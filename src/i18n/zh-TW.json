@@ -209,7 +209,14 @@
     "logs": "日誌",
     "remove": "移除",
     "close": "關閉",
-    "notRunning": "Docker 已停止運行，請前往軟體庫頁面啟動。"
+    "notRunning": "Docker 已停止運行，請前往軟體庫頁面啟動。",
+    "commit": "打包為鏡像",
+    "commitTitle": "將容器 \"{{name}}\" 儲存為鏡像",
+    "commitImageName": "鏡像名稱：",
+    "commitMsgLabel": "提交說明（選填）：",
+    "commitMsgPlaceholder": "例如：設定完成後的快照",
+    "committing": "正在打包...",
+    "commitSuccess": "容器已儲存為鏡像 {{name}}"
   },
   "files": {
     "notConnected": "未連線",
@@ -315,6 +322,7 @@
     "preparingDownload": "準備下載: {{name}}...",
     "savedTo": "已儲存: {{path}}",
     "saveFailed": "儲存失敗: {{error}}",
+    "savingToLocal": "正在儲存到本機",
     "archiveCreated": "壓縮檔已建立: {{name}}",
     "compressFailed": "壓縮失敗: {{error}}",
     "skipped": "已跳過: {{name}}",

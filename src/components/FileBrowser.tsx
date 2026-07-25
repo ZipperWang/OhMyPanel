@@ -175,6 +175,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   const [compressDialog, setCompressDialog] = useState<{ names: string[] } | null>(null)
   const [compressFormat, setCompressFormat] = useState<'zip' | 'tar.gz' | 'tar.bz2'>('zip')
   const [missingToolModal, setMissingToolModal] = useState<'zip' | 'unzip' | null>(null)
+  const [saveProgress, setSaveProgress] = useState<{ fileName: string; uploaded: number; total: number; speed: number; active: boolean } | null>(null)
   const [dropActive, setDropActive] = useState(false)
   const dragItemRef = useRef<FileEntry | null>(null)
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null)
@@ -1336,17 +1337,28 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     if (!sessionId || entry.isDir) return
     const filePath = resolvePath(entry)
     showToast(t('files.preparingDownload', { name: entry.name }), 'info')
+    const t0 = Date.now()
+    const unlisten = await listen<{ uploaded: number; total: number }>('save-local-progress', (e) => {
+      const elapsed = (Date.now() - t0) / 1000
+      const speed = elapsed > 0 ? e.payload.uploaded / elapsed : 0
+      setSaveProgress({ fileName: entry.name, uploaded: e.payload.uploaded, total: e.payload.total, speed, active: true })
+    })
     try {
       const localPath = await invoke<string>('ssh_save_as_local', {
         sessionId,
         remotePath: filePath,
         fileName: entry.name,
       })
+      setSaveProgress(prev => prev ? { ...prev, active: false } : null)
       showToast(t('files.savedTo', { path: localPath }), 'success')
+      setTimeout(() => setSaveProgress(null), 3000)
     } catch (e) {
+      setSaveProgress(null)
       if (String(e) !== 'Save cancelled') {
         showToast(t('files.saveFailed', { error: e }), 'error')
       }
+    } finally {
+      unlisten()
     }
   }
 
@@ -2357,6 +2369,27 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
              downloadProgress.status === 'error' ? t('files.failed') :
              `${Math.round(downloadProgress.progress)}%`}
           </span>
+        </div>
+      )}
+
+      {/* Save-to-local progress panel — reuses upload panel styles */}
+      {saveProgress && (
+        <div className="upload-panel" style={{ position: 'absolute', bottom: 36, right: 12, zIndex: 200 }}>
+          <div className="upload-panel-header">
+            <span className="upload-panel-title">
+              💾 {saveProgress.active ? t('files.savingToLocal') : t('upload.complete')} — {saveProgress.fileName}
+            </span>
+            {!saveProgress.active && <span className="upload-panel-toggle" style={{ cursor: 'pointer' }} onClick={() => setSaveProgress(null)}>✕</span>}
+          </div>
+          <div className="upload-panel-progress">
+            <div className="upload-progress-track">
+              <div className="upload-progress-fill" style={{ width: `${saveProgress.total > 0 ? Math.round((saveProgress.uploaded / saveProgress.total) * 100) : 0}%` }} />
+            </div>
+            <div className="upload-progress-info">
+              {(saveProgress.uploaded / 1048576).toFixed(1)}M / {saveProgress.total > 0 ? (saveProgress.total / 1048576).toFixed(1) + 'M' : '?'}
+              {saveProgress.active && saveProgress.speed > 0 && ` | ${saveProgress.speed >= 1048576 ? (saveProgress.speed / 1048576).toFixed(1) + ' MB/s' : (saveProgress.speed / 1024).toFixed(0) + ' KB/s'}`}
+            </div>
+          </div>
         </div>
       )}
 

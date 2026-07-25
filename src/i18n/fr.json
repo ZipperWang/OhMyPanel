@@ -209,7 +209,14 @@
     "logs": "Journaux",
     "remove": "Supprimer",
     "close": "Fermer",
-    "notRunning": "Docker est arrêté. Allez au dépôt de logiciels pour le démarrer."
+    "notRunning": "Docker est arrêté. Allez au dépôt de logiciels pour le démarrer.",
+    "commit": "Enregistrer comme image",
+    "commitTitle": "Enregistrer le conteneur \"{{name}}\" comme image",
+    "commitImageName": "Nom de l'image :",
+    "commitMsgLabel": "Message de commit (optionnel) :",
+    "commitMsgPlaceholder": "ex. snapshot après configuration",
+    "committing": "Commit en cours...",
+    "commitSuccess": "Conteneur enregistré comme image {{name}}"
   },
   "files": {
     "notConnected": "Non connecté",
@@ -315,6 +322,7 @@
     "preparingDownload": "Préparation du téléchargement : {{name}}...",
     "savedTo": "Enregistré : {{path}}",
     "saveFailed": "Échec de l'enregistrement : {{error}}",
+    "savingToLocal": "Enregistrement en local",
     "archiveCreated": "Archive créée : {{name}}",
     "compressFailed": "Échec de la compression : {{error}}",
     "skipped": "Ignoré : {{name}}",

@@ -209,7 +209,14 @@
     "logs": "Логи",
     "remove": "Удалить",
     "close": "Закрыть",
-    "notRunning": "Docker остановлен. Перейдите в репозиторий ПО для запуска."
+    "notRunning": "Docker остановлен. Перейдите в репозиторий ПО для запуска.",
+    "commit": "Сохранить как образ",
+    "commitTitle": "Сохранить контейнер \"{{name}}\" как образ",
+    "commitImageName": "Имя образа:",
+    "commitMsgLabel": "Сообщение коммита (необязательно):",
+    "commitMsgPlaceholder": "напр. снимок после настройки",
+    "committing": "Коммит...",
+    "commitSuccess": "Контейнер сохранён как образ {{name}}"
   },
   "files": {
     "notConnected": "Не подключено",
@@ -315,6 +322,7 @@
     "preparingDownload": "Подготовка скачивания: {{name}}...",
     "savedTo": "Сохранено: {{path}}",
     "saveFailed": "Ошибка сохранения: {{error}}",
+    "savingToLocal": "Сохранение на компьютер",
     "archiveCreated": "Архив создан: {{name}}",
     "compressFailed": "Ошибка сжатия: {{error}}",
     "skipped": "Пропущено: {{name}}",

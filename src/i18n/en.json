@@ -209,7 +209,14 @@
     "logs": "Logs",
     "remove": "Remove",
     "close": "Close",
-    "notRunning": "Docker is stopped. Please go to Software Repository to start it."
+    "notRunning": "Docker is stopped. Please go to Software Repository to start it.",
+    "commit": "Save as Image",
+    "commitTitle": "Save Container \"{{name}}\" as Image",
+    "commitImageName": "Image name:",
+    "commitMsgLabel": "Commit message (optional):",
+    "commitMsgPlaceholder": "e.g. snapshot after config",
+    "committing": "Committing...",
+    "commitSuccess": "Container saved as image {{name}}"
   },
   "files": {
     "notConnected": "Not connected",
@@ -315,6 +322,7 @@
     "preparingDownload": "Preparing download: {{name}}...",
     "savedTo": "Saved: {{path}}",
     "saveFailed": "Save failed: {{error}}",
+    "savingToLocal": "Saving to local",
     "archiveCreated": "Archive created: {{name}}",
     "compressFailed": "Compress failed: {{error}}",
     "skipped": "Skipped: {{name}}",

@@ -209,7 +209,14 @@
     "logs": "Logs",
     "remove": "Remover",
     "close": "Fechar",
-    "notRunning": "Docker está parado. Vá ao repositório de software para iniciar."
+    "notRunning": "Docker está parado. Vá ao repositório de software para iniciar.",
+    "commit": "Salvar como imagem",
+    "commitTitle": "Salvar contêiner \"{{name}}\" como imagem",
+    "commitImageName": "Nome da imagem:",
+    "commitMsgLabel": "Mensagem do commit (opcional):",
+    "commitMsgPlaceholder": "ex. snapshot após configuração",
+    "committing": "Commitando...",
+    "commitSuccess": "Contêiner salvo como imagem {{name}}"
   },
   "files": {
     "notConnected": "Não conectado",
@@ -315,6 +322,7 @@
     "preparingDownload": "Preparando download: {{name}}...",
     "savedTo": "Salvo: {{path}}",
     "saveFailed": "Falha ao salvar: {{error}}",
+    "savingToLocal": "Salvando no computador",
     "archiveCreated": "Arquivo criado: {{name}}",
     "compressFailed": "Falha ao comprimir: {{error}}",
     "skipped": "Ignorado: {{name}}",

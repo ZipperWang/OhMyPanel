@@ -209,7 +209,14 @@
     "logs": "Protokolle",
     "remove": "Entfernen",
     "close": "Schließen",
-    "notRunning": "Docker ist gestoppt. Bitte im Software-Repository starten."
+    "notRunning": "Docker ist gestoppt. Bitte im Software-Repository starten.",
+    "commit": "Als Image speichern",
+    "commitTitle": "Container \"{{name}}\" als Image speichern",
+    "commitImageName": "Image-Name:",
+    "commitMsgLabel": "Commit-Nachricht (optional):",
+    "commitMsgPlaceholder": "z.B. Snapshot nach Konfiguration",
+    "committing": "Commit läuft...",
+    "commitSuccess": "Container als Image {{name}} gespeichert"
   },
   "files": {
     "notConnected": "Nicht verbunden",
@@ -315,6 +322,7 @@
     "preparingDownload": "Download wird vorbereitet: {{name}}...",
     "savedTo": "Gespeichert: {{path}}",
     "saveFailed": "Speichern fehlgeschlagen: {{error}}",
+    "savingToLocal": "Wird lokal gespeichert",
     "archiveCreated": "Archiv erstellt: {{name}}",
     "compressFailed": "Komprimierung fehlgeschlagen: {{error}}",
     "skipped": "Übersprungen: {{name}}",

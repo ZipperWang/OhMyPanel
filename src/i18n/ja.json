@@ -209,7 +209,14 @@
     "logs": "ログ",
     "remove": "削除",
     "close": "閉じる",
-    "notRunning": "Docker が停止しています。ソフトウェアリポジトリで起動してください。"
+    "notRunning": "Docker が停止しています。ソフトウェアリポジトリで起動してください。",
+    "commit": "イメージとして保存",
+    "commitTitle": "コンテナ \"{{name}}\" をイメージとして保存",
+    "commitImageName": "イメージ名：",
+    "commitMsgLabel": "コミットメッセージ（任意）：",
+    "commitMsgPlaceholder": "例：設定後のスナップショット",
+    "committing": "コミット中...",
+    "commitSuccess": "コンテナをイメージ {{name}} として保存しました"
   },
   "files": {
     "notConnected": "未接続",
@@ -315,6 +322,7 @@
     "preparingDownload": "ダウンロード準備中: {{name}}...",
     "savedTo": "保存: {{path}}",
     "saveFailed": "保存失敗: {{error}}",
+    "savingToLocal": "ローカルに保存中",
     "archiveCreated": "アーカイブを作成: {{name}}",
     "compressFailed": "圧縮失敗: {{error}}",
     "skipped": "スキップ: {{name}}",

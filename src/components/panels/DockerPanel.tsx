@@ -59,6 +59,10 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
   const [containerLogs, setContainerLogs] = useState('')
   const [logsLoading, setLogsLoading] = useState(false)
   const [confirmDeleteContainer, setConfirmDeleteContainer] = useState<DockerContainer | null>(null)
+  const [commitContainer, setCommitContainer] = useState<DockerContainer | null>(null)
+  const [commitImageName, setCommitImageName] = useState('')
+  const [commitMessage, setCommitMessage] = useState('')
+  const [committing, setCommitting] = useState(false)
 
   // Images
   const [images, setImages] = useState<DockerImage[]>([])
@@ -221,6 +225,33 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
       setError(String(e))
     } finally {
       setContainerAction('')
+    }
+  }
+
+  const handleOpenCommit = (container: DockerContainer) => {
+    setCommitContainer(container)
+    setCommitImageName(`${container.name}:latest`)
+    setCommitMessage('')
+  }
+
+  const handleCommit = async () => {
+    if (!sessionId || !commitContainer || !commitImageName.trim()) return
+    clearMessages()
+    setCommitting(true)
+    try {
+      await invoke('server_docker_container_commit', {
+        sessionId,
+        containerId: commitContainer.id,
+        imageName: commitImageName.trim(),
+        message: commitMessage.trim(),
+      })
+      setCommitContainer(null)
+      setSuccess(t('dockerPanel.commitSuccess', { name: commitImageName.trim() }))
+      await fetchImages()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setCommitting(false)
     }
   }
 
@@ -413,6 +444,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
                           <button className="docker-action-btn" onClick={() => handleContainerAction(c, 'start')} disabled={!!containerAction} title={t('dockerPanel.start')}>▶</button>
                         )}
                         <button className="docker-action-btn" onClick={() => handleViewLogs(c)} disabled={!!containerAction} title={t('dockerPanel.logs')}>📋</button>
+                        <button className="docker-action-btn" onClick={() => handleOpenCommit(c)} disabled={!!containerAction} title={t('dockerPanel.commit')}>📦</button>
                         <button className="docker-action-btn danger" onClick={() => setConfirmDeleteContainer(c)} disabled={!!containerAction} title={t('dockerPanel.delete')}>🗑</button>
                         {containerAction === c.id + 'stop' || containerAction === c.id + 'start' || containerAction === c.id + 'restart' || containerAction === c.id + 'pause' || containerAction === c.id + 'unpause' || containerAction === c.id + 'delete' ? (
                           <span className="docker-action-loading">...</span>
@@ -608,6 +640,45 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
             <div className="docker-confirm-actions">
               <button className="docker-btn" onClick={() => setConfirmDeleteImage(null)}>{t('dockerPanel.cancel')}</button>
               <button className="docker-btn danger" onClick={() => handleDeleteImage(confirmDeleteImage)}>{t('dockerPanel.delete')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Commit Container Modal */}
+      {commitContainer && (
+        <div className="docker-modal-overlay">
+          <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="modal-close-btn"
+              onClick={() => setCommitContainer(null)}
+              title={t('dockerPanel.close')}
+            >×</button>
+            <div className="docker-confirm-title">{t('dockerPanel.commitTitle', { name: commitContainer.name })}</div>
+            <div className="docker-confirm-msg">
+              <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.commitImageName')}</label>
+              <input
+                className="docker-pull-input"
+                value={commitImageName}
+                onChange={(e) => setCommitImageName(e.target.value)}
+                placeholder="myimage:v1.0"
+                disabled={committing}
+                style={{ marginBottom: '12px' }}
+              />
+              <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.commitMsgLabel')}</label>
+              <input
+                className="docker-pull-input"
+                value={commitMessage}
+                onChange={(e) => setCommitMessage(e.target.value)}
+                placeholder={t('dockerPanel.commitMsgPlaceholder')}
+                disabled={committing}
+              />
+            </div>
+            <div className="docker-confirm-actions">
+              <button className="docker-btn" onClick={() => setCommitContainer(null)} disabled={committing}>{t('dockerPanel.cancel')}</button>
+              <button className="docker-btn primary" onClick={handleCommit} disabled={committing || !commitImageName.trim()}>
+                {committing ? t('dockerPanel.committing') : t('dockerPanel.commit')}
+              </button>
             </div>
           </div>
         </div>

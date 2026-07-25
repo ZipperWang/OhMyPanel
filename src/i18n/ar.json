@@ -209,7 +209,14 @@
     "logs": "السجلات",
     "remove": "إزالة",
     "close": "إغلاق",
-    "notRunning": "Docker متوقف. يرجى الذهاب إلى مستودع البرمجيات لتشغيله."
+    "notRunning": "Docker متوقف. يرجى الذهاب إلى مستودع البرمجيات لتشغيله.",
+    "commit": "حفظ كصورة",
+    "commitTitle": "حفظ الحاوية \"{{name}}\" كصورة",
+    "commitImageName": "اسم الصورة:",
+    "commitMsgLabel": "رسالة الالتزام (اختياري):",
+    "commitMsgPlaceholder": "مثال: لقطة بعد الإعداد",
+    "committing": "جارٍ الالتزام...",
+    "commitSuccess": "تم حفظ الحاوية كصورة {{name}}"
   },
   "files": {
     "notConnected": "غير متصل",
@@ -315,6 +322,7 @@
     "preparingDownload": "تحضير التحميل: {{name}}...",
     "savedTo": "حُفظ: {{path}}",
     "saveFailed": "فشل الحفظ: {{error}}",
+    "savingToLocal": "جاري الحفظ محليًا",
     "archiveCreated": "أُنشئ الأرشيف: {{name}}",
     "compressFailed": "فشل الضغط: {{error}}",
     "skipped": "تُخطي: {{name}}",

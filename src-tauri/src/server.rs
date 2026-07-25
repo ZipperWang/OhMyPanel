@@ -7116,6 +7116,41 @@ pub async fn docker_container_remove(
     Ok(format!("Container {} removed successfully", safe_id))
 }
 
+/// Commit a container to a new image
+pub async fn docker_container_commit(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    container_id: &str,
+    image_name: &str,
+    message: &str,
+) -> Result<String, String> {
+    let safe_id = container_id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
+    // ponytail: sanitize image name — allow [a-z0-9._/:-]
+    let safe_image: String = image_name.chars().filter(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '/' | ':' | '-')).collect();
+    if safe_image.is_empty() {
+        return Err("Image name cannot be empty".to_string());
+    }
+    let cmd = if message.is_empty() {
+        format!("docker commit {} {}", safe_id, safe_image)
+    } else {
+        let safe_msg = message.replace('"', "\\\"");
+        format!("docker commit -m \"{}\" {} {}", safe_msg, safe_id, safe_image)
+    };
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 120).await?;
+    if code > 0 {
+        let err = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            format!("Command failed with exit code {}", code)
+        };
+        return Err(format!("Failed to commit container: {}", err));
+    }
+    Ok(format!("Container committed as {}", safe_image))
+}
+
 /// Get container logs
 pub async fn docker_container_logs(
     session: &SshSession,

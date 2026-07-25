@@ -282,9 +282,9 @@ pub async fn ssh_download_file(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManag
 }
 
 #[tauri::command]
-pub async fn ssh_download_to_local(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>, session_id: &str, remote_path: &str, file_name: &str) -> Result<String, String> {
-    let mgr = ssh_mgr.lock().await;
-    mgr.download_to_local(session_id, remote_path, file_name).await
+pub async fn ssh_download_to_local(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>, app: tauri::AppHandle, session_id: &str, remote_path: &str, file_name: &str) -> Result<String, String> {
+    let mgr = ssh_mgr.lock().await; let session = mgr.get_session(session_id)?; drop(mgr);
+    ssh::session_download_to_local(&session, remote_path, file_name, &app, session_id).await
 }
 
 #[tauri::command]
@@ -298,9 +298,9 @@ pub async fn ssh_save_as_local(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManag
         None => return Err("Save cancelled".to_string()),
     };
     let local_str = local_path.to_string();
-    let mgr = ssh_mgr.lock().await;
-    let bytes = mgr.read_file_bytes(session_id, remote_path).await?;
-    std::fs::write(&local_str, &bytes).map_err(|e| format!("Failed to write local file: {}", e))?;
+    // ponytail: grab session then release lock — don't hold global mutex during transfer
+    let mgr = ssh_mgr.lock().await; let session = mgr.get_session(session_id)?; drop(mgr);
+    ssh::session_stream_file_to_local(&session, remote_path, &local_str, &app, session_id).await?;
     Ok(local_str)
 }
 

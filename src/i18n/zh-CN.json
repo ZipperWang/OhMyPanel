@@ -209,7 +209,14 @@
     "logs": "日志",
     "remove": "移除",
     "close": "关闭",
-    "notRunning": "Docker 已停止运行，请前往软件仓库页面启动。"
+    "notRunning": "Docker 已停止运行，请前往软件仓库页面启动。",
+    "commit": "打包为镜像",
+    "commitTitle": "将容器 \"{{name}}\" 保存为镜像",
+    "commitImageName": "镜像名称：",
+    "commitMsgLabel": "提交说明（可选）：",
+    "commitMsgPlaceholder": "例如：配置完成后的快照",
+    "committing": "正在打包...",
+    "commitSuccess": "容器已保存为镜像 {{name}}"
   },
   "files": {
     "notConnected": "未连接",
@@ -315,6 +322,7 @@
     "preparingDownload": "准备下载: {{name}}...",
     "savedTo": "已保存: {{path}}",
     "saveFailed": "保存失败: {{error}}",
+    "savingToLocal": "正在保存到本地",
     "archiveCreated": "压缩包已创建: {{name}}",
     "compressFailed": "压缩失败: {{error}}",
     "skipped": "已跳过: {{name}}",
