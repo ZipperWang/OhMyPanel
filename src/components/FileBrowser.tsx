@@ -176,6 +176,8 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   const [compressFormat, setCompressFormat] = useState<'zip' | 'tar.gz' | 'tar.bz2'>('zip')
   const [missingToolModal, setMissingToolModal] = useState<'zip' | 'unzip' | null>(null)
   const [saveProgress, setSaveProgress] = useState<{ fileName: string; uploaded: number; total: number; speed: number; active: boolean; paused: boolean } | null>(null)
+  const [showSaveStopConfirm, setShowSaveStopConfirm] = useState(false)
+  const [saveStopInput, setSaveStopInput] = useState('')
   const [dropActive, setDropActive] = useState(false)
   const dragItemRef = useRef<FileEntry | null>(null)
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null)
@@ -2397,9 +2399,37 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
               ) : (
                 <button className="upload-btn" onClick={async () => { await invoke('ssh_save_resume'); setSaveProgress(prev => prev ? { ...prev, paused: false } : null) }}>▶ {t('upload.resume')}</button>
               )}
-              <button className="upload-btn danger" onClick={async () => { await invoke('ssh_save_stop'); setSaveProgress(null) }}>⏹ {t('upload.stop')}</button>
+              <button className="upload-btn" onClick={() => { setShowSaveStopConfirm(true); setSaveStopInput('') }}>⏹ {t('upload.stop')}</button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Save stop confirmation modal — same pattern as upload panel */}
+      {showSaveStopConfirm && (
+        <div className="fb-dialog-overlay" onClick={() => setShowSaveStopConfirm(false)}>
+          <div className="fb-dialog" onClick={(e) => e.stopPropagation()} style={{ minWidth: 380 }}>
+            <button className="modal-close-btn" onClick={() => setShowSaveStopConfirm(false)} title={t('common.close')}>×</button>
+            <div className="fb-dialog-title" style={{ marginBottom: 12 }}>{t('upload.confirmStopTitle')}</div>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#8b949e', lineHeight: 1.6 }}>
+              {t('upload.confirmStopMsg')}
+            </p>
+            <input
+              className="fb-dialog-input"
+              value={saveStopInput}
+              onChange={e => setSaveStopInput(e.target.value)}
+              onKeyDown={async (e) => { if (e.key === 'Enter' && saveStopInput.trim().toLowerCase() === 'stop') { await invoke('ssh_save_stop'); setSaveProgress(null); setShowSaveStopConfirm(false) } }}
+              placeholder={t('upload.confirmStopPlaceholder')}
+              autoFocus
+              style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #30363d', background: '#0d1117', color: '#c9d1d9', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+            />
+            <div className="fb-dialog-actions">
+              <button className="fb-dialog-btn" onClick={() => setShowSaveStopConfirm(false)}>{t('common.cancel')}</button>
+              <button className="fb-dialog-btn danger" disabled={saveStopInput.trim().toLowerCase() !== 'stop'} onClick={async () => { await invoke('ssh_save_stop'); setSaveProgress(null); setShowSaveStopConfirm(false) }} style={{ opacity: saveStopInput.trim().toLowerCase() === 'stop' ? 1 : 0.4 }}>
+                {t('upload.stop')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
