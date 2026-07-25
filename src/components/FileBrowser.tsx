@@ -1343,7 +1343,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     const unlisten = await listen<{ uploaded: number; total: number }>('save-local-progress', (e) => {
       const elapsed = (Date.now() - t0) / 1000
       const speed = elapsed > 0 ? e.payload.uploaded / elapsed : 0
-      setSaveProgress({ fileName: entry.name, uploaded: e.payload.uploaded, total: e.payload.total, speed, active: true, paused: false })
+      setSaveProgress(prev => ({ fileName: entry.name, uploaded: e.payload.uploaded, total: e.payload.total, speed, active: true, paused: prev?.paused ?? false }))
     })
     try {
       const localPath = await invoke<string>('ssh_save_as_local', {
