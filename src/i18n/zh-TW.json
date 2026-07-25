@@ -220,7 +220,11 @@
     "commitModeLabel": "打包方式：",
     "commitCleanYes": "清理後打包（推薦）",
     "commitCleanNo": "直接打包",
-    "commitCleanHint": "清理會刪除容器內的套件管理器快取、暫存檔和日誌，可顯著減小鏡像體積。"
+    "commitCleanHint": "清理會刪除容器內的套件管理器快取、暫存檔和日誌，可顯著減小鏡像體積。",
+    "commitExport": "最小化打包（體積最小）",
+    "commitExportHint": "將容器扁平化為單層鏡像，移除所有歷史層，生成最小體積的鏡像。",
+    "commitExportCmd": "啟動命令（可選）：",
+    "commitExportExpose": "暴露連接埠（可選，逗號分隔）："
   },
   "files": {
     "notConnected": "未連線",

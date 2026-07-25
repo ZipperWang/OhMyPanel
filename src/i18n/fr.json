@@ -220,7 +220,11 @@
     "commitModeLabel": "Mode de commit :",
     "commitCleanYes": "Nettoyer puis commit (recommandé)",
     "commitCleanNo": "Commit direct",
-    "commitCleanHint": "Le nettoyage supprime les caches de paquets, fichiers temporaires et journaux du conteneur, réduisant significativement la taille de l'image."
+    "commitCleanHint": "Le nettoyage supprime les caches de paquets, fichiers temporaires et journaux du conteneur, réduisant significativement la taille de l'image.",
+    "commitExport": "Export minimal (image la plus petite)",
+    "commitExportHint": "Aplatit le conteneur en une image monocouche. Tout l'historique des couches est supprimé, produisant l'image la plus petite possible.",
+    "commitExportCmd": "Commande de démarrage (optionnelle) :",
+    "commitExportExpose": "Ports exposés (optionnels, séparés par virgules) :"
   },
   "files": {
     "notConnected": "Non connecté",

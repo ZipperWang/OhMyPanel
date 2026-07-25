@@ -220,7 +220,11 @@
     "commitModeLabel": "コミットモード：",
     "commitCleanYes": "クリーンアップしてからコミット（推奨）",
     "commitCleanNo": "直接コミット",
-    "commitCleanHint": "クリーンアップはコンテナ内のパッケージキャッシュ、一時ファイル、ログを削除し、イメージサイズを大幅に削減します。"
+    "commitCleanHint": "クリーンアップはコンテナ内のパッケージキャッシュ、一時ファイル、ログを削除し、イメージサイズを大幅に削減します。",
+    "commitExport": "最小化エクスポート（最小イメージ）",
+    "commitExportHint": "コンテナを単層イメージにフラット化します。すべてのレイヤー履歴が削除され、最小サイズのイメージが生成されます。",
+    "commitExportCmd": "起動コマンド（任意）：",
+    "commitExportExpose": "公開ポート（任意、カンマ区切り）："
   },
   "files": {
     "notConnected": "未接続",

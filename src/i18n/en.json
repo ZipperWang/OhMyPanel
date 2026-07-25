@@ -220,7 +220,11 @@
     "commitModeLabel": "Commit mode:",
     "commitCleanYes": "Clean then commit (recommended)",
     "commitCleanNo": "Commit directly",
-    "commitCleanHint": "Cleaning removes package caches, temp files and logs inside the container, significantly reducing image size."
+    "commitCleanHint": "Cleaning removes package caches, temp files and logs inside the container, significantly reducing image size.",
+    "commitExport": "Minimal export (smallest image)",
+    "commitExportHint": "Flattens the container into a single-layer image. All layer history is removed, producing the smallest possible image.",
+    "commitExportCmd": "Startup command (optional):",
+    "commitExportExpose": "Exposed ports (optional, comma-separated):"
   },
   "files": {
     "notConnected": "Not connected",

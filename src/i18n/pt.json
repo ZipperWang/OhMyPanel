@@ -220,7 +220,11 @@
     "commitModeLabel": "Modo de commit:",
     "commitCleanYes": "Limpar e então commit (recomendado)",
     "commitCleanNo": "Commit direto",
-    "commitCleanHint": "A limpeza remove caches de pacotes, arquivos temporários e logs do contêiner, reduzindo significativamente o tamanho da imagem."
+    "commitCleanHint": "A limpeza remove caches de pacotes, arquivos temporários e logs do contêiner, reduzindo significativamente o tamanho da imagem.",
+    "commitExport": "Exportação mínima (imagem menor)",
+    "commitExportHint": "Achata o contêiner em uma imagem de camada única. Todo o histórico de camadas é removido, produzindo a menor imagem possível.",
+    "commitExportCmd": "Comando de inicialização (opcional):",
+    "commitExportExpose": "Portas expostas (opcional, separadas por vírgula):"
   },
   "files": {
     "notConnected": "Não conectado",

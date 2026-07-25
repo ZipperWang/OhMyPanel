@@ -62,7 +62,9 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
   const [commitContainer, setCommitContainer] = useState<DockerContainer | null>(null)
   const [commitImageName, setCommitImageName] = useState('')
   const [commitMessage, setCommitMessage] = useState('')
-  const [commitClean, setCommitClean] = useState(true)
+  const [commitMode, setCommitMode] = useState<'direct' | 'clean' | 'export'>('clean')
+  const [commitExportCmd, setCommitExportCmd] = useState('')
+  const [commitExportExpose, setCommitExportExpose] = useState('')
   const [committing, setCommitting] = useState(false)
 
   // Images
@@ -233,21 +235,25 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
     setCommitContainer(container)
     setCommitImageName(`${container.name}:latest`)
     setCommitMessage('')
-    setCommitClean(true)
+    setCommitMode('clean')
+    setCommitExportCmd('')
+    setCommitExportExpose('')
   }
 
   const handleCommit = async () => {
     if (!sessionId || !commitContainer || !commitImageName.trim()) return
     clearMessages()
     setCommitting(true)
-    if (commitClean) startStream()
+    if (commitMode !== 'direct') startStream()
     try {
       await invoke('server_docker_container_commit', {
         sessionId,
         containerId: commitContainer.id,
         imageName: commitImageName.trim(),
         message: commitMessage.trim(),
-        clean: commitClean,
+        mode: commitMode,
+        exportCmd: commitExportCmd.trim(),
+        exportExpose: commitExportExpose.trim(),
       })
       setCommitContainer(null)
       setSuccess(t('dockerPanel.commitSuccess', { name: commitImageName.trim() }))
@@ -669,25 +675,56 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
                 disabled={committing}
                 style={{ marginBottom: '12px' }}
               />
-              <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.commitMsgLabel')}</label>
-              <input
-                className="docker-pull-input"
-                value={commitMessage}
-                onChange={(e) => setCommitMessage(e.target.value)}
-                placeholder={t('dockerPanel.commitMsgPlaceholder')}
-                disabled={committing}
-                style={{ marginBottom: '12px' }}
-              />
+              {commitMode !== 'export' && (
+                <>
+                  <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.commitMsgLabel')}</label>
+                  <input
+                    className="docker-pull-input"
+                    value={commitMessage}
+                    onChange={(e) => setCommitMessage(e.target.value)}
+                    placeholder={t('dockerPanel.commitMsgPlaceholder')}
+                    disabled={committing}
+                    style={{ marginBottom: '12px' }}
+                  />
+                </>
+              )}
               <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.commitModeLabel')}</label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', cursor: 'pointer' }}>
-                <input type="radio" name="commitClean" checked={commitClean} onChange={() => setCommitClean(true)} disabled={committing} />
+                <input type="radio" name="commitMode" checked={commitMode === 'export'} onChange={() => setCommitMode('export')} disabled={committing} />
+                {t('dockerPanel.commitExport')}
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', cursor: 'pointer' }}>
+                <input type="radio" name="commitMode" checked={commitMode === 'clean'} onChange={() => setCommitMode('clean')} disabled={committing} />
                 {t('dockerPanel.commitCleanYes')}
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', cursor: 'pointer' }}>
-                <input type="radio" name="commitClean" checked={!commitClean} onChange={() => setCommitClean(false)} disabled={committing} />
+                <input type="radio" name="commitMode" checked={commitMode === 'direct'} onChange={() => setCommitMode('direct')} disabled={committing} />
                 {t('dockerPanel.commitCleanNo')}
               </label>
-              <p style={{ fontSize: '12px', opacity: 0.7, margin: '4px 0 0 0' }}>{t('dockerPanel.commitCleanHint')}</p>
+              <p style={{ fontSize: '12px', opacity: 0.7, margin: '4px 0 0 0' }}>
+                {commitMode === 'export' ? t('dockerPanel.commitExportHint') : t('dockerPanel.commitCleanHint')}
+              </p>
+              {commitMode === 'export' && (
+                <>
+                  <label style={{ display: 'block', marginTop: '12px', marginBottom: '8px' }}>{t('dockerPanel.commitExportCmd')}</label>
+                  <input
+                    className="docker-pull-input"
+                    value={commitExportCmd}
+                    onChange={(e) => setCommitExportCmd(e.target.value)}
+                    placeholder="nginx -g 'daemon off;'"
+                    disabled={committing}
+                    style={{ marginBottom: '12px' }}
+                  />
+                  <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.commitExportExpose')}</label>
+                  <input
+                    className="docker-pull-input"
+                    value={commitExportExpose}
+                    onChange={(e) => setCommitExportExpose(e.target.value)}
+                    placeholder="80/tcp, 443/tcp"
+                    disabled={committing}
+                  />
+                </>
+              )}
             </div>
             <div className="docker-confirm-actions">
               <button className="docker-btn" onClick={() => setCommitContainer(null)} disabled={committing}>{t('dockerPanel.cancel')}</button>

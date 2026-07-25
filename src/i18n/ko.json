@@ -220,7 +220,11 @@
     "commitModeLabel": "커밋 모드:",
     "commitCleanYes": "정리 후 커밋 (권장)",
     "commitCleanNo": "직접 커밋",
-    "commitCleanHint": "정리는 컨테이너 내 패키지 캐시, 임시 파일 및 로그를 제거하여 이미지 크기를 크게 줄입니다."
+    "commitCleanHint": "정리는 컨테이너 내 패키지 캐시, 임시 파일 및 로그를 제거하여 이미지 크기를 크게 줄입니다.",
+    "commitExport": "최소화 내보내기 (가장 작은 이미지)",
+    "commitExportHint": "컨테이너를 단일 레이어 이미지로 평탄화합니다. 모든 레이어 기록이 제거되어 가장 작은 이미지가 생성됩니다.",
+    "commitExportCmd": "시작 명령 (선택):",
+    "commitExportExpose": "노출 포트 (선택, 쉼표로 구분):"
   },
   "files": {
     "notConnected": "연결되지 않음",

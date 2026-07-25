@@ -220,7 +220,11 @@
     "commitModeLabel": "Commit-Modus:",
     "commitCleanYes": "Bereinigen dann committen (empfohlen)",
     "commitCleanNo": "Direkt committen",
-    "commitCleanHint": "Die Bereinigung entfernt Paket-Caches, temporäre Dateien und Logs im Container und reduziert die Image-Größe erheblich."
+    "commitCleanHint": "Die Bereinigung entfernt Paket-Caches, temporäre Dateien und Logs im Container und reduziert die Image-Größe erheblich.",
+    "commitExport": "Minimaler Export (kleinstes Image)",
+    "commitExportHint": "Flacht den Container zu einem einschichtigen Image ab. Der gesamte Schichtenverlauf wird entfernt, was das kleinstmögliche Image erzeugt.",
+    "commitExportCmd": "Startbefehl (optional):",
+    "commitExportExpose": "Freigegebene Ports (optional, kommagetrennt):"
   },
   "files": {
     "notConnected": "Nicht verbunden",

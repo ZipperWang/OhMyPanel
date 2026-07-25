@@ -7124,7 +7124,9 @@ pub async fn docker_container_commit(
     container_id: &str,
     image_name: &str,
     message: &str,
-    clean: bool,
+    mode: &str,
+    export_cmd: &str,
+    export_expose: &str,
     app_handle: &AppHandle,
 ) -> Result<String, String> {
     let safe_id = container_id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
@@ -7134,33 +7136,64 @@ pub async fn docker_container_commit(
         return Err("Image name cannot be empty".to_string());
     }
 
-    // Clean up caches/logs inside container before commit
-    if clean {
-        let clean_cmd = format!(
-            "docker exec {} sh -c 'echo \"[clean] Clearing package cache...\"; apt-get clean 2>/dev/null; yum clean all 2>/dev/null; rm -rf /var/cache/apt/archives/* /var/cache/yum/* /tmp/* /var/tmp/* /var/log/*.log /var/log/*.gz 2>/dev/null; echo \"[clean] Done.\"'",
-            safe_id
-        );
-        docker_stream_exec(session, cache, session_id, &clean_cmd, 120, app_handle).await?;
-    }
+    match mode {
+        "export" => {
+            // ponytail: build --change flags for CMD and EXPOSE
+            let mut changes = String::new();
+            if !export_cmd.trim().is_empty() {
+                changes.push_str(&format!("--change 'CMD {}' ", export_cmd.trim()));
+            }
+            if !export_expose.trim().is_empty() {
+                for port in export_expose.split(',') {
+                    let port = port.trim();
+                    if !port.is_empty() {
+                        changes.push_str(&format!("--change 'EXPOSE {}' ", port));
+                    }
+                }
+            }
+            let cmd = format!(
+                "echo '[export] Exporting container...'; docker export {} | docker import {} - {}",
+                safe_id, changes.trim(), safe_image
+            );
+            docker_stream_exec(session, cache, session_id, &cmd, 300, app_handle).await?;
+            Ok(format!("Container exported as {}", safe_image))
+        }
+        "clean" => {
+            let clean_cmd = format!(
+                "docker exec {} sh -c 'echo \"[clean] Clearing package cache...\"; apt-get clean 2>/dev/null; yum clean all 2>/dev/null; rm -rf /var/cache/apt/archives/* /var/cache/yum/* /tmp/* /var/tmp/* /var/log/*.log /var/log/*.gz 2>/dev/null; echo \"[clean] Done.\"'",
+                safe_id
+            );
+            docker_stream_exec(session, cache, session_id, &clean_cmd, 120, app_handle).await?;
 
-    let cmd = if message.is_empty() {
-        format!("docker commit {} {}", safe_id, safe_image)
-    } else {
-        let safe_msg = message.replace('"', "\\\"");
-        format!("docker commit -m \"{}\" {} {}", safe_msg, safe_id, safe_image)
-    };
-    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 120).await?;
-    if code > 0 {
-        let err = if !stderr.trim().is_empty() {
-            stderr.trim().to_string()
-        } else if !stdout.trim().is_empty() {
-            stdout.trim().to_string()
-        } else {
-            format!("Command failed with exit code {}", code)
-        };
-        return Err(format!("Failed to commit container: {}", err));
+            let cmd = if message.is_empty() {
+                format!("docker commit {} {}", safe_id, safe_image)
+            } else {
+                let safe_msg = message.replace('"', "\\\"");
+                format!("docker commit -m \"{}\" {} {}", safe_msg, safe_id, safe_image)
+            };
+            let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 120).await?;
+            if code > 0 {
+                let err = if !stderr.trim().is_empty() { stderr.trim().to_string() } else if !stdout.trim().is_empty() { stdout.trim().to_string() } else { format!("Command failed with exit code {}", code) };
+                return Err(format!("Failed to commit container: {}", err));
+            }
+            Ok(format!("Container committed as {}", safe_image))
+        }
+        _ => {
+            // direct mode
+            let cmd = if message.is_empty() {
+                format!("docker commit {} {}", safe_id, safe_image)
+            } else {
+                let safe_msg = message.replace('"', "\\\"");
+                format!("docker commit -m \"{}\" {} {}", safe_msg, safe_id, safe_image)
+            };
+            let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 120).await?;
+            if code > 0 {
+                let err = if !stderr.trim().is_empty() { stderr.trim().to_string() } else if !stdout.trim().is_empty() { stdout.trim().to_string() } else { format!("Command failed with exit code {}", code) };
+                return Err(format!("Failed to commit container: {}", err));
+            }
+            Ok(format!("Container committed as {}", safe_image))
+        }
     }
-    Ok(format!("Container committed as {}", safe_image))
 }
 
 /// Get container logs

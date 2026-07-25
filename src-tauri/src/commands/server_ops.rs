@@ -663,13 +663,15 @@ pub async fn server_docker_container_commit(
     container_id: &str,
     image_name: &str,
     message: &str,
-    clean: bool,
+    mode: &str,
+    export_cmd: &str,
+    export_expose: &str,
 ) -> Result<String, String> {
     let mgr = ssh_mgr.lock().await;
     let session = mgr.get_session(session_id)?;
     let cache = mgr.cache.clone();
     drop(mgr);
-    server::docker_container_commit(&session, &cache, session_id, container_id, image_name, message, clean, &app).await
+    server::docker_container_commit(&session, &cache, session_id, container_id, image_name, message, mode, export_cmd, export_expose, &app).await
 }
 
 #[tauri::command]
