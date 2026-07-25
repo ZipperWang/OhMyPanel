@@ -175,7 +175,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   const [compressDialog, setCompressDialog] = useState<{ names: string[] } | null>(null)
   const [compressFormat, setCompressFormat] = useState<'zip' | 'tar.gz' | 'tar.bz2'>('zip')
   const [missingToolModal, setMissingToolModal] = useState<'zip' | 'unzip' | null>(null)
-  const [saveProgress, setSaveProgress] = useState<{ fileName: string; uploaded: number; total: number; speed: number; active: boolean } | null>(null)
+  const [saveProgress, setSaveProgress] = useState<{ fileName: string; uploaded: number; total: number; speed: number; active: boolean; paused: boolean } | null>(null)
   const [dropActive, setDropActive] = useState(false)
   const dragItemRef = useRef<FileEntry | null>(null)
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null)
@@ -1341,7 +1341,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     const unlisten = await listen<{ uploaded: number; total: number }>('save-local-progress', (e) => {
       const elapsed = (Date.now() - t0) / 1000
       const speed = elapsed > 0 ? e.payload.uploaded / elapsed : 0
-      setSaveProgress({ fileName: entry.name, uploaded: e.payload.uploaded, total: e.payload.total, speed, active: true })
+      setSaveProgress({ fileName: entry.name, uploaded: e.payload.uploaded, total: e.payload.total, speed, active: true, paused: false })
     })
     try {
       const localPath = await invoke<string>('ssh_save_as_local', {
@@ -2377,7 +2377,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         <div className="upload-panel" style={{ position: 'absolute', bottom: 36, right: 12, zIndex: 200 }}>
           <div className="upload-panel-header">
             <span className="upload-panel-title">
-              💾 {saveProgress.active ? t('files.savingToLocal') : t('upload.complete')} — {saveProgress.fileName}
+              💾 {saveProgress.active ? (saveProgress.paused ? t('upload.paused') : t('files.savingToLocal')) : t('upload.complete')} — {saveProgress.fileName}
             </span>
             {!saveProgress.active && <span className="upload-panel-toggle" style={{ cursor: 'pointer' }} onClick={() => setSaveProgress(null)}>✕</span>}
           </div>
@@ -2387,9 +2387,19 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
             </div>
             <div className="upload-progress-info">
               {(saveProgress.uploaded / 1048576).toFixed(1)}M / {saveProgress.total > 0 ? (saveProgress.total / 1048576).toFixed(1) + 'M' : '?'}
-              {saveProgress.active && saveProgress.speed > 0 && ` | ${saveProgress.speed >= 1048576 ? (saveProgress.speed / 1048576).toFixed(1) + ' MB/s' : (saveProgress.speed / 1024).toFixed(0) + ' KB/s'}`}
+              {saveProgress.active && !saveProgress.paused && saveProgress.speed > 0 && ` | ${saveProgress.speed >= 1048576 ? (saveProgress.speed / 1048576).toFixed(1) + ' MB/s' : (saveProgress.speed / 1024).toFixed(0) + ' KB/s'}`}
             </div>
           </div>
+          {saveProgress.active && (
+            <div className="upload-panel-actions">
+              {!saveProgress.paused ? (
+                <button className="upload-btn" onClick={async () => { await invoke('ssh_save_pause'); setSaveProgress(prev => prev ? { ...prev, paused: true } : null) }}>⏸ {t('upload.pause')}</button>
+              ) : (
+                <button className="upload-btn" onClick={async () => { await invoke('ssh_save_resume'); setSaveProgress(prev => prev ? { ...prev, paused: false } : null) }}>▶ {t('upload.resume')}</button>
+              )}
+              <button className="upload-btn danger" onClick={async () => { await invoke('ssh_save_stop'); setSaveProgress(null) }}>⏹ {t('upload.stop')}</button>
+            </div>
+          )}
         </div>
       )}
 

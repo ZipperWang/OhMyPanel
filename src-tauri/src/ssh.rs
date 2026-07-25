@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use russh::client::{self, Handler};
 use russh::ChannelMsg;
@@ -104,10 +105,17 @@ pub struct SshSession {
     pub sftp_cache: Arc<tokio::sync::Mutex<Option<(Arc<russh_sftp::client::SftpSession>, tokio::time::Instant)>>>,
 }
 
+/// Controls pause/stop for active file transfers (save-to-local).
+pub struct TransferControl {
+    pub paused: AtomicBool,
+    pub stopped: AtomicBool,
+}
+
 pub struct SshManager {
     sessions: std::sync::RwLock<HashMap<String, SshSession>>,
     pub app_handle: Option<AppHandle>,
     pub cache: Arc<SshCache>,
+    pub transfer_ctrl: std::sync::Mutex<Option<Arc<TransferControl>>>,
 }
 
 impl SshManager {
@@ -116,6 +124,7 @@ impl SshManager {
             sessions: std::sync::RwLock::new(HashMap::new()),
             app_handle: None,
             cache: Arc::new(SshCache::new()),
+            transfer_ctrl: std::sync::Mutex::new(None),
         }
     }
 
@@ -1410,7 +1419,8 @@ pub async fn session_read_file_bytes(session: &SshSession, path: &str) -> Result
 
 /// Stream remote file to local path in chunks — avoids holding manager lock and caps memory at 256KB.
 /// Emits `save-local-progress` events: { sessionId, uploaded, total }
-pub async fn session_stream_file_to_local(session: &SshSession, remote_path: &str, local_path: &str, app_handle: &AppHandle, session_id: &str) -> Result<(), String> {
+/// Supports pause/stop via TransferControl.
+pub async fn session_stream_file_to_local(session: &SshSession, remote_path: &str, local_path: &str, app_handle: &AppHandle, session_id: &str, ctrl: Arc<TransferControl>) -> Result<(), String> {
     use tokio::io::AsyncReadExt;
     let sftp = session_open_sftp(session).await?;
     let total = sftp.metadata(remote_path).await.map(|m| m.len()).unwrap_or(0);
@@ -1420,6 +1430,20 @@ pub async fn session_stream_file_to_local(session: &SshSession, remote_path: &st
     let mut buf = vec![0u8; 256 * 1024];
     let mut sent: u64 = 0;
     loop {
+        // ponytail: check stop/pause flags each chunk
+        if ctrl.stopped.load(Ordering::Relaxed) {
+            drop(out);
+            let _ = tokio::fs::remove_file(local_path).await;
+            return Err("Transfer stopped".to_string());
+        }
+        while ctrl.paused.load(Ordering::Relaxed) {
+            if ctrl.stopped.load(Ordering::Relaxed) {
+                drop(out);
+                let _ = tokio::fs::remove_file(local_path).await;
+                return Err("Transfer stopped".to_string());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
         let n = file.read(&mut buf).await.map_err(|e| format!("Read failed: {}", e))?;
         if n == 0 { break; }
         out.write_all(&buf[..n]).await.map_err(|e| format!("Write failed: {}", e))?;
@@ -1437,7 +1461,9 @@ pub async fn session_download_to_local(session: &SshSession, remote_path: &str, 
     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
     let local_path = temp_dir.join(file_name);
     let local_str = local_path.to_string_lossy().to_string();
-    session_stream_file_to_local(session, remote_path, &local_str, app_handle, session_id).await?;
+    // ponytail: image preview — no pause/stop needed, pass inert control
+    let ctrl = Arc::new(TransferControl { paused: AtomicBool::new(false), stopped: AtomicBool::new(false) });
+    session_stream_file_to_local(session, remote_path, &local_str, app_handle, session_id, ctrl).await?;
     let _ = open::that(&local_path);
     Ok(local_str)
 }

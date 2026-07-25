@@ -300,8 +300,40 @@ pub async fn ssh_save_as_local(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManag
     let local_str = local_path.to_string();
     // ponytail: grab session then release lock — don't hold global mutex during transfer
     let mgr = ssh_mgr.lock().await; let session = mgr.get_session(session_id)?; drop(mgr);
-    ssh::session_stream_file_to_local(&session, remote_path, &local_str, &app, session_id).await?;
+    // Create transfer control for pause/stop support
+    let ctrl = Arc::new(ssh::TransferControl { paused: std::sync::atomic::AtomicBool::new(false), stopped: std::sync::atomic::AtomicBool::new(false) });
+    { let mgr = ssh_mgr.lock().await; *mgr.transfer_ctrl.lock().unwrap() = Some(ctrl.clone()); }
+    let result = ssh::session_stream_file_to_local(&session, remote_path, &local_str, &app, session_id, ctrl).await;
+    { let mgr = ssh_mgr.lock().await; *mgr.transfer_ctrl.lock().unwrap() = None; }
+    result?;
     Ok(local_str)
+}
+
+#[tauri::command]
+pub async fn ssh_save_pause(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>) -> Result<(), String> {
+    let mgr = ssh_mgr.lock().await;
+    if let Some(ctrl) = mgr.transfer_ctrl.lock().unwrap().as_ref() {
+        ctrl.paused.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_save_resume(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>) -> Result<(), String> {
+    let mgr = ssh_mgr.lock().await;
+    if let Some(ctrl) = mgr.transfer_ctrl.lock().unwrap().as_ref() {
+        ctrl.paused.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_save_stop(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>) -> Result<(), String> {
+    let mgr = ssh_mgr.lock().await;
+    if let Some(ctrl) = mgr.transfer_ctrl.lock().unwrap().as_ref() {
+        ctrl.stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(())
 }
 
 #[tauri::command]
