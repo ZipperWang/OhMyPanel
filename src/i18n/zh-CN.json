@@ -216,7 +216,11 @@
     "commitMsgLabel": "提交说明（可选）：",
     "commitMsgPlaceholder": "例如：配置完成后的快照",
     "committing": "正在打包...",
-    "commitSuccess": "容器已保存为镜像 {{name}}"
+    "commitSuccess": "容器已保存为镜像 {{name}}",
+    "commitModeLabel": "打包方式：",
+    "commitCleanYes": "清理后打包（推荐）",
+    "commitCleanNo": "直接打包",
+    "commitCleanHint": "清理会删除容器内的包管理器缓存、临时文件和日志，可显著减小镜像体积。"
   },
   "files": {
     "notConnected": "未连接",

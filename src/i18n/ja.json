@@ -216,7 +216,11 @@
     "commitMsgLabel": "コミットメッセージ（任意）：",
     "commitMsgPlaceholder": "例：設定後のスナップショット",
     "committing": "コミット中...",
-    "commitSuccess": "コンテナをイメージ {{name}} として保存しました"
+    "commitSuccess": "コンテナをイメージ {{name}} として保存しました",
+    "commitModeLabel": "コミットモード：",
+    "commitCleanYes": "クリーンアップしてからコミット（推奨）",
+    "commitCleanNo": "直接コミット",
+    "commitCleanHint": "クリーンアップはコンテナ内のパッケージキャッシュ、一時ファイル、ログを削除し、イメージサイズを大幅に削減します。"
   },
   "files": {
     "notConnected": "未接続",

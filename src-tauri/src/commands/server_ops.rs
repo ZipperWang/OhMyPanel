@@ -658,16 +658,18 @@ pub async fn server_docker_container_logs(
 #[tauri::command]
 pub async fn server_docker_container_commit(
     ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
+    app: tauri::AppHandle,
     session_id: &str,
     container_id: &str,
     image_name: &str,
     message: &str,
+    clean: bool,
 ) -> Result<String, String> {
     let mgr = ssh_mgr.lock().await;
     let session = mgr.get_session(session_id)?;
     let cache = mgr.cache.clone();
     drop(mgr);
-    server::docker_container_commit(&session, &cache, session_id, container_id, image_name, message).await
+    server::docker_container_commit(&session, &cache, session_id, container_id, image_name, message, clean, &app).await
 }
 
 #[tauri::command]

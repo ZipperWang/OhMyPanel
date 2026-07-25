@@ -7119,11 +7119,13 @@ pub async fn docker_container_remove(
 /// Commit a container to a new image
 pub async fn docker_container_commit(
     session: &SshSession,
-    _cache: &SshCache,
-    _session_id: &str,
+    cache: &SshCache,
+    session_id: &str,
     container_id: &str,
     image_name: &str,
     message: &str,
+    clean: bool,
+    app_handle: &AppHandle,
 ) -> Result<String, String> {
     let safe_id = container_id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
     // ponytail: sanitize image name — allow [a-z0-9._/:-]
@@ -7131,6 +7133,16 @@ pub async fn docker_container_commit(
     if safe_image.is_empty() {
         return Err("Image name cannot be empty".to_string());
     }
+
+    // Clean up caches/logs inside container before commit
+    if clean {
+        let clean_cmd = format!(
+            "docker exec {} sh -c 'echo \"[clean] Clearing package cache...\"; apt-get clean 2>/dev/null; yum clean all 2>/dev/null; rm -rf /var/cache/apt/archives/* /var/cache/yum/* /tmp/* /var/tmp/* /var/log/*.log /var/log/*.gz 2>/dev/null; echo \"[clean] Done.\"'",
+            safe_id
+        );
+        docker_stream_exec(session, cache, session_id, &clean_cmd, 120, app_handle).await?;
+    }
+
     let cmd = if message.is_empty() {
         format!("docker commit {} {}", safe_id, safe_image)
     } else {

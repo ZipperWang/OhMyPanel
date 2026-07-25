@@ -216,7 +216,11 @@
     "commitMsgLabel": "Message de commit (optionnel) :",
     "commitMsgPlaceholder": "ex. snapshot après configuration",
     "committing": "Commit en cours...",
-    "commitSuccess": "Conteneur enregistré comme image {{name}}"
+    "commitSuccess": "Conteneur enregistré comme image {{name}}",
+    "commitModeLabel": "Mode de commit :",
+    "commitCleanYes": "Nettoyer puis commit (recommandé)",
+    "commitCleanNo": "Commit direct",
+    "commitCleanHint": "Le nettoyage supprime les caches de paquets, fichiers temporaires et journaux du conteneur, réduisant significativement la taille de l'image."
   },
   "files": {
     "notConnected": "Non connecté",

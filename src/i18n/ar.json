@@ -216,7 +216,11 @@
     "commitMsgLabel": "رسالة الالتزام (اختياري):",
     "commitMsgPlaceholder": "مثال: لقطة بعد الإعداد",
     "committing": "جارٍ الالتزام...",
-    "commitSuccess": "تم حفظ الحاوية كصورة {{name}}"
+    "commitSuccess": "تم حفظ الحاوية كصورة {{name}}",
+    "commitModeLabel": "وضع الالتزام:",
+    "commitCleanYes": "تنظيف ثم التزام (موصى به)",
+    "commitCleanNo": "التزام مباشر",
+    "commitCleanHint": "يزيل التنظيف ذاكرة التخزين المؤقت والملفات المؤقتة والسجلات داخل الحاوية، مما يقلل حجم الصورة بشكل ملحوظ."
   },
   "files": {
     "notConnected": "غير متصل",

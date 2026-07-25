@@ -216,7 +216,11 @@
     "commitMsgLabel": "Commit-Nachricht (optional):",
     "commitMsgPlaceholder": "z.B. Snapshot nach Konfiguration",
     "committing": "Commit läuft...",
-    "commitSuccess": "Container als Image {{name}} gespeichert"
+    "commitSuccess": "Container als Image {{name}} gespeichert",
+    "commitModeLabel": "Commit-Modus:",
+    "commitCleanYes": "Bereinigen dann committen (empfohlen)",
+    "commitCleanNo": "Direkt committen",
+    "commitCleanHint": "Die Bereinigung entfernt Paket-Caches, temporäre Dateien und Logs im Container und reduziert die Image-Größe erheblich."
   },
   "files": {
     "notConnected": "Nicht verbunden",
