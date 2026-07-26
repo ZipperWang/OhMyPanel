@@ -73,6 +73,9 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
   const [pullImageName, setPullImageName] = useState('')
   const [pulling, setPulling] = useState(false)
   const [confirmDeleteImage, setConfirmDeleteImage] = useState<DockerImage | null>(null)
+  const [loadImageModal, setLoadImageModal] = useState(false)
+  const [loadImagePath, setLoadImagePath] = useState('')
+  const [loadingImage, setLoadingImage] = useState(false)
   const [runImageModal, setRunImageModal] = useState<DockerImage | null>(null)
   const [runCommand, setRunCommand] = useState('')
   const [runningContainer, setRunningContainer] = useState(false)
@@ -309,6 +312,26 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
     }
   }
 
+  const handleLoadImage = async () => {
+    if (!sessionId || !loadImagePath.trim()) return
+    clearMessages()
+    setLoadImageModal(false)
+    startStream()
+    setLoadingImage(true)
+    try {
+      await invoke('server_docker_image_load', {
+        sessionId,
+        filePath: loadImagePath.trim(),
+      })
+      setLoadImagePath('')
+      await fetchImages()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoadingImage(false)
+    }
+  }
+
   const handleRunFromImage = (image: DockerImage) => {
     setRunImageModal(image)
     // ponytail: provide sensible defaults based on common patterns
@@ -481,6 +504,9 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
                 />
                 <button className="docker-btn primary" onClick={handlePullImage} disabled={pulling || !pullImageName.trim()}>
                   {pulling ? t('dockerPanel.pulling') : t('dockerPanel.pullImage')}
+                </button>
+                <button className="docker-btn" onClick={() => setLoadImageModal(true)} disabled={loadingImage} title={t('dockerPanel.loadImage')}>
+                  📂 {t('dockerPanel.loadImage')}
                 </button>
               </div>
 
@@ -730,6 +756,38 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
               <button className="docker-btn" onClick={() => setCommitContainer(null)} disabled={committing}>{t('dockerPanel.cancel')}</button>
               <button className="docker-btn primary" onClick={handleCommit} disabled={committing || !commitImageName.trim()}>
                 {committing ? t('dockerPanel.committing') : t('dockerPanel.commit')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Load Image Modal */}
+      {loadImageModal && (
+        <div className="docker-modal-overlay">
+          <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="modal-close-btn"
+              onClick={() => setLoadImageModal(false)}
+              title={t('dockerPanel.close')}
+            >×</button>
+            <div className="docker-confirm-title">{t('dockerPanel.loadImageTitle')}</div>
+            <div className="docker-confirm-msg">
+              <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.loadImagePath')}</label>
+              <input
+                className="docker-pull-input"
+                value={loadImagePath}
+                onChange={(e) => setLoadImagePath(e.target.value)}
+                placeholder="/root/myimage.tar.gz"
+                onKeyDown={(e) => { if (e.key === 'Enter' && loadImagePath.trim()) handleLoadImage() }}
+                autoFocus
+              />
+              <p style={{ fontSize: '12px', opacity: 0.7, margin: '8px 0 0 0' }}>{t('dockerPanel.loadImageHint')}</p>
+            </div>
+            <div className="docker-confirm-actions">
+              <button className="docker-btn" onClick={() => setLoadImageModal(false)}>{t('dockerPanel.cancel')}</button>
+              <button className="docker-btn primary" onClick={handleLoadImage} disabled={!loadImagePath.trim()}>
+                {t('dockerPanel.loadImage')}
               </button>
             </div>
           </div>

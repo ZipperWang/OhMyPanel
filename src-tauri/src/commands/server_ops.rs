@@ -714,6 +714,20 @@ pub async fn server_docker_image_remove(
 }
 
 #[tauri::command]
+pub async fn server_docker_image_load(
+    ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
+    app: tauri::AppHandle,
+    session_id: &str,
+    file_path: &str,
+) -> Result<String, String> {
+    let mgr = ssh_mgr.lock().await;
+    let session = mgr.get_session(session_id)?;
+    let cache = mgr.cache.clone();
+    drop(mgr);
+    server::docker_image_load(&session, &cache, session_id, file_path, &app).await
+}
+
+#[tauri::command]
 pub async fn server_docker_image_run(
     ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
     app: tauri::AppHandle,

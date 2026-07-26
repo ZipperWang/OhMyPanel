@@ -7311,6 +7311,24 @@ pub async fn docker_image_remove(
     Ok(format!("Image {} removed successfully", safe_id))
 }
 
+/// Load an image from a tar file on the server
+pub async fn docker_image_load(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    file_path: &str,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    // ponytail: sanitize path — allow alphanumeric, /, ., -, _
+    let safe_path: String = file_path.chars().filter(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '-' | '_')).collect();
+    if safe_path.is_empty() || !safe_path.starts_with('/') {
+        return Err("Invalid file path".to_string());
+    }
+    let cmd = format!("docker load -i {}", safe_path);
+    docker_stream_exec(session, cache, session_id, &cmd, 600, app_handle).await?;
+    Ok(format!("Image loaded from {}", safe_path))
+}
+
 /// Run a container from an image
 pub async fn docker_image_run(
     session: &SshSession,
