@@ -4633,7 +4633,7 @@ if [ "{}" = "install" ]; then
     sleep 1
   done
   if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
-    apt-get update -qq --allow-releaseinfo-change || true
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true
     apt-get install -y {} 2>&1
   else
     yum install -y --nogpgcheck --assumeyes {} 2>&1
@@ -4834,7 +4834,7 @@ if [ -f /etc/os-release ]; then
 fi
 
 if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
-  apt-get update -qq --allow-releaseinfo-change 2>/dev/null || true
+  apt-get update -q --allow-releaseinfo-change 2>&1 || true
   M_CAND=$(apt-cache policy mariadb-server 2>/dev/null | grep 'Candidate:' | awk '{print $2}')
   if [ -n "$M_CAND" ] && [ "$M_CAND" != "(none)" ]; then
     echo "mariadb:$M_CAND"
@@ -5355,7 +5355,7 @@ install_deps() {{
       echo "Waiting for package manager lock... ($i/60)"
       sleep 1
     done
-    apt-get update -qq --allow-releaseinfo-change || true
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true
     # Core build tools (always install)
     apt-get install -y build-essential autoconf pkg-config libtool re2c bison flex
     # Each lib individually — failures recorded but not fatal
@@ -5657,7 +5657,7 @@ if [ "{}" = "install" ]; then
       echo "Waiting for package manager lock... ($i/60)"
       sleep 1
     done
-    apt-get update -qq --allow-releaseinfo-change || true
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true
     apt-get install -y redis-server
   else
     yum install -y --nogpgcheck --assumeyes epel-release
@@ -5706,7 +5706,7 @@ if [ "{}" = "install" ]; then
         echo "Waiting for package manager lock... ($i/60)"
         sleep 1
       done
-      apt-get update -qq --allow-releaseinfo-change || true
+      apt-get update -q --allow-releaseinfo-change 2>&1 || true
       apt-get install -y nodejs npm
     else
       yum install -y --nogpgcheck --assumeyes nodejs npm
@@ -5738,12 +5738,12 @@ echo "ACTION_SUCCESS"
                 // ponytail: bypass get.docker.com (blocked by GFW) — use Aliyun Docker CE repo directly
                 format!(r#"{} && . /etc/os-release
   if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
-    apt-get update -qq --allow-releaseinfo-change || true; apt-get install -y ca-certificates curl gnupg
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true; apt-get install -y ca-certificates curl gnupg
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/$ID/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/$ID $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
-    apt-get update -qq --allow-releaseinfo-change || true
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
   else
     yum install -y --nogpgcheck --assumeyes yum-utils
@@ -5825,7 +5825,7 @@ if [ "__ACTION__" = "install" ]; then
       echo "Waiting for package manager lock... ($i/60)"
       sleep 1
     done
-    apt-get update -qq --allow-releaseinfo-change || true
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true
     
     # Auto-detect variant if not specified
     if [ -z "$VARIANT" ]; then
@@ -5961,7 +5961,7 @@ if [ "__ACTION__" = "install" ]; then
       echo "Waiting for package manager lock... ($i/60)"
       sleep 1
     done
-    apt-get update -qq
+    apt-get update -q 2>&1
     if [ -n "__VERSION__" ]; then
       # Core package — must succeed
       apt-get install -y php__VERSION__-fpm || { echo "ERROR: php__VERSION__-fpm install failed"; exit 1; }
@@ -6052,10 +6052,10 @@ if [ \"__ACTION__\" = \"install\" ]; then\n\
       echo \"Waiting for package manager lock... ($i/60)\"\n\
       sleep 1\n\
     done\n\
-    apt-get update -qq\n\
+    apt-get update -q 2>&1\n\
     apt-get install -y software-properties-common\n\
     add-apt-repository -y ppa:ondrej/php 2>/dev/null || true\n\
-    apt-get update -qq\n\
+    apt-get update -q 2>&1\n\
     apt-get install -y php__VER__-fpm || { echo \"ERROR: php__VER__-fpm install failed\"; exit 1; }\n\
     for pkg in php__VER__-mysql php__VER__-curl php__VER__-mbstring php__VER__-xml php__VER__-zip php__VER__-gd php__VER__-bcmath php__VER__-opcache; do\n\
       apt-get install -y \"$pkg\" || { echo \"SKIP: $pkg not available\"; SKIPPED=\"$SKIPPED $pkg\"; }\n\
@@ -6101,7 +6101,7 @@ fi
 if [ "__ACTION__" = "install" ]; then
   echo "Installing Apache..."
   if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
-    apt-get update -qq
+    apt-get update -q 2>&1
     apt-get install -y apache2 apache2-utils
   else
     yum install -y httpd httpd-tools mod_ssl
@@ -6146,7 +6146,7 @@ if [ "{}" = "install" ]; then
   fi
   echo "Installing PostgreSQL..."
   if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
-    apt-get update -qq
+    apt-get update -q 2>&1
     apt-get install -y postgresql postgresql-contrib
   else
     yum install -y --nogpgcheck --assumeyes postgresql-server postgresql-contrib
@@ -6188,7 +6188,7 @@ if [ "{}" = "install" ]; then
       echo "Waiting for package manager lock... ($i/60)"
       sleep 1
     done
-    {} update -qq 2>/dev/null || true
+    {} update -y -q 2>&1 || true
     {} {} 2>&1
     {}
   fi
