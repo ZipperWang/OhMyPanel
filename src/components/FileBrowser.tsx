@@ -1491,6 +1491,10 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       if (e.key === 'Delete' && selectedFiles.size > 0) {
         handleDelete()
       }
+      if (e.key === 'Backspace') {
+        e.preventDefault()
+        goUp()
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
