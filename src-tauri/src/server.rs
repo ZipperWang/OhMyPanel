@@ -4792,11 +4792,18 @@ if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
   apt-cache search --names-only '^php[0-9]+\.[0-9]+-fpm$' 2>/dev/null | \
     awk '{print $1}' | sed 's/^php//; s/-fpm$//' | sort -V | uniq
 else
-  # CentOS/RHEL: query yum/dnf for php*-fpm packages
+  # CentOS/RHEL: query multiple sources for available PHP versions
   if command -v dnf &>/dev/null; then
-    dnf list available 'php*-fpm' 2>/dev/null | grep -oP 'php\K[0-9.]+' | sort -V | uniq
+    # DNF module streams (RHEL 8+/CentOS 8+/Alibaba Cloud Linux 3)
+    dnf module list php 2>/dev/null | grep -E '^php[[:space:]]' | awk '{gsub(/\[.\]/, "", $2); print $2}' | grep -E '^[0-9]+\.[0-9]+$'
+    # Remi SCL packages (php81-php-fpm, php82-php-fpm, etc.)
+    dnf list available 'php*-php-fpm' 2>/dev/null | grep -oP 'php\K[0-9]+(?=-php-fpm)' | sed 's/^\([0-9]\{1,\}\)\([0-9]\)$/\1.\2/'
+    # Default php-fpm — extract version from package version field
+    dnf list available php-fpm 2>/dev/null | awk '/^php-fpm/ {print $2}' | grep -oE '^[0-9]+\.[0-9]+'
   else
-    yum list available 'php*-fpm' 2>/dev/null | grep -oP 'php\K[0-9.]+' | sort -V | uniq
+    # yum fallback (CentOS 7, no dnf)
+    yum list available 'php*-php-fpm' 2>/dev/null | grep -oP 'php\K[0-9]+(?=-php-fpm)' | sed 's/^\([0-9]\{1,\}\)\([0-9]\)$/\1.\2/'
+    yum list available php-fpm 2>/dev/null | awk '/^php-fpm/ {print $2}' | grep -oE '^[0-9]+\.[0-9]+'
   fi
 fi
 "#;
@@ -6060,21 +6067,35 @@ if [ \"__ACTION__\" = \"install\" ]; then\n\
     for pkg in php__VER__-mysql php__VER__-curl php__VER__-mbstring php__VER__-xml php__VER__-zip php__VER__-gd php__VER__-bcmath php__VER__-opcache; do\n\
       apt-get install -y \"$pkg\" || { echo \"SKIP: $pkg not available\"; SKIPPED=\"$SKIPPED $pkg\"; }\n\
     done\n\
+    SVC_NAME=php__VER__-fpm\n\
   else\n\
-    yum install -y --nogpgcheck --assumeyes epel-release 2>/dev/null || true\n\
-    yum install -y --nogpgcheck --assumeyes https://rpms.remirepo.net/enterprise/remi-release-$(rpm -E %{rhel}).rpm 2>/dev/null || true\n\
-    yum module enable -y php:remi-__VER__ 2>/dev/null || true\n\
-    yum install -y --nogpgcheck --assumeyes php__VER__-fpm || { echo \"ERROR: php__VER__-fpm install failed\"; exit 1; }\n\
-    for pkg in php__VER__-mysqlnd php__VER__-curl php__VER__-mbstring php__VER__-xml php__VER__-zip php__VER__-gd php__VER__-bcmath php__VER__-opcache; do\n\
-      yum install -y --nogpgcheck --assumeyes \"$pkg\" || { echo \"SKIP: $pkg not available\"; SKIPPED=\"$SKIPPED $pkg\"; }\n\
-    done\n\
+    # RHEL: try default DNF module stream first (RHEL 8+/Alibaba Cloud Linux 3)\n\
+    SVC_NAME=php-fpm\n\
+    dnf module enable -y php:__VER__ 2>/dev/null\n\
+    if dnf list available php-fpm 2>/dev/null | grep -q '^php-fpm'; then\n\
+      dnf install -y php-fpm || { echo \"ERROR: php-fpm install failed\"; exit 1; }\n\
+      for pkg in php-mysqlnd php-curl php-mbstring php-xml php-zip php-gd php-bcmath php-opcache; do\n\
+        dnf install -y \"$pkg\" || { echo \"SKIP: $pkg not available\"; SKIPPED=\"$SKIPPED $pkg\"; }\n\
+      done\n\
+    else\n\
+      # Fallback to Remi SCL\n\
+      yum install -y --nogpgcheck --assumeyes epel-release 2>/dev/null || true\n\
+      yum install -y --nogpgcheck --assumeyes https://rpms.remirepo.net/enterprise/remi-release-$(rpm -E %{rhel}).rpm 2>/dev/null || true\n\
+      yum module enable -y php:remi-__VER__ 2>/dev/null || true\n\
+      REMI_VER=$(echo __VER__ | tr -d '.')\n\
+      yum install -y --nogpgcheck --assumeyes php${REMI_VER}-php-fpm || { echo \"ERROR: php${REMI_VER}-php-fpm install failed\"; exit 1; }\n\
+      SVC_NAME=php${REMI_VER}-php-fpm\n\
+      for pkg in php${REMI_VER}-php-mysqlnd php${REMI_VER}-php-curl php${REMI_VER}-php-mbstring php${REMI_VER}-php-xml php${REMI_VER}-php-zip php${REMI_VER}-php-gd php${REMI_VER}-php-bcmath php${REMI_VER}-php-opcache; do\n\
+        yum install -y --nogpgcheck --assumeyes \"$pkg\" || { echo \"SKIP: $pkg not available\"; SKIPPED=\"$SKIPPED $pkg\"; }\n\
+      done\n\
+    fi\n\
   fi\n\
-  systemctl enable __SVC__ && systemctl start __SVC__\n\
+  systemctl enable $SVC_NAME && systemctl start $SVC_NAME\n\
   [ -n \"$SKIPPED\" ] && echo \"WARNING: skipped packages (not in repo):$SKIPPED\"\n\
 else\n\
   echo \"Removing PHP __VER__...\"\n\
-  systemctl stop __SVC__ 2>/dev/null || true\n\
-  systemctl disable __SVC__ 2>/dev/null || true\n\
+  systemctl stop $SVC_NAME 2>/dev/null || true\n\
+  systemctl disable $SVC_NAME 2>/dev/null || true\n\
   if [ \"$ID\" = \"ubuntu\" ] || [ \"$ID\" = \"debian\" ]; then\n\
     apt-get purge -y __EXT__ 2>/dev/null || true\n\
   else\n\
