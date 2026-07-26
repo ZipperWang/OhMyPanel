@@ -1217,6 +1217,7 @@ body {
   color: #c9d1d9;
   overflow: hidden;
   position: relative;
+  outline: none;
 }
 
 .file-browser.fb-drop-active {
