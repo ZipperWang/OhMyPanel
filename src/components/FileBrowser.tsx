@@ -1495,6 +1495,11 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         e.preventDefault()
         goUp()
       }
+      if (e.key === 'Enter' && selectedFiles.size === 1) {
+        e.preventDefault()
+        const entry = files.find(f => f.name === [...selectedFiles][0])
+        if (entry) handleItemDoubleClick(entry)
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
