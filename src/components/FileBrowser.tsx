@@ -18,7 +18,6 @@ interface FileBrowserProps {
   sessionId: string | null
   connHost?: string
   jumpToPath?: string | null
-  onTerminalCommand?: (cmd: string) => void
   onCdHere?: (path: string) => void
   onStartUpload?: (files: { file: File; fileName: string; remotePath: string }[]) => void
   onNavigateToSoftware?: () => void
@@ -146,7 +145,7 @@ const RefreshIcon = () => (
   </svg>
 )
 
-export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser({ sessionId, connHost, jumpToPath, onTerminalCommand, onCdHere, onStartUpload, onNavigateToSoftware }, ref) {
+export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser({ sessionId, connHost, jumpToPath, onCdHere, onStartUpload, onNavigateToSoftware }, ref) {
   const { t } = useTranslation()
   const [currentPath, setCurrentPath] = useState('/')
   const [files, setFiles] = useState<FileEntry[]>([])
@@ -330,7 +329,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         setCacheTime(Date.now())
       }
       if (connHost) invoke('ui_state_set', { key: `fb_path_${connHost}`, value: resolvedPath }).catch(() => {})
-      onTerminalCommand?.(`cd ${resolvedPath} && ls -la`)
+      
     } catch (e) {
       console.error('list_dir error:', e)
       return false
@@ -338,7 +337,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       setLoading(false)
     }
     return true
-  }, [sessionId, currentPath, connHost, onTerminalCommand])
+  }, [sessionId, currentPath, connHost])
 
 
   useImperativeHandle(ref, () => ({
@@ -949,13 +948,13 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     const filePath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`
     showToast(t('files.downloadingFile', { name: entry.name }), 'info')
     try {
-      const localPath = await invoke<string>('ssh_download_to_local', {
+      await invoke<string>('ssh_download_to_local', {
         sessionId,
         remotePath: filePath,
         fileName: entry.name,
       })
       showToast(t('files.openImage', { name: entry.name }), 'success')
-      onTerminalCommand?.(`# Downloaded ${filePath} -> ${localPath}`)
+      
     } catch (e) {
       showToast(t('files.failedOpenImage', { error: e }), 'error')
     }
@@ -965,14 +964,12 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     // ponytail: allow all files up to 3MB, no format restriction
     if (entry.size >= 3 * 1024 * 1024) {
       showToast(t('files.binaryOrLarge'), 'info')
-      onTerminalCommand?.(`file ${currentPath}/${entry.name}`)
       return
     }
     const filePath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`
     try {
       const content = await invoke<string>('ssh_read_file', { sessionId, path: filePath })
       setEditor({ path: filePath, name: entry.name, content, originalContent: content, saving: false })
-      onTerminalCommand?.(`cat ${filePath}`)
     } catch (e) {
       console.error('read_file error:', e)
       showToast(t('files.readFailed', { error: e }), 'error')
@@ -986,7 +983,6 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       await invoke('ssh_write_file', { sessionId, path: editor.path, content: editor.content })
       setEditor({ ...editor, originalContent: editor.content, saving: false })
       showToast(t('files.savedFile', { name: editor.name }), 'success')
-      onTerminalCommand?.(`# Saved ${editor.path}`)
     } catch (e) {
       showToast(t('files.saveFailedMsg', { error: e }), 'error')
       setEditor({ ...editor, saving: false })
