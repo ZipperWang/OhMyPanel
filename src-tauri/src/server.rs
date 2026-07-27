@@ -4216,6 +4216,7 @@ fi
 # Check PHP versions — dynamic scan for any installed PHP-FPM
 # ponytail: no hardcoded version list — detect whatever is on the system
 # Supports: php8.1-fpm (Debian/Ubuntu), php81-php-fpm (CentOS Remi SCL)
+_php_ver_found=0
 for _svc in $(systemctl list-unit-files --type=service 2>/dev/null | grep -oE 'php[0-9]+(\.[0-9]+)?-?(php-)?fpm' | sed 's/.service$//' | sort -uV); do
   # Extract version: php8.1-fpm → 8.1, php81-php-fpm → 81
   phpver=$(echo "$_svc" | sed -E 's/^php([0-9]+(\.[0-9]+)?)-?(php-)?fpm$/\1/')
@@ -4225,6 +4226,7 @@ for _svc in $(systemctl list-unit-files --type=service 2>/dev/null | grep -oE 'p
   _btbin="/www/server/php/${phpver}/sbin/php-fpm"
   if systemctl is-enabled "$_svc" &>/dev/null || [ -x "$_bin" ] || [ -x "$_remibin" ] || [ -x "$_btbin" ]; then
     echo "PHP_DETECT_VERSION=${phpver}"
+    _php_ver_found=1
     if [ -x "$_bin" ]; then
       _fullver=$("$_bin" -v 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "${phpver}.x")
     elif [ -x "$_remibin" ]; then
@@ -4255,6 +4257,7 @@ if [ -d /www/server/php ]; then
     _svc="php${phpver}-fpm"
     if ! systemctl list-unit-files --type=service 2>/dev/null | grep -q "${_svc}"; then
       echo "PHP_DETECT_VERSION=${phpver}"
+      _php_ver_found=1
       _fullver=$("$_btbin" -v 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "${phpver}.x")
       echo "PHP_DETECT_FULLVER=${_fullver}"
       echo "PHP_DETECT_SERVICE=$_svc"
@@ -4263,12 +4266,36 @@ if [ -d /www/server/php ]; then
   done
 fi
 
+# Fallback: php-fpm service without version in name (CentOS default, Alibaba Cloud Linux 3 DNF module)
+# ponytail: only triggers if no versioned PHP was detected by the loops above
+if systemctl list-unit-files --type=service 2>/dev/null | grep -qE '^php-fpm\.service'; then
+  # ponytail: only if no versioned PHP was detected by the loops above
+  if [ "$_php_ver_found" = "0" ]; then
+    _fv=""
+    for _b in /usr/sbin/php-fpm /usr/bin/php-fpm; do
+      [ -x "$_b" ] && _fv=$("$_b" -v 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) && [ -n "$_fv" ] && break
+    done
+    [ -z "$_fv" ] && command -v php &>/dev/null && _fv=$(php -v 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+    if [ -n "$_fv" ]; then
+      _sv=$(echo "$_fv" | grep -oE '^[0-9]+\.[0-9]+')
+      echo "PHP_DETECT_VERSION=${_sv}"
+      echo "PHP_DETECT_FULLVER=${_fv}"
+      echo "PHP_DETECT_SERVICE=php-fpm"
+      if systemctl is-active php-fpm &>/dev/null; then
+        echo "PHP_DETECT_RUNNING=active"
+      else
+        echo "PHP_DETECT_RUNNING=inactive"
+      fi
+    fi
+  fi
+fi
+
 # Generic PHP detection (for always-visible install card)
 # ponytail: matches php-fpm (CentOS), php8.1-fpm (Debian), php81-php-fpm (Remi SCL)
 if command -v php &>/dev/null || ls /usr/sbin/php*-php-fpm /usr/sbin/php-fpm* /www/server/php/*/sbin/php-fpm &>/dev/null; then
   echo "PHP_GENERIC_INSTALLED=1"
   echo "PHP_GENERIC_VERSION=$(php -v 2>/dev/null || ls /usr/sbin/php*-php-fpm 2>/dev/null | head -1 | xargs -I{} {} -v 2>/dev/null || echo '' | head -1 | grep -oP '[\d]+\.[\d]+\.[\d]+' || echo '')"
-  PHP_GENERIC_SVC=$(systemctl list-units --type=service 2>/dev/null | grep -E 'php([0-9]+(\.[0-9]+)?-?)?php-fpm|php-fpm' | awk '{print $1}' | head -1 | sed 's/.service//')
+  PHP_GENERIC_SVC=$(systemctl list-unit-files --type=service 2>/dev/null | grep -E '^php[0-9.]*-?(php-)?fpm' | awk '{print $1}' | head -1 | sed 's/.service//')
   echo "PHP_GENERIC_SERVICE=$PHP_GENERIC_SVC"
   if [ -n "$PHP_GENERIC_SVC" ] && systemctl is-active "$PHP_GENERIC_SVC" &>/dev/null; then
     echo "PHP_GENERIC_RUNNING=active"
