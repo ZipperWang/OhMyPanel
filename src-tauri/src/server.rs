@@ -6019,21 +6019,40 @@ if [ "__ACTION__" = "install" ]; then
     yum install -y --nogpgcheck --assumeyes epel-release 2>/dev/null || true
     if [ -n "__VERSION__" ]; then
       VER_NODOT=$(echo "__VERSION__" | tr -d '.')
-      yum install -y --nogpgcheck --assumeyes php${VER_NODOT}-php-fpm || { echo "ERROR: php${VER_NODOT}-php-fpm install failed"; exit 1; }
-      for pkg in php${VER_NODOT}-php-mysqlnd php${VER_NODOT}-php-curl php${VER_NODOT}-php-mbstring php${VER_NODOT}-php-xml php${VER_NODOT}-php-zip php${VER_NODOT}-php-gd php${VER_NODOT}-php-bcmath php${VER_NODOT}-php-opcache; do
-        yum install -y --nogpgcheck --assumeyes "$pkg" || { echo "SKIP: $pkg not available"; SKIPPED="$SKIPPED $pkg"; }
-      done
+      # ponytail: try DNF module stream first (RHEL 8+/CentOS 8+), fallback to Remi SCL
+      if command -v dnf &>/dev/null && dnf module list php 2>/dev/null | grep -qE '^php[[:space:]]'; then
+        dnf module enable -y php:__VERSION__ 2>/dev/null || true
+        if dnf list available php-fpm 2>/dev/null | grep -q '^php-fpm'; then
+          dnf install -y php-fpm || { echo "ERROR: php-fpm install failed"; exit 1; }
+          for pkg in php-mysqlnd php-curl php-mbstring php-xml php-zip php-gd php-bcmath php-opcache; do
+            dnf install -y "$pkg" || { echo "SKIP: $pkg not available"; SKIPPED="$SKIPPED $pkg"; }
+          done
+          SVC="php-fpm"
+        else
+          # Fallback to Remi SCL
+          yum install -y --nogpgcheck --assumeyes https://rpms.remirepo.net/enterprise/remi-release-$(rpm -E %{rhel}).rpm 2>/dev/null || true
+          yum module enable -y php:remi-__VERSION__ 2>/dev/null || true
+          yum install -y --nogpgcheck --assumeyes php${VER_NODOT}-php-fpm || { echo "ERROR: php${VER_NODOT}-php-fpm install failed"; exit 1; }
+          for pkg in php${VER_NODOT}-php-mysqlnd php${VER_NODOT}-php-curl php${VER_NODOT}-php-mbstring php${VER_NODOT}-php-xml php${VER_NODOT}-php-zip php${VER_NODOT}-php-gd php${VER_NODOT}-php-bcmath php${VER_NODOT}-php-opcache; do
+            yum install -y --nogpgcheck --assumeyes "$pkg" || { echo "SKIP: $pkg not available"; SKIPPED="$SKIPPED $pkg"; }
+          done
+          SVC="php${VER_NODOT}-php-fpm"
+        fi
+      else
+        # yum (CentOS 7) or no module: use Remi SCL directly
+        yum install -y --nogpgcheck --assumeyes https://rpms.remirepo.net/enterprise/remi-release-$(rpm -E %{rhel}).rpm 2>/dev/null || true
+        yum install -y --nogpgcheck --assumeyes php${VER_NODOT}-php-fpm || { echo "ERROR: php${VER_NODOT}-php-fpm install failed"; exit 1; }
+        for pkg in php${VER_NODOT}-php-mysqlnd php${VER_NODOT}-php-curl php${VER_NODOT}-php-mbstring php${VER_NODOT}-php-xml php${VER_NODOT}-php-zip php${VER_NODOT}-php-gd php${VER_NODOT}-php-bcmath php${VER_NODOT}-php-opcache; do
+          yum install -y --nogpgcheck --assumeyes "$pkg" || { echo "SKIP: $pkg not available"; SKIPPED="$SKIPPED $pkg"; }
+        done
+        SVC="php${VER_NODOT}-php-fpm"
+      fi
     else
       yum install -y --nogpgcheck --assumeyes php-fpm || { echo "ERROR: php-fpm install failed"; exit 1; }
       for pkg in php-mysqlnd php-curl php-mbstring php-xml php-zip php-gd php-bcmath php-opcache; do
         yum install -y --nogpgcheck --assumeyes "$pkg" || { echo "SKIP: $pkg not available"; SKIPPED="$SKIPPED $pkg"; }
       done
-    fi
-    # ponytail: use exact versioned service name when version is known
-    if [ -n "__VERSION__" ]; then
-      SVC="php${VER_NODOT}-php-fpm"
-    else
-      SVC=$(systemctl list-units --type=service | grep -E 'php' | awk '{print $1}' | head -1 | sed 's/.service//')
+      SVC="php-fpm"
     fi
   fi
   if [ -n "$SVC" ]; then
