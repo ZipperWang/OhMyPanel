@@ -798,6 +798,7 @@
     "addSourceSuccess": "Fonte adicionada com sucesso",
     "importantNotice": "IMPORTANTE: Após a instalação bem-sucedida do software, você precisa desconectar e reconectar ao servidor para ativá-lo!",
     "viewFullOutput": " Clique para ver a saída completa do terminal",
+    "pkgLockHint": "O sistema está atualizando automaticamente. Aguarde a conclusão da atualização antes de instalar. Isso não é um erro, geralmente leva de 5 a 10 minutos.",
     "customCategory": "Personalizado",
     "addCustomSoftware": "Adicionar Software",
     "addCustomSoftwareTitle": "Adicionar Software Personalizado",

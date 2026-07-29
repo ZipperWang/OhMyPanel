@@ -808,6 +808,7 @@
     "addSourceSuccess": "软件源添加成功",
     "importantNotice": "重要：软件安装成功后，需要断开重新连接服务器，才能激活使用！",
     "viewFullOutput": "点击查看完整终端输出",
+    "pkgLockHint": "系统正在自动升级，请等待升级完成再安装，这不是错误，通常需要等待5-10分钟。",
     "customCategory": "自定义",
     "addCustomSoftware": "添加软件",
     "addCustomSoftwareTitle": "添加自定义软件",

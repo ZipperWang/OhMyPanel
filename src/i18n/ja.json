@@ -798,6 +798,7 @@
     "addSourceSuccess": "パッケージソースが追加されました",
     "importantNotice": "重要：ソフトウェアのインストール成功後、サーバーを切断して再接続する必要があります！",
     "viewFullOutput": "クリックして完全なターミナル出力を表示",
+    "pkgLockHint": "システムが自動アップデート中です。インストール前にアップデートが完了するまでお待ちください。これはエラーではなく、通常5〜10分かかります。",
     "customCategory": "カスタム",
     "addCustomSoftware": "ソフトウェアを追加",
     "addCustomSoftwareTitle": "カスタムソフトウェアを追加",

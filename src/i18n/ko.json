@@ -798,6 +798,7 @@
     "addSourceSuccess": "소스가 성공적으로 추가되었습니다",
     "importantNotice": "중요: 소프트웨어 설치 성공 후, 활성화하려면 서버 연결을 끊었다가 다시 연결해야 합니다!",
     "viewFullOutput": " 전체 터미널 출력을 보려면 클릭하세요",
+    "pkgLockHint": "시스템이 자동 업데이트 중입니다. 설치를 완료할 때까지 기다려 주세요. 이것은 오류가 아니며 보통 5-10분 정도 소요됩니다.",
     "customCategory": "사용자 정의",
     "addCustomSoftware": "소프트웨어 추가",
     "addCustomSoftwareTitle": "사용자 정의 소프트웨어 추가",

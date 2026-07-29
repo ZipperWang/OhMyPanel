@@ -798,6 +798,7 @@
     "addSourceSuccess": "Source ajoutée avec succès",
     "importantNotice": "IMPORTANT : Après l'installation réussie d'un logiciel, vous devez vous déconnecter et vous reconnecter au serveur pour l'activer !",
     "viewFullOutput": " Cliquez pour voir la sortie complète du terminal",
+    "pkgLockHint": "Le système est en cours de mise à jour automatique. Veuillez attendre la fin de la mise à jour avant d'installer. Ce n'est pas une erreur, cela prend généralement 5 à 10 minutes.",
     "customCategory": "Personnalisé",
     "addCustomSoftware": "Ajouter un logiciel",
     "addCustomSoftwareTitle": "Ajouter un logiciel personnalisé",

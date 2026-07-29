@@ -798,6 +798,7 @@
     "addSourceSuccess": "Quelle erfolgreich hinzugefügt",
     "importantNotice": "WICHTIG: Nach erfolgreicher Software-Installation müssen Sie die Verbindung zum Server trennen und erneut herstellen, um sie zu aktivieren!",
     "viewFullOutput": " Klicken, um die vollständige Terminal-Ausgabe anzuzeigen",
+    "pkgLockHint": "Das System wird automatisch aktualisiert. Bitte warten Sie, bis das Update abgeschlossen ist, bevor Sie installieren. Dies ist kein Fehler, es dauert normalerweise 5-10 Minuten.",
     "customCategory": "Benutzerdefiniert",
     "addCustomSoftware": "Software hinzufügen",
     "addCustomSoftwareTitle": "Benutzerdefinierte Software hinzufügen",

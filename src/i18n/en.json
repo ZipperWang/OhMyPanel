@@ -808,6 +808,7 @@
     "addSourceSuccess": "Source added successfully",
     "importantNotice": "IMPORTANT: After software installation succeeds, you need to disconnect and reconnect to the server to activate it!",
     "viewFullOutput": " Click to view full terminal output",
+    "pkgLockHint": "System is auto-updating, please wait for the update to complete before installing. This is not an error, it usually takes 5-10 minutes.",
     "customCategory": "Custom",
     "addCustomSoftware": "Add Software",
     "addCustomSoftwareTitle": "Add Custom Software",
