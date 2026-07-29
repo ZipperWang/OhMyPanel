@@ -91,6 +91,7 @@ If you have any suggestions or feedback, feel free to share them in [GitHub Disc
 - 🔑 SSH password / key authentication with credential storage
 - ️ Full-featured xterm.js terminal with clipboard, web links, and search
 -  Auto-reconnect on connection loss
+- 🖥️ Multi-server quick switch — one-click switching in sidebar with independent session states
 -  Multi-server concurrent management — each session operates independently without blocking others
 
 ###  File Management
