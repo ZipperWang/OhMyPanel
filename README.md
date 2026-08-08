@@ -70,6 +70,20 @@ If you have any suggestions or feedback, feel free to share them in [GitHub Disc
 | macOS | 6 MB +|
 | Linux | 6 MB + |
 
+## 📥 Download
+
+| Platform | Download |
+|----------|----------|
+| Windows  | [Download for Windows](https://github.com/gna1280072/LeePanel/releases) |
+| macOS    | [Download for macOS](https://github.com/gna1280072/LeePanel/releases) |
+| Linux    | [Download for Linux](https://github.com/gna1280072/LeePanel/releases) |
+
+<p align="center">
+  <a href="https://github.com/gna1280072/LeePanel/releases">
+    <img src="https://img.shields.io/badge/Download-Latest%20Version-2da44e?style=for-the-badge&logo=github" alt="Download Latest">
+  </a>
+</p>
+
 ## 🖥️ Supported Servers
 > 🖥️ All features are currently tested on **Ubuntu** / **Debian**. More distributions coming soon, stay tuned...
 
