@@ -22,7 +22,7 @@
 
 LeePanel — Free and open-source, the next-generation Linux server management panel.
 
-LeePanel 是一款开源的桌面端 Linux 服务器管理面板，所有操作通过本地 SSH 完成、服务器上零安装零残留，从根本上消除了传统web面板的安全风险。
+LeePanel 是一款开源的Linux服务器管理面板桌面端软件，所有操作通过本地 SSH 完成、服务器上零安装零残留，从根本上消除了传统web面板的安全风险。
 
 Traditional Linux/VPS control panels frequently suffer from security vulnerabilities, causing endless headaches for server administrators.
 

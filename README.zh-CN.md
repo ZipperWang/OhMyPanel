@@ -20,7 +20,7 @@
 
 [English](README.md) | [📥 下载软件](https://github.com/gna1280072/LeePanel/releases)
 
-LeePanel — 免费开源，下一代 Linux 服务器管理面板。
+LeePanel — 免费开源，下一代 Linux 服务器管理面板软件。
 
 传统 Linux/VPS 管理面板频繁曝出安全漏洞，令服务器管理员苦不堪言。
 
