@@ -1,3 +1,7 @@
+# ponytail: keep build artifacts on D: (target dir moved off the system drive)
+[build]
+target-dir = "D:/LeePanel-target"
+
 # ponytail: build speed tuning
 # To enable lld fast linker: winget install LLVM.LLVM, then uncomment below
 # [target.x86_64-pc-windows-msvc]
