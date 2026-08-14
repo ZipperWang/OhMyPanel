@@ -6644,6 +6644,8 @@ body.dragging-files * {
 
 .docker-tab-content {
   min-height: 200px;
+  display: flex;
+  flex-direction: column;
 }
 
 .docker-loading, .docker-empty, .docker-status-loading {
@@ -6713,10 +6715,15 @@ body.dragging-files * {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  margin-bottom: 10px;
+  margin-top: 10px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+.docker-tab-content > .docker-table {
+  flex: 1;
+  align-self: flex-start;
+  width: 100%;
 }
 .docker-batch-count {
   display: flex;

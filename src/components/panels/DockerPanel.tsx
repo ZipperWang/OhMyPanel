@@ -533,38 +533,6 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
           {/* Containers Tab */}
           {activeTab === 'containers' && (
             <div className="docker-tab-content">
-              {selectedIds.size > 0 && (
-                <div className="docker-batch-bar">
-                  <span className="docker-batch-count">
-                    {t('dockerPanel.selectedCount', { count: selectedIds.size })}
-                    <button className="docker-batch-clear" onClick={clearSelection} disabled={batchRunning}>✕</button>
-                  </span>
-                  <button
-                    className="docker-btn"
-                    onClick={() => handleBatchAction('stop')}
-                    disabled={batchRunning || eligibleIds('stop').length === 0}
-                    title={t('dockerPanel.stop')}
-                  >
-                    ⏹ {t('dockerPanel.batchStop')}
-                  </button>
-                  <button
-                    className="docker-btn"
-                    onClick={() => handleBatchAction('pause')}
-                    disabled={batchRunning || eligibleIds('pause').length === 0}
-                    title={t('dockerPanel.pause')}
-                  >
-                    ⏸ {t('dockerPanel.batchPause')}
-                  </button>
-                  <button
-                    className="docker-btn danger"
-                    onClick={() => setBatchDeleteConfirm(true)}
-                    disabled={batchRunning}
-                  >
-                    🗑 {t('dockerPanel.batchDelete')}
-                  </button>
-                  {batchRunning && <span className="docker-action-loading">...</span>}
-                </div>
-              )}
               {containersLoading && containers.length === 0 ? (
                 <div className="docker-loading">{t('dockerPanel.loadingContainers')}</div>
               ) : containers.length === 0 ? (
@@ -624,6 +592,40 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
                   ))}
                 </div>
               )}
+
+              {/* Batch bar — always visible, bottom-left of the containers tab */}
+              <div className="docker-batch-bar">
+                {selectedIds.size > 0 && (
+                  <span className="docker-batch-count">
+                    {t('dockerPanel.selectedCount', { count: selectedIds.size })}
+                    <button className="docker-batch-clear" onClick={clearSelection} disabled={batchRunning}>✕</button>
+                  </span>
+                )}
+                <button
+                  className="docker-btn"
+                  onClick={() => handleBatchAction('stop')}
+                  disabled={batchRunning || selectedIds.size === 0 || eligibleIds('stop').length === 0}
+                  title={t('dockerPanel.stop')}
+                >
+                  ⏹ {t('dockerPanel.batchStop')}
+                </button>
+                <button
+                  className="docker-btn"
+                  onClick={() => handleBatchAction('pause')}
+                  disabled={batchRunning || selectedIds.size === 0 || eligibleIds('pause').length === 0}
+                  title={t('dockerPanel.pause')}
+                >
+                  ⏸ {t('dockerPanel.batchPause')}
+                </button>
+                <button
+                  className="docker-btn danger"
+                  onClick={() => setBatchDeleteConfirm(true)}
+                  disabled={batchRunning || selectedIds.size === 0}
+                >
+                  🗑 {t('dockerPanel.batchDelete')}
+                </button>
+                {batchRunning && <span className="docker-action-loading">...</span>}
+              </div>
             </div>
           )}
 
