@@ -2,10 +2,12 @@ mod config;
 mod db;
 mod server;
 mod ssh;
+mod tunnel;
 mod commands;
 
 use rusqlite::Connection as SqliteConn;
 use ssh::SshManager;
+use tunnel::TunnelManager;
 use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::Mutex as AsyncMutex;
@@ -34,6 +36,9 @@ pub fn run() {
         .setup(|app| {
             let ssh_mgr = Arc::new(AsyncMutex::new(SshManager::new()));
             app.manage(ssh_mgr);
+
+            let tunnel_mgr = Arc::new(AsyncMutex::new(TunnelManager::new()));
+            app.manage(tunnel_mgr);
 
             // Initialize SQLite database
             let db = db::init_db().expect("Failed to initialize database");
@@ -120,6 +125,9 @@ pub fn run() {
             // Custom Software
             commands::server_ops::custom_software_list, commands::server_ops::custom_software_add, commands::server_ops::custom_software_remove, commands::server_ops::custom_software_action,
             commands::server_ops::server_check_installation,
+            // Tunnels
+            commands::tunnel::tunnel_create, commands::tunnel::tunnel_close,
+            commands::tunnel::tunnel_list, commands::tunnel::tunnel_get,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

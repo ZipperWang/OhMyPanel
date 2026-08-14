@@ -141,11 +141,42 @@
     "ssl": "SSL",
     "monitor": "监控",
     "firewall": "防火墙",
+    "tunnel": "隧道",
     "bbr": "BBR 加速",
     "docker": "Docker",
     "update": "更新",
     "settings": "设置",
     "discussions": "讨论"
+  },
+  "tunnel": {
+    "title": "SSH 隧道",
+    "create": "创建隧道",
+    "type": "隧道类型",
+    "types": {
+      "local": "本地转发",
+      "remote": "远程转发",
+      "dynamic": "动态转发 (SOCKS5)"
+    },
+    "localHost": "本地地址",
+    "localPort": "本地端口",
+    "remoteHost": "远程地址",
+    "remotePort": "远程端口",
+    "activeTunnels": "活跃隧道",
+    "notConnected": "请先连接服务器",
+    "portRequired": "端口为必填项",
+    "quickActions": "快捷操作 - 转发常用服务：",
+    "quick": {
+      "mysql": "MySQL",
+      "redis": "Redis",
+      "postgres": "PostgreSQL",
+      "mongodb": "MongoDB"
+    },
+    "desc": {
+      "local": "将本地端口通过 SSH 服务器转发到远程服务。例如：在本地访问远程 MySQL 数据库。",
+      "remote": "将本地服务暴露给远程服务器。服务器将监听指定端口并将流量转发到本地。",
+      "dynamic": "在本地创建 SOCKS5 代理。所有流量将通过 SSH 服务器路由。"
+    },
+    "empty": "暂无活跃隧道，创建一个开始使用吧！"
   },
   "dockerPanel": {
     "runContainer": "运行容器",

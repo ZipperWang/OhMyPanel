@@ -141,11 +141,42 @@
     "ssl": "SSL",
     "monitor": "Monitor",
     "firewall": "Firewall",
+    "tunnel": "Tunnel",
     "bbr": "BBR Acceleration",
     "docker": "Docker",
     "update": "Update",
     "settings": "Settings",
     "discussions": "Discussions"
+  },
+  "tunnel": {
+    "title": "SSH Tunnels",
+    "create": "Create Tunnel",
+    "type": "Tunnel Type",
+    "types": {
+      "local": "Local Forward",
+      "remote": "Remote Forward",
+      "dynamic": "Dynamic (SOCKS5)"
+    },
+    "localHost": "Local Host",
+    "localPort": "Local Port",
+    "remoteHost": "Remote Host",
+    "remotePort": "Remote Port",
+    "activeTunnels": "Active Tunnels",
+    "notConnected": "Please connect to a server first",
+    "portRequired": "Port is required",
+    "quickActions": "Quick Actions - Forward common services:",
+    "quick": {
+      "mysql": "MySQL",
+      "redis": "Redis",
+      "postgres": "PostgreSQL",
+      "mongodb": "MongoDB"
+    },
+    "desc": {
+      "local": "Forward a local port to a remote service through the SSH server. Example: Access remote MySQL on your local machine.",
+      "remote": "Expose a local service to the remote server. The server will listen on the specified port and forward traffic to your local machine.",
+      "dynamic": "Create a SOCKS5 proxy on your local machine. All traffic will be routed through the SSH server."
+    },
+    "empty": "No active tunnels. Create one to get started!"
   },
   "dockerPanel": {
     "runContainer": "Run Container",
