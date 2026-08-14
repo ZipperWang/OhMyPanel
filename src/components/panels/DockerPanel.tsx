@@ -604,7 +604,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
                 <button
                   className="docker-btn"
                   onClick={() => handleBatchAction('stop')}
-                  disabled={batchRunning || selectedIds.size === 0 || eligibleIds('stop').length === 0}
+                  disabled={batchRunning}
                   title={t('dockerPanel.stop')}
                 >
                   ⏹ {t('dockerPanel.batchStop')}
@@ -612,15 +612,21 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
                 <button
                   className="docker-btn"
                   onClick={() => handleBatchAction('pause')}
-                  disabled={batchRunning || selectedIds.size === 0 || eligibleIds('pause').length === 0}
+                  disabled={batchRunning}
                   title={t('dockerPanel.pause')}
                 >
                   ⏸ {t('dockerPanel.batchPause')}
                 </button>
                 <button
                   className="docker-btn danger"
-                  onClick={() => setBatchDeleteConfirm(true)}
-                  disabled={batchRunning || selectedIds.size === 0}
+                  onClick={() => {
+                    if (selectedIds.size === 0) {
+                      setError(t('dockerPanel.batchNoEligible'))
+                      return
+                    }
+                    setBatchDeleteConfirm(true)
+                  }}
+                  disabled={batchRunning}
                 >
                   🗑 {t('dockerPanel.batchDelete')}
                 </button>
