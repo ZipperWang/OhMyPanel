@@ -3186,7 +3186,7 @@ body.dragging-files * {
 }
 
 .sp-nav-item.active {
-  background: #1f2937;
+  background: var(--bg-subtle);
   color: var(--accent);
   border-left: 3px solid var(--accent);
   padding-left: 13px;
