@@ -51,6 +51,8 @@
     "warning": "Warnung",
     "info": "Info",
     "copy": "Kopieren",
+    "copied": "Kopiert",
+    "creating": "Wird erstellt...",
     "cut": "Ausschneiden",
     "paste": "Einfügen",
     "rename": "Umbenennen",
@@ -142,10 +144,51 @@
     "monitor": "Monitor",
     "firewall": "Firewall",
     "bbr": "BBR-Beschleunigung",
+    "tunnel": "Tunnel",
     "docker": "Docker",
     "update": "Update",
     "settings": "Einstellungen",
     "discussions": "Diskussionen"
+  },
+  "tunnel": {
+    "title": "SSH-Tunnel",
+    "create": "Tunnel erstellen",
+    "type": "Tunneltyp",
+    "types": {
+      "local": "Lokale Weiterleitung",
+      "remote": "Remote-Weiterleitung",
+      "dynamic": "Dynamisch (SOCKS5)"
+    },
+    "localHost": "Lokaler Host",
+    "localPort": "Lokaler Port",
+    "remoteHost": "Remote-Host",
+    "remotePort": "Remote-Port",
+    "activeTunnels": "Aktive Tunnel",
+    "notConnected": "Bitte zuerst mit einem Server verbinden",
+    "portRequired": "Port ist erforderlich",
+    "invalidPort": "Ungültiger Port (1-65535)",
+    "portInUse": "Port wird bereits von einem anderen Tunnel verwendet",
+    "remotePortRequired": "Remote-Port ist erforderlich",
+    "invalidRemotePort": "Ungültiger Remote-Port (1-65535)",
+    "usageHint": "Verbinden mit",
+    "active": "aktiv",
+    "mapping": "Zuordnung",
+    "created": "Tunnel erstellt",
+    "closed": "Tunnel geschlossen",
+    "quickActions": "Schnellaktionen - Häufige Dienste weiterleiten:",
+    "quick": {
+      "mysql": "MySQL",
+      "redis": "Redis",
+      "postgres": "PostgreSQL",
+      "mongodb": "MongoDB"
+    },
+    "desc": {
+      "local": "Leitet einen lokalen Port über den SSH-Server an einen Remote-Dienst weiter. Beispiel: Zugriff auf Remote-MySQL vom lokalen Rechner.",
+      "remote": "Macht einen lokalen Dienst auf dem Remote-Server verfügbar. Der Server lauscht am angegebenen Port und leitet den Datenverkehr an Ihren lokalen Rechner weiter.",
+      "dynamic": "Erstellt einen SOCKS5-Proxy auf Ihrem lokalen Rechner. Der gesamte Datenverkehr wird über den SSH-Server geleitet."
+    },
+    "empty": "Keine aktiven Tunnel. Erstellen Sie einen, um zu beginnen!",
+    "emptyHint": "Mit den Schnellaktionen oben können Sie häufige Dienste wie MySQL, Redis usw. schnell weiterleiten."
   },
   "dockerPanel": {
     "runContainer": "Container ausführen",

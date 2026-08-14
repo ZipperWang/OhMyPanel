@@ -51,6 +51,8 @@
     "warning": "경고",
     "info": "정보",
     "copy": "복사",
+    "copied": "복사됨",
+    "creating": "생성 중...",
     "cut": "잘라내기",
     "paste": "붙여넣기",
     "rename": "이름 변경",
@@ -142,10 +144,51 @@
     "monitor": "모니터",
     "firewall": "방화벽",
     "bbr": "BBR 가속",
+    "tunnel": "터널",
     "docker": "Docker",
     "update": "업데이트",
     "settings": "설정",
     "discussions": "토론"
+  },
+  "tunnel": {
+    "title": "SSH 터널",
+    "create": "터널 만들기",
+    "type": "터널 유형",
+    "types": {
+      "local": "로컬 전달",
+      "remote": "원격 전달",
+      "dynamic": "동적 전달 (SOCKS5)"
+    },
+    "localHost": "로컬 주소",
+    "localPort": "로컬 포트",
+    "remoteHost": "원격 주소",
+    "remotePort": "원격 포트",
+    "activeTunnels": "활성 터널",
+    "notConnected": "먼저 서버에 연결하세요",
+    "portRequired": "포트는 필수입니다",
+    "invalidPort": "잘못된 포트 (1-65535)",
+    "portInUse": "이 포트는 다른 터널이 사용 중입니다",
+    "remotePortRequired": "원격 포트는 필수입니다",
+    "invalidRemotePort": "잘못된 원격 포트 (1-65535)",
+    "usageHint": "연결 명령",
+    "active": "개 활성",
+    "mapping": "매핑",
+    "created": "터널이 생성되었습니다",
+    "closed": "터널이 종료되었습니다",
+    "quickActions": "빠른 작업 - 일반 서비스 전달:",
+    "quick": {
+      "mysql": "MySQL",
+      "redis": "Redis",
+      "postgres": "PostgreSQL",
+      "mongodb": "MongoDB"
+    },
+    "desc": {
+      "local": "로컬 포트를 SSH 서버를 통해 원격 서비스로 전달합니다. 예: 로컬에서 원격 MySQL 접속.",
+      "remote": "로컬 서비스를 원격 서버에 노출합니다. 서버가 지정된 포트에서 수신하고 트래픽을 로컬로 전달합니다.",
+      "dynamic": "로컬에 SOCKS5 프록시를 만듭니다. 모든 트래픽이 SSH 서버를 통해 라우팅됩니다."
+    },
+    "empty": "활성 터널이 없습니다. 하나 만들어 시작하세요!",
+    "emptyHint": "위의 빠른 작업으로 MySQL, Redis 등 일반 서비스를 빠르게 전달할 수 있습니다."
   },
   "dockerPanel": {
     "runContainer": "컨테이너 실행",

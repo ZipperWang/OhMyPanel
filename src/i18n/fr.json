@@ -51,6 +51,8 @@
     "warning": "Avertissement",
     "info": "Info",
     "copy": "Copier",
+    "copied": "Copié",
+    "creating": "Création...",
     "cut": "Couper",
     "paste": "Coller",
     "rename": "Renommer",
@@ -142,10 +144,51 @@
     "monitor": "Moniteur",
     "firewall": "Pare-feu",
     "bbr": "Accélération BBR",
+    "tunnel": "Tunnel",
     "docker": "Docker",
     "update": "Mise à jour",
     "settings": "Paramètres",
     "discussions": "Discussions"
+  },
+  "tunnel": {
+    "title": "Tunnels SSH",
+    "create": "Créer un tunnel",
+    "type": "Type de tunnel",
+    "types": {
+      "local": "Transfert local",
+      "remote": "Transfert distant",
+      "dynamic": "Dynamique (SOCKS5)"
+    },
+    "localHost": "Hôte local",
+    "localPort": "Port local",
+    "remoteHost": "Hôte distant",
+    "remotePort": "Port distant",
+    "activeTunnels": "Tunnels actifs",
+    "notConnected": "Veuillez d'abord vous connecter à un serveur",
+    "portRequired": "Le port est requis",
+    "invalidPort": "Port invalide (1-65535)",
+    "portInUse": "Port déjà utilisé par un autre tunnel",
+    "remotePortRequired": "Le port distant est requis",
+    "invalidRemotePort": "Port distant invalide (1-65535)",
+    "usageHint": "Se connecter avec",
+    "active": "actif(s)",
+    "mapping": "Mappage",
+    "created": "Tunnel créé",
+    "closed": "Tunnel fermé",
+    "quickActions": "Actions rapides - Transférer des services courants :",
+    "quick": {
+      "mysql": "MySQL",
+      "redis": "Redis",
+      "postgres": "PostgreSQL",
+      "mongodb": "MongoDB"
+    },
+    "desc": {
+      "local": "Transfère un port local vers un service distant via le serveur SSH. Exemple : accéder à un MySQL distant depuis votre machine locale.",
+      "remote": "Expose un service local au serveur distant. Le serveur écoute sur le port spécifié et transfère le trafic vers votre machine locale.",
+      "dynamic": "Crée un proxy SOCKS5 sur votre machine locale. Tout le trafic est routé via le serveur SSH."
+    },
+    "empty": "Aucun tunnel actif. Créez-en un pour commencer !",
+    "emptyHint": "Utilisez les actions rapides ci-dessus pour transférer des services courants comme MySQL, Redis, etc."
   },
   "dockerPanel": {
     "runContainer": "Exécuter le conteneur",

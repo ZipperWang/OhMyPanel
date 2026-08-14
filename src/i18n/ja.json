@@ -51,6 +51,8 @@
     "warning": "警告",
     "info": "情報",
     "copy": "コピー",
+    "copied": "コピーしました",
+    "creating": "作成中...",
     "cut": "切り取り",
     "paste": "貼り付け",
     "rename": "名前変更",
@@ -142,10 +144,51 @@
     "monitor": "モニター",
     "firewall": "ファイアウォール",
     "bbr": "BBR 高速化",
+    "tunnel": "トンネル",
     "docker": "Docker",
     "update": "アップデート",
     "settings": "設定",
     "discussions": "ディスカッション"
+  },
+  "tunnel": {
+    "title": "SSH トンネル",
+    "create": "トンネルを作成",
+    "type": "トンネルタイプ",
+    "types": {
+      "local": "ローカル転送",
+      "remote": "リモート転送",
+      "dynamic": "動的転送 (SOCKS5)"
+    },
+    "localHost": "ローカルホスト",
+    "localPort": "ローカルポート",
+    "remoteHost": "リモートホスト",
+    "remotePort": "リモートポート",
+    "activeTunnels": "アクティブなトンネル",
+    "notConnected": "先にサーバーに接続してください",
+    "portRequired": "ポートは必須です",
+    "invalidPort": "無効なポート (1-65535)",
+    "portInUse": "このポートは他のトンネルが使用中です",
+    "remotePortRequired": "リモートポートは必須です",
+    "invalidRemotePort": "無効なリモートポート (1-65535)",
+    "usageHint": "接続コマンド",
+    "active": "件アクティブ",
+    "mapping": "マッピング",
+    "created": "トンネルを作成しました",
+    "closed": "トンネルを閉じました",
+    "quickActions": "クイック操作 - 一般的なサービスを転送：",
+    "quick": {
+      "mysql": "MySQL",
+      "redis": "Redis",
+      "postgres": "PostgreSQL",
+      "mongodb": "MongoDB"
+    },
+    "desc": {
+      "local": "ローカルポートを SSH サーバー経由でリモートサービスに転送します。例：ローカルからリモートの MySQL にアクセス。",
+      "remote": "ローカルサービスをリモートサーバーに公開します。サーバーが指定ポートをリッスンし、トラフィックをローカルに転送します。",
+      "dynamic": "ローカルに SOCKS5 プロキシを作成します。すべてのトラフィックが SSH サーバー経由でルーティングされます。"
+    },
+    "empty": "アクティブなトンネルがありません。作成して開始しましょう！",
+    "emptyHint": "上のクイック操作で MySQL、Redis などの一般的なサービスを素早く転送できます。"
   },
   "dockerPanel": {
     "runContainer": "コンテナを実行",

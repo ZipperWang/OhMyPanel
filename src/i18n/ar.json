@@ -51,6 +51,8 @@
     "warning": "تحذير",
     "info": "معلومات",
     "copy": "نسخ",
+    "copied": "تم النسخ",
+    "creating": "جارٍ الإنشاء...",
     "cut": "قص",
     "paste": "لصق",
     "rename": "إعادة تسمية",
@@ -142,10 +144,51 @@
     "monitor": "المراقبة",
     "firewall": "جدار الحماية",
     "bbr": "تسريع BBR",
+    "tunnel": "النفق",
     "docker": "Docker",
     "update": "تحديث",
     "settings": "الإعدادات",
     "discussions": "المناقشات"
+  },
+  "tunnel": {
+    "title": "أنفاق SSH",
+    "create": "إنشاء نفق",
+    "type": "نوع النفق",
+    "types": {
+      "local": "توجيه محلي",
+      "remote": "توجيه بعيد",
+      "dynamic": "ديناميكي (SOCKS5)"
+    },
+    "localHost": "المضيف المحلي",
+    "localPort": "المنفذ المحلي",
+    "remoteHost": "المضيف البعيد",
+    "remotePort": "المنفذ البعيد",
+    "activeTunnels": "الأنفاق النشطة",
+    "notConnected": "يرجى الاتصال بالخادم أولاً",
+    "portRequired": "المنفذ مطلوب",
+    "invalidPort": "منفذ غير صالح (1-65535)",
+    "portInUse": "المنفذ مستخدم بالفعل من نفق آخر",
+    "remotePortRequired": "المنفذ البعيد مطلوب",
+    "invalidRemotePort": "منفذ بعيد غير صالح (1-65535)",
+    "usageHint": "الاتصال باستخدام",
+    "active": "نشط",
+    "mapping": "التخطيط",
+    "created": "تم إنشاء النفق",
+    "closed": "تم إغلاق النفق",
+    "quickActions": "إجراءات سريعة - توجيه الخدمات الشائعة:",
+    "quick": {
+      "mysql": "MySQL",
+      "redis": "Redis",
+      "postgres": "PostgreSQL",
+      "mongodb": "MongoDB"
+    },
+    "desc": {
+      "local": "يوجه منفذًا محليًا إلى خدمة بعيدة عبر خادم SSH. مثال: الوصول إلى MySQL البعيد من جهازك المحلي.",
+      "remote": "يكشف خدمة محلية للخادم البعيد. سيستمع الخادم إلى المنفذ المحدد ويوجه الحركة إلى جهازك المحلي.",
+      "dynamic": "ينشئ وكيل SOCKS5 على جهازك المحلي. سيتم توجيه كل الحركة عبر خادم SSH."
+    },
+    "empty": "لا توجد أنفاق نشطة. أنشئ واحدًا للبدء!",
+    "emptyHint": "استخدم الإجراءات السريعة أعلاه لتوجيه الخدمات الشائعة مثل MySQL وRedis وغيرها."
   },
   "dockerPanel": {
     "runContainer": "تشغيل الحاوية",

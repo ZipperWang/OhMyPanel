@@ -51,6 +51,8 @@
     "warning": "Aviso",
     "info": "Informação",
     "copy": "Copiar",
+    "copied": "Copiado",
+    "creating": "Criando...",
     "cut": "Recortar",
     "paste": "Colar",
     "rename": "Renomear",
@@ -142,10 +144,51 @@
     "monitor": "Monitor",
     "firewall": "Firewall",
     "bbr": "Aceleração BBR",
+    "tunnel": "Túnel",
     "docker": "Docker",
     "update": "Atualização",
     "settings": "Configurações",
     "discussions": "Discussões"
+  },
+  "tunnel": {
+    "title": "Túneis SSH",
+    "create": "Criar Túnel",
+    "type": "Tipo de Túnel",
+    "types": {
+      "local": "Encaminhamento Local",
+      "remote": "Encaminhamento Remoto",
+      "dynamic": "Dinâmico (SOCKS5)"
+    },
+    "localHost": "Host Local",
+    "localPort": "Porta Local",
+    "remoteHost": "Host Remoto",
+    "remotePort": "Porta Remota",
+    "activeTunnels": "Túneis Ativos",
+    "notConnected": "Conecte-se a um servidor primeiro",
+    "portRequired": "A porta é obrigatória",
+    "invalidPort": "Porta inválida (1-65535)",
+    "portInUse": "Porta já em uso por outro túnel",
+    "remotePortRequired": "A porta remota é obrigatória",
+    "invalidRemotePort": "Porta remota inválida (1-65535)",
+    "usageHint": "Conectar usando",
+    "active": "ativo(s)",
+    "mapping": "Mapeamento",
+    "created": "Túnel criado",
+    "closed": "Túnel fechado",
+    "quickActions": "Ações Rápidas - Encaminhar serviços comuns:",
+    "quick": {
+      "mysql": "MySQL",
+      "redis": "Redis",
+      "postgres": "PostgreSQL",
+      "mongodb": "MongoDB"
+    },
+    "desc": {
+      "local": "Encaminha uma porta local para um serviço remoto através do servidor SSH. Exemplo: acessar o MySQL remoto na sua máquina local.",
+      "remote": "Expõe um serviço local ao servidor remoto. O servidor ouvirá na porta especificada e encaminhará o tráfego para a sua máquina local.",
+      "dynamic": "Cria um proxy SOCKS5 na sua máquina local. Todo o tráfego será roteado pelo servidor SSH."
+    },
+    "empty": "Nenhum túnel ativo. Crie um para começar!",
+    "emptyHint": "Use as ações rápidas acima para encaminhar serviços comuns como MySQL, Redis, etc."
   },
   "dockerPanel": {
     "runContainer": "Executar contêiner",

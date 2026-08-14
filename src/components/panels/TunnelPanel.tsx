@@ -20,13 +20,6 @@ interface TunnelPanelProps {
 
 type TunnelType = 'local' | 'remote' | 'dynamic'
 
-interface QuickAction {
-  label: string
-  remotePort: number
-  icon: string
-  command?: string
-}
-
 export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
   const { t } = useTranslation()
   const [tunnels, setTunnels] = useState<TunnelInfo[]>([])
@@ -38,6 +31,7 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
   const [remotePort, setRemotePort] = useState('')
   const [creating, setCreating] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
@@ -46,10 +40,9 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
       setLoading(true)
       const result = await invoke<string>('tunnel_list')
       const allTunnels: TunnelInfo[] = JSON.parse(result)
-      // Filter tunnels for current session
       setTunnels(allTunnels.filter(t => t.session_id === sessionId))
     } catch (e) {
-      console.error('Failed to load tunnels:', e)
+      setError(String(e))
     } finally {
       setLoading(false)
     }
@@ -58,15 +51,8 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
   useEffect(() => {
     loadTunnels()
 
-    // Listen for tunnel events
-    const unlistenCreated = listen('tunnel-created', () => {
-      loadTunnels()
-    })
-
-    const unlistenStatus = listen<{ tunnelId: string; status: string; message?: string }>('tunnel-status', () => {
-      loadTunnels()
-    })
-
+    const unlistenCreated = listen('tunnel-created', () => loadTunnels())
+    const unlistenStatus = listen('tunnel-status', () => loadTunnels())
     const unlistenError = listen<{ tunnelId: string; error: string }>('tunnel-error', (event) => {
       setError(event.payload.error)
     })
@@ -78,51 +64,28 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
     }
   }, [sessionId, loadTunnels])
 
-  // Validate port number
   const isValidPort = (port: string): boolean => {
     const num = parseInt(port)
     return !isNaN(num) && num >= 1 && num <= 65535
   }
 
-  // Check if port is already in use by another tunnel
-  const isPortInUse = (port: number, excludeId?: string): boolean => {
-    return tunnels.some(t => 
-      t.local_port === port && 
-      t.local_host === localHost && 
-      t.id !== excludeId
-    )
-  }
+  const isPortInUse = (port: number): boolean =>
+    tunnels.some(t => t.local_port === port && t.local_host === localHost)
 
   const handleCreate = async () => {
     if (!sessionId) return
-    
-    // Validation
-    if (!localPort) {
-      setError(t('tunnel.portRequired'))
-      return
-    }
-    
-    if (!isValidPort(localPort)) {
+
+    if (!localPort || !isValidPort(localPort)) {
       setError(t('tunnel.invalidPort'))
       return
     }
-
-    const localPortNum = parseInt(localPort)
-    
-    if (isPortInUse(localPortNum)) {
+    if (isPortInUse(parseInt(localPort))) {
       setError(t('tunnel.portInUse'))
       return
     }
-
-    if (tunnelType !== 'dynamic') {
-      if (!remotePort) {
-        setError(t('tunnel.remotePortRequired'))
-        return
-      }
-      if (!isValidPort(remotePort)) {
-        setError(t('tunnel.invalidRemotePort'))
-        return
-      }
+    if (tunnelType !== 'dynamic' && (!remotePort || !isValidPort(remotePort))) {
+      setError(t('tunnel.invalidRemotePort'))
+      return
     }
 
     setCreating(true)
@@ -133,10 +96,11 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
         sessionId,
         tunnelType,
         localHost,
-        localPort: localPortNum,
+        localPort: parseInt(localPort),
         remoteHost: tunnelType === 'dynamic' ? '' : remoteHost,
         remotePort: tunnelType === 'dynamic' ? 0 : parseInt(remotePort),
       })
+      setMsg(t('tunnel.created'))
       setShowCreate(false)
       resetForm()
       loadTunnels()
@@ -150,6 +114,7 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
   const handleClose = async (tunnelId: string) => {
     try {
       await invoke('tunnel_close', { tunnelId })
+      setMsg(t('tunnel.closed'))
       loadTunnels()
     } catch (e) {
       setError(String(e))
@@ -157,13 +122,12 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
   }
 
   const handleCopy = async (tunnel: TunnelInfo) => {
-    const text = `${tunnel.local_host}:${tunnel.local_port}`
     try {
-      await navigator.clipboard.writeText(text)
+      await navigator.clipboard.writeText(`${tunnel.local_host}:${tunnel.local_port}`)
       setCopiedId(tunnel.id)
       setTimeout(() => setCopiedId(null), 2000)
     } catch (e) {
-      console.error('Failed to copy:', e)
+      setError(String(e))
     }
   }
 
@@ -193,7 +157,6 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
     if (tunnel.tunnel_type === 'dynamic') {
       return `export ALL_PROXY=socks5://${tunnel.local_host}:${tunnel.local_port}`
     }
-    // Detect service type by port
     const portCommands: Record<number, string> = {
       3306: `mysql -h ${tunnel.local_host} -P ${tunnel.local_port} -u root -p`,
       5432: `psql -h ${tunnel.local_host} -p ${tunnel.local_port} -U postgres`,
@@ -203,11 +166,11 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
     return portCommands[tunnel.remote_port] || `${tunnel.local_host}:${tunnel.local_port}`
   }
 
-  const getQuickActions = (): QuickAction[] => [
-    { label: t('tunnel.quick.mysql'), remotePort: 3306, icon: '🗄', command: 'mysql -h 127.0.0.1 -P 3306 -u root -p' },
-    { label: t('tunnel.quick.redis'), remotePort: 6379, icon: '⚡', command: 'redis-cli -h 127.0.0.1 -p 6379' },
-    { label: t('tunnel.quick.postgres'), remotePort: 5432, icon: '🐘', command: 'psql -h 127.0.0.1 -p 5432 -U postgres' },
-    { label: t('tunnel.quick.mongodb'), remotePort: 27017, icon: '🍃', command: 'mongosh "mongodb://127.0.0.1:27017"' },
+  const quickActions = [
+    { label: t('tunnel.quick.mysql'), port: 3306 },
+    { label: t('tunnel.quick.redis'), port: 6379 },
+    { label: t('tunnel.quick.postgres'), port: 5432 },
+    { label: t('tunnel.quick.mongodb'), port: 27017 },
   ]
 
   const handleQuickAction = (port: number) => {
@@ -219,266 +182,285 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
     setShowCreate(true)
   }
 
-  const getTunnelTypeIcon = (type: string) => {
+  const getTypeColor = (type: string): string => {
     switch (type) {
-      case 'local': return '📥'
-      case 'remote': return '📤'
-      case 'dynamic': return '🔄'
-      default: return '🔌'
+      case 'local': return '#2196F3'
+      case 'remote': return '#FF9800'
+      case 'dynamic': return '#9C27B0'
+      default: return '#666'
     }
   }
 
   if (!sessionId) {
     return (
-      <div className="p-4 text-center text-gray-500">
-        {t('tunnel.notConnected')}
+      <div className="panel-container">
+        <div className="panel-header">
+          <h2>{t('tunnel.title')}</h2>
+        </div>
+        <div className="alert alert-error">{t('tunnel.notConnected')}</div>
       </div>
     )
   }
 
+  const canSubmit = localPort !== '' && isValidPort(localPort) && !isPortInUse(parseInt(localPort)) &&
+    (tunnelType === 'dynamic' || (remotePort !== '' && isValidPort(remotePort)))
+
   return (
-    <div className="p-4 space-y-4">
+    <div className="panel-container">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-            {t('tunnel.title')}
-          </h2>
-          {loading && (
-            <span className="text-xs text-gray-400">{t('common.loading')}</span>
+      <div className="panel-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <h2>{t('tunnel.title')}</h2>
+          {tunnels.length > 0 && (
+            <span style={{ fontSize: '12px', color: '#3fb950', fontWeight: 'bold' }}>
+              {tunnels.length} {t('tunnel.active')}
+            </span>
           )}
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={loadTunnels}
-            className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-            title={t('common.refresh')}
-          >
-            🔄
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn-secondary" onClick={loadTunnels} disabled={loading}>
+            {t('common.refresh')}
           </button>
-          <button
-            onClick={() => { setShowCreate(!showCreate); resetForm() }}
-            className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-          >
-            {showCreate ? t('common.cancel') : t('tunnel.create')}
+          <button className="btn-primary" onClick={() => { resetForm(); setShowCreate(true) }}>
+            {t('tunnel.create')}
           </button>
         </div>
       </div>
 
-      {/* Quick Actions - Always visible */}
-      {!showCreate && (
-        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-            {t('tunnel.quickActions')}
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {getQuickActions().map(action => (
-              <button
-                key={action.remotePort}
-                onClick={() => handleQuickAction(action.remotePort)}
-                className="flex items-center gap-2 px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
-              >
-                <span>{action.icon}</span>
-                <span>{action.label}</span>
-                <span className="text-gray-400 text-xs">:{action.remotePort}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+      {/* Messages */}
+      {msg && (
+        <div className="alert alert-success">{msg}</div>
+      )}
+      {error && (
+        <div className="alert alert-error">{error}</div>
       )}
 
-      {/* Create Form */}
+      {/* Quick Actions */}
+      <div className="toolbar">
+        <span style={{ fontSize: '13px', color: '#8b949e', whiteSpace: 'nowrap' }}>
+          {t('tunnel.quickActions')}
+        </span>
+        {quickActions.map(action => (
+          <button
+            key={action.port}
+            className="btn-secondary"
+            onClick={() => handleQuickAction(action.port)}
+          >
+            {action.label} <span style={{ color: '#8b949e' }}>:{action.port}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Tunnel Table */}
+      <div className="table-wrapper">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>{t('common.status')}</th>
+              <th>{t('tunnel.type')}</th>
+              <th>{t('tunnel.mapping')}</th>
+              <th>{t('tunnel.usageHint')}</th>
+              <th>{t('common.actions')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={5} style={{ textAlign: 'center', padding: '2rem' }}>
+                  {t('common.loading')}
+                </td>
+              </tr>
+            ) : tunnels.length === 0 ? (
+              <tr>
+                <td colSpan={5} style={{ textAlign: 'center', padding: '2rem' }}>
+                  <div>{t('tunnel.empty')}</div>
+                  <div style={{ fontSize: '12px', color: '#8b949e', marginTop: '4px' }}>
+                    {t('tunnel.emptyHint')}
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              tunnels.map(tunnel => (
+                <tr key={tunnel.id}>
+                  <td>
+                    <span style={{
+                      display: 'inline-block',
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      backgroundColor: tunnel.status === 'active' ? '#3fb950' : '#8b949e',
+                      marginRight: '6px',
+                    }} />
+                    {tunnel.status}
+                  </td>
+                  <td>
+                    <span style={{
+                      display: 'inline-block',
+                      padding: '2px 8px',
+                      borderRadius: '3px',
+                      backgroundColor: getTypeColor(tunnel.tunnel_type),
+                      color: '#fff',
+                      fontSize: '12px',
+                    }}>
+                      {t(`tunnel.types.${tunnel.tunnel_type}`)}
+                    </span>
+                  </td>
+                  <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                    {getTunnelDescription(tunnel)}
+                  </td>
+                  <td>
+                    <span
+                      style={{ fontFamily: 'monospace', fontSize: '12px', cursor: 'pointer', color: '#58a6ff' }}
+                      title={t('common.copy')}
+                      onClick={() => handleCopy(tunnel)}
+                    >
+                      {copiedId === tunnel.id ? '✓' : getConnectionCommand(tunnel)}
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      className="action-link"
+                      onClick={() => handleCopy(tunnel)}
+                    >
+                      {copiedId === tunnel.id ? t('common.copied') : t('common.copy')}
+                    </button>
+                    <button
+                      className="action-link danger"
+                      onClick={() => handleClose(tunnel.id)}
+                    >
+                      {t('common.close')}
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Create Dialog */}
       {showCreate && (
-        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-4">
-          {/* Tunnel Type */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t('tunnel.type')}
-            </label>
-            <div className="flex gap-2">
-              {(['local', 'remote', 'dynamic'] as TunnelType[]).map(type => (
-                <button
-                  key={type}
-                  onClick={() => setTunnelType(type)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition-colors ${
-                    tunnelType === type
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'
-                  }`}
-                >
-                  <span>{getTunnelTypeIcon(type)}</span>
-                  <span>{t(`tunnel.types.${type}`)}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+        <div className="modal-overlay" onClick={() => !creating && setShowCreate(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="modal-close-btn"
+              onClick={() => setShowCreate(false)}
+              title="Close"
+            >×</button>
+            <h3>{t('tunnel.create')}</h3>
 
-          {/* Local Settings */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {t('tunnel.localHost')}
-              </label>
-              <input
-                type="text"
-                value={localHost}
-                onChange={e => setLocalHost(e.target.value)}
-                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                placeholder="127.0.0.1"
-              />
+            {/* Tunnel Type */}
+            <div className="form-group">
+              <label>{t('tunnel.type')}:</label>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {(['local', 'remote', 'dynamic'] as TunnelType[]).map(type => (
+                  <button
+                    key={type}
+                    className={tunnelType === type ? 'btn-primary' : 'btn-secondary'}
+                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                    onClick={() => setTunnelType(type)}
+                  >
+                    {t(`tunnel.types.${type}`)}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {t('tunnel.localPort')} *
-              </label>
-              <input
-                type="number"
-                value={localPort}
-                onChange={e => setLocalPort(e.target.value)}
-                min="1"
-                max="65535"
-                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                placeholder="8080"
-              />
-              {localPort && !isValidPort(localPort) && (
-                <p className="text-xs text-red-500 mt-1">{t('tunnel.invalidPort')}</p>
-              )}
-              {localPort && isValidPort(localPort) && isPortInUse(parseInt(localPort)) && (
-                <p className="text-xs text-orange-500 mt-1">{t('tunnel.portInUse')}</p>
-              )}
-            </div>
-          </div>
 
-          {/* Remote Settings (for local/remote tunnels) */}
-          {tunnelType !== 'dynamic' && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  {t('tunnel.remoteHost')}
-                </label>
+            {/* Local Settings */}
+            <div className="form-row">
+              <div className="form-group">
+                <label>{t('tunnel.localHost')}:</label>
                 <input
                   type="text"
-                  value={remoteHost}
-                  onChange={e => setRemoteHost(e.target.value)}
-                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  value={localHost}
+                  onChange={e => setLocalHost(e.target.value)}
+                  className="form-input"
                   placeholder="127.0.0.1"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  {t('tunnel.remotePort')} *
-                </label>
+              <div className="form-group">
+                <label>{t('tunnel.localPort')}:</label>
                 <input
                   type="number"
-                  value={remotePort}
-                  onChange={e => setRemotePort(e.target.value)}
+                  value={localPort}
+                  onChange={e => setLocalPort(e.target.value)}
                   min="1"
                   max="65535"
-                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  className="form-input"
                   placeholder="3306"
                 />
               </div>
             </div>
-          )}
 
-          {/* Description */}
-          <div className="text-xs text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 p-3 rounded border-l-4 border-blue-400">
-            {tunnelType === 'local' && t('tunnel.desc.local')}
-            {tunnelType === 'remote' && t('tunnel.desc.remote')}
-            {tunnelType === 'dynamic' && t('tunnel.desc.dynamic')}
-          </div>
-
-          {/* Error */}
-          {error && (
-            <div className="text-sm text-red-500 bg-red-50 dark:bg-red-900/20 p-2 rounded">
-              ⚠️ {error}
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex gap-2">
-            <button
-              onClick={handleCreate}
-              disabled={creating || !localPort || !isValidPort(localPort) || isPortInUse(parseInt(localPort))}
-              className="px-4 py-1.5 text-sm bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {creating ? t('common.creating') : t('tunnel.create')}
-            </button>
-            <button
-              onClick={() => { setShowCreate(false); resetForm() }}
-              className="px-4 py-1.5 text-sm bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
-            >
-              {t('common.cancel')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Tunnel List */}
-      {tunnels.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">
-            {t('tunnel.activeTunnels')} ({tunnels.length})
-          </h3>
-          {tunnels.map(tunnel => (
-            <div
-              key={tunnel.id}
-              className="p-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg space-y-2"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${
-                    tunnel.status === 'active' ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
-                  }`} />
-                  <span className="text-lg">{getTunnelTypeIcon(tunnel.tunnel_type)}</span>
-                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
-                    {t(`tunnel.types.${tunnel.tunnel_type}`)}
-                  </span>
+            {/* Remote Settings */}
+            {tunnelType !== 'dynamic' && (
+              <div className="form-row">
+                <div className="form-group">
+                  <label>{t('tunnel.remoteHost')}:</label>
+                  <input
+                    type="text"
+                    value={remoteHost}
+                    onChange={e => setRemoteHost(e.target.value)}
+                    className="form-input"
+                    placeholder="127.0.0.1"
+                  />
                 </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => handleCopy(tunnel)}
-                    className="px-2 py-1 text-xs text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
-                    title={t('common.copy')}
-                  >
-                    {copiedId === tunnel.id ? '✓' : '📋'}
-                  </button>
-                  <button
-                    onClick={() => handleClose(tunnel.id)}
-                    className="px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                  >
-                    {t('common.close')}
-                  </button>
+                <div className="form-group">
+                  <label>{t('tunnel.remotePort')}:</label>
+                  <input
+                    type="number"
+                    value={remotePort}
+                    onChange={e => setRemotePort(e.target.value)}
+                    min="1"
+                    max="65535"
+                    className="form-input"
+                    placeholder="3306"
+                  />
                 </div>
               </div>
-              
-              {/* Connection Info */}
-              <div className="text-xs text-gray-500 dark:text-gray-400">
-                <div className="font-mono bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded">
-                  {getTunnelDescription(tunnel)}
-                </div>
-              </div>
+            )}
 
-              {/* Usage Hint */}
-              {tunnel.tunnel_type !== 'remote' && (
-                <div className="text-xs text-gray-400 dark:text-gray-500">
-                  <span className="text-gray-500 dark:text-gray-400">💡 {t('tunnel.usageHint')}:</span>
-                  <code className="ml-1 font-mono bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-gray-700 dark:text-gray-300">
-                    {getConnectionCommand(tunnel)}
-                  </code>
-                </div>
-              )}
+            {/* Inline validation hints */}
+            {localPort && !isValidPort(localPort) && (
+              <div style={{ color: '#f85149', fontSize: '12px' }}>{t('tunnel.invalidPort')}</div>
+            )}
+            {localPort && isValidPort(localPort) && isPortInUse(parseInt(localPort)) && (
+              <div style={{ color: '#d29922', fontSize: '12px' }}>{t('tunnel.portInUse')}</div>
+            )}
+
+            {/* Description */}
+            <div style={{
+              fontSize: '12px',
+              color: '#8b949e',
+              background: '#0d1117',
+              border: '1px solid #30363d',
+              borderRadius: '6px',
+              padding: '10px 12px',
+            }}>
+              {t(`tunnel.desc.${tunnelType}`)}
             </div>
-          ))}
-        </div>
-      )}
 
-      {/* Empty State */}
-      {!showCreate && tunnels.length === 0 && (
-        <div className="text-center py-8 text-gray-400">
-          <div className="text-4xl mb-2">🔌</div>
-          <p className="text-sm">{t('tunnel.empty')}</p>
-          <p className="text-xs mt-2 text-gray-400">{t('tunnel.emptyHint')}</p>
+            {error && (
+              <div className="alert alert-error" style={{ marginBottom: 0 }}>{error}</div>
+            )}
+
+            <div className="modal-actions">
+              <button
+                className="btn-secondary"
+                onClick={() => setShowCreate(false)}
+                disabled={creating}
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleCreate}
+                disabled={creating || !canSubmit}
+              >
+                {creating ? t('common.creating') : t('tunnel.create')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

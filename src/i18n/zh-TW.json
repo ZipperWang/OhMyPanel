@@ -51,6 +51,8 @@
     "warning": "警告",
     "info": "提示",
     "copy": "複製",
+    "copied": "已複製",
+    "creating": "建立中...",
     "cut": "剪下",
     "paste": "貼上",
     "rename": "重新命名",
@@ -142,10 +144,51 @@
     "monitor": "監控",
     "firewall": "防火牆",
     "bbr": "BBR 加速",
+    "tunnel": "隧道",
     "docker": "Docker",
     "update": "更新",
     "settings": "設定",
     "discussions": "討論"
+  },
+  "tunnel": {
+    "title": "SSH 隧道",
+    "create": "建立隧道",
+    "type": "隧道類型",
+    "types": {
+      "local": "本機轉發",
+      "remote": "遠端轉發",
+      "dynamic": "動態轉發 (SOCKS5)"
+    },
+    "localHost": "本機位址",
+    "localPort": "本機埠",
+    "remoteHost": "遠端位址",
+    "remotePort": "遠端埠",
+    "activeTunnels": "使用中隧道",
+    "notConnected": "請先連線到伺服器",
+    "portRequired": "埠為必填欄位",
+    "invalidPort": "無效埠 (1-65535)",
+    "portInUse": "該埠已被其他隧道使用",
+    "remotePortRequired": "遠端埠為必填欄位",
+    "invalidRemotePort": "無效遠端埠 (1-65535)",
+    "usageHint": "連線指令",
+    "active": "個使用中",
+    "mapping": "對應",
+    "created": "隧道已建立",
+    "closed": "隧道已關閉",
+    "quickActions": "快捷操作 - 轉發常用服務：",
+    "quick": {
+      "mysql": "MySQL",
+      "redis": "Redis",
+      "postgres": "PostgreSQL",
+      "mongodb": "MongoDB"
+    },
+    "desc": {
+      "local": "將本機埠透過 SSH 伺服器轉發到遠端服務。例如：在本機存取遠端 MySQL 資料庫。",
+      "remote": "將本機服務暴露給遠端伺服器。伺服器將監聽指定埠並將流量轉發到本機。",
+      "dynamic": "在本機建立 SOCKS5 代理。所有流量將透過 SSH 伺服器路由。"
+    },
+    "empty": "暫無使用中隧道，建立一個開始使用吧！",
+    "emptyHint": "使用上方快捷操作可快速轉發 MySQL、Redis 等常用服務。"
   },
   "dockerPanel": {
     "runContainer": "執行容器",
