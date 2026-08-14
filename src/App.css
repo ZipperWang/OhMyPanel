@@ -6732,7 +6732,6 @@ body.dragging-files * {
   font-size: 12px;
   font-weight: 600;
   color: var(--accent);
-  margin-right: auto;
   white-space: nowrap;
 }
 .docker-batch-clear {

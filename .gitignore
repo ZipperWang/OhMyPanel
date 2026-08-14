@@ -45,6 +45,9 @@ src-tauri/.cargo/config.toml
 # Qoder AI assistant
 .qoder/
 
+# WorkBuddy workspace data (memory, skills, etc.)
+.workbuddy/
+
 # Documentation
 docs/
 
