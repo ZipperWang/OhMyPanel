@@ -6771,6 +6771,14 @@ pub struct DockerContainer {
     pub created: String,
 }
 
+/// Per-container outcome of a batch operation, so the UI can list success/failure details.
+#[derive(Serialize, Clone, Debug)]
+pub struct DockerBatchResult {
+    pub id: String,
+    pub ok: bool,
+    pub message: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DockerImage {
     pub id: String,
@@ -7181,6 +7189,83 @@ pub async fn docker_container_remove(
         return Err(format!("Failed to remove container: {}", err));
     }
     Ok(format!("Container {} removed successfully", safe_id))
+}
+
+/// Batch action on multiple containers (start/stop/restart/pause/unpause).
+/// Executes per-container so each result is reported individually instead of
+/// docker's fail-fast multi-arg behavior aborting the whole batch.
+pub async fn docker_container_batch_action(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    container_ids: Vec<String>,
+    action: &str,
+) -> Result<Vec<DockerBatchResult>, String> {
+    let valid_actions = ["start", "stop", "restart", "pause", "unpause"];
+    if !valid_actions.contains(&action) {
+        return Err(format!("Invalid action: {}", action));
+    }
+
+    let mut results = Vec::with_capacity(container_ids.len());
+    for id in container_ids {
+        let safe_id = id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
+        if safe_id.is_empty() {
+            results.push(DockerBatchResult { id, ok: false, message: "Invalid container id".into() });
+            continue;
+        }
+        let cmd = format!("docker {} {}", action, safe_id);
+        let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 30).await?;
+        if code > 0 {
+            let err = if !stderr.trim().is_empty() {
+                stderr.trim().to_string()
+            } else if !stdout.trim().is_empty() {
+                stdout.trim().to_string()
+            } else {
+                format!("Command failed with exit code {}", code)
+            };
+            results.push(DockerBatchResult { id: safe_id.clone(), ok: false, message: err });
+        } else {
+            results.push(DockerBatchResult { id: safe_id, ok: true, message: format!("{}ed", action) });
+        }
+    }
+    Ok(results)
+}
+
+/// Batch remove multiple containers (docker rm [-f]).
+pub async fn docker_container_batch_remove(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    container_ids: Vec<String>,
+    force: bool,
+) -> Result<Vec<DockerBatchResult>, String> {
+    let mut results = Vec::with_capacity(container_ids.len());
+    for id in container_ids {
+        let safe_id = id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
+        if safe_id.is_empty() {
+            results.push(DockerBatchResult { id, ok: false, message: "Invalid container id".into() });
+            continue;
+        }
+        let cmd = if force {
+            format!("docker rm -f {}", safe_id)
+        } else {
+            format!("docker rm {}", safe_id)
+        };
+        let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 30).await?;
+        if code > 0 {
+            let err = if !stderr.trim().is_empty() {
+                stderr.trim().to_string()
+            } else if !stdout.trim().is_empty() {
+                stdout.trim().to_string()
+            } else {
+                format!("Command failed with exit code {}", code)
+            };
+            results.push(DockerBatchResult { id: safe_id.clone(), ok: false, message: err });
+        } else {
+            results.push(DockerBatchResult { id: safe_id, ok: true, message: "removed".into() });
+        }
+    }
+    Ok(results)
 }
 
 /// Commit a container to a new image

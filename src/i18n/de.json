@@ -205,6 +205,16 @@
     }
   },
   "dockerPanel": {
+    "selectAll": "Alle auswählen",
+    "selectedCount": "{{count}} ausgewählt",
+    "batchStop": "Stoppen",
+    "batchPause": "Pausieren",
+    "batchDelete": "Löschen",
+    "batchDeleteTitle": "Container löschen",
+    "batchDeleteConfirmMsg": "{{count}} ausgewählte Container löschen? ({{running}} laufende werden erzwungen entfernt)",
+    "batchResultTitle": "Ergebnis der Stapeloperation",
+    "batchNoEligible": "Keiner der ausgewählten Container unterstützt diese Aktion",
+
     "runContainer": "Container ausführen",
     "notInstalled": "Docker ist nicht installiert. Bitte gehen Sie zum Software-Repository, um es zu installieren.",
     "goToSoftware": "Zum Software-Repository",

@@ -205,6 +205,16 @@
     }
   },
   "dockerPanel": {
+    "selectAll": "تحديد الكل",
+    "selectedCount": "تم تحديد {{count}}",
+    "batchStop": "إيقاف",
+    "batchPause": "إيقاف مؤقت",
+    "batchDelete": "حذف",
+    "batchDeleteTitle": "حذف الحاويات",
+    "batchDeleteConfirmMsg": "حذف {{count}} حاوية محددة؟ (سيتم حذف {{running}} قيد التشغيل قسرًا)",
+    "batchResultTitle": "نتيجة العملية المجمعة",
+    "batchNoEligible": "لا يمكن تنفيذ هذا الإجراء على أي من الحاويات المحددة",
+
     "runContainer": "تشغيل الحاوية",
     "notInstalled": "Docker غير مُثبَّت. يرجى الذهاب إلى مستودع البرمجيات لتثبيته.",
     "goToSoftware": "الذهاب إلى مستودع البرمجيات",

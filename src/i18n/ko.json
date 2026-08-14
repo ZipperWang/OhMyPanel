@@ -205,6 +205,16 @@
     }
   },
   "dockerPanel": {
+    "selectAll": "모두 선택",
+    "selectedCount": "{{count}}개 선택됨",
+    "batchStop": "일괄 중지",
+    "batchPause": "일괄 일시정지",
+    "batchDelete": "일괄 삭제",
+    "batchDeleteTitle": "컨테이너 일괄 삭제",
+    "batchDeleteConfirmMsg": "선택한 {{count}}개 컨테이너를 삭제하시겠습니까? (실행 중 {{running}}개는 강제 삭제됩니다)",
+    "batchResultTitle": "일괄 작업 결과",
+    "batchNoEligible": "선택한 컨테이너 중 이 작업을 실행할 수 있는 항목이 없습니다",
+
     "runContainer": "컨테이너 실행",
     "notInstalled": "Docker가 설치되지 않았습니다. 소프트웨어 저장소에서 설치하세요.",
     "goToSoftware": "소프트웨어 저장소로 이동",

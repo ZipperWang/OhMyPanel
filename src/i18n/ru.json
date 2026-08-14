@@ -205,6 +205,16 @@
     }
   },
   "dockerPanel": {
+    "selectAll": "Выбрать все",
+    "selectedCount": "Выбрано: {{count}}",
+    "batchStop": "Остановить",
+    "batchPause": "Пауза",
+    "batchDelete": "Удалить",
+    "batchDeleteTitle": "Удаление контейнеров",
+    "batchDeleteConfirmMsg": "Удалить {{count}} выбранных контейнеров? ({{running}} запущенных будут принудительно удалены)",
+    "batchResultTitle": "Результат пакетной операции",
+    "batchNoEligible": "Ни один из выбранных контейнеров не поддерживает это действие",
+
     "runContainer": "Запустить контейнер",
     "notInstalled": "Docker не установлен. Перейдите в репозиторий ПО для установки.",
     "goToSoftware": "Перейти к репозиторию ПО",

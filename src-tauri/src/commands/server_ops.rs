@@ -642,6 +642,34 @@ pub async fn server_docker_container_remove(
 }
 
 #[tauri::command]
+pub async fn server_docker_container_batch_action(
+    ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
+    session_id: &str,
+    container_ids: Vec<String>,
+    action: &str,
+) -> Result<Vec<server::DockerBatchResult>, String> {
+    let mgr = ssh_mgr.lock().await;
+    let session = mgr.get_session(session_id)?;
+    let cache = mgr.cache.clone();
+    drop(mgr);
+    server::docker_container_batch_action(&session, &cache, session_id, container_ids, action).await
+}
+
+#[tauri::command]
+pub async fn server_docker_container_batch_remove(
+    ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
+    session_id: &str,
+    container_ids: Vec<String>,
+    force: bool,
+) -> Result<Vec<server::DockerBatchResult>, String> {
+    let mgr = ssh_mgr.lock().await;
+    let session = mgr.get_session(session_id)?;
+    let cache = mgr.cache.clone();
+    drop(mgr);
+    server::docker_container_batch_remove(&session, &cache, session_id, container_ids, force).await
+}
+
+#[tauri::command]
 pub async fn server_docker_container_logs(
     ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
     session_id: &str,

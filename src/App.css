@@ -6694,6 +6694,90 @@ body.dragging-files * {
 .docker-col-ports { flex: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 11px; }
 .docker-col-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
 
+/* Batch selection column */
+.docker-col-check { flex: 0 0 28px; display: flex; align-items: center; }
+.docker-checkbox {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
+}
+.docker-table-row.selected {
+  background: var(--accent-soft, rgba(88, 166, 255, 0.08));
+}
+
+/* Batch operation bar */
+.docker-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.docker-batch-count {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-right: auto;
+  white-space: nowrap;
+}
+.docker-batch-clear {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.docker-batch-clear:hover {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+/* Batch result dialog list */
+.docker-batch-result-list {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0;
+}
+.docker-batch-result-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: monospace;
+}
+.docker-batch-result-item.ok {
+  color: var(--green);
+  background: var(--green-soft);
+}
+.docker-batch-result-item.fail {
+  color: var(--red);
+  background: var(--red-soft);
+}
+.docker-batch-result-status { flex: 0 0 14px; font-weight: 700; }
+.docker-batch-result-id { flex: 0 0 auto; opacity: 0.8; }
+.docker-batch-result-msg {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Image columns */
 .docker-col-repo { flex: 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .docker-col-tag { flex: 1; color: var(--accent); }

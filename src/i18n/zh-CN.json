@@ -205,6 +205,16 @@
     }
   },
   "dockerPanel": {
+    "selectAll": "全选",
+    "selectedCount": "已选 {{count}} 个",
+    "batchStop": "批量停止",
+    "batchPause": "批量暂停",
+    "batchDelete": "批量删除",
+    "batchDeleteTitle": "批量删除容器",
+    "batchDeleteConfirmMsg": "确定删除选中的 {{count}} 个容器？（其中 {{running}} 个运行中，将强制删除）",
+    "batchResultTitle": "批量操作结果",
+    "batchNoEligible": "选中的容器中没有可执行该操作的容器",
+
     "runContainer": "运行容器",
     "notInstalled": "Docker 未安装，请前往软件仓库安装。",
     "goToSoftware": "前往软件仓库",

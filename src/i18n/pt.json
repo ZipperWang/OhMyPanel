@@ -205,6 +205,16 @@
     }
   },
   "dockerPanel": {
+    "selectAll": "Selecionar tudo",
+    "selectedCount": "{{count}} selecionado(s)",
+    "batchStop": "Parar",
+    "batchPause": "Pausar",
+    "batchDelete": "Excluir",
+    "batchDeleteTitle": "Excluir contêineres",
+    "batchDeleteConfirmMsg": "Excluir {{count}} contêiner(es) selecionado(s)? ({{running}} em execução serão forçados)",
+    "batchResultTitle": "Resultado da operação em lote",
+    "batchNoEligible": "Nenhum dos contêineres selecionados pode executar esta ação",
+
     "runContainer": "Executar contêiner",
     "notInstalled": "Docker não está instalado. Vá ao repositório de software para instalá-lo.",
     "goToSoftware": "Ir ao repositório de software",

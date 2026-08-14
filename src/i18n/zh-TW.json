@@ -205,6 +205,16 @@
     }
   },
   "dockerPanel": {
+    "selectAll": "全選",
+    "selectedCount": "已選 {{count}} 個",
+    "batchStop": "批次停止",
+    "batchPause": "批次暫停",
+    "batchDelete": "批次刪除",
+    "batchDeleteTitle": "批次刪除容器",
+    "batchDeleteConfirmMsg": "確定刪除選中的 {{count}} 個容器？（其中 {{running}} 個執行中，將強制刪除）",
+    "batchResultTitle": "批次操作結果",
+    "batchNoEligible": "選中的容器中沒有可執行此操作的容器",
+
     "runContainer": "執行容器",
     "notInstalled": "Docker 未安裝，請前往軟體庫安裝。",
     "goToSoftware": "前往軟體庫",

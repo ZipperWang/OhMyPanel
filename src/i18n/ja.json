@@ -205,6 +205,16 @@
     }
   },
   "dockerPanel": {
+    "selectAll": "すべて選択",
+    "selectedCount": "{{count}} 件選択中",
+    "batchStop": "一括停止",
+    "batchPause": "一括一時停止",
+    "batchDelete": "一括削除",
+    "batchDeleteTitle": "コンテナを一括削除",
+    "batchDeleteConfirmMsg": "選択した {{count}} 個のコンテナを削除しますか？（実行中 {{running}} 個は強制削除されます）",
+    "batchResultTitle": "一括操作結果",
+    "batchNoEligible": "選択したコンテナにこの操作を実行できるものはありません",
+
     "runContainer": "コンテナを実行",
     "notInstalled": "Docker がインストールされていません。ソフトウェアリポジトリからインストールしてください。",
     "goToSoftware": "ソフトウェアリポジトリへ",
