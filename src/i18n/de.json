@@ -151,7 +151,7 @@
     "discussions": "Diskussionen"
   },
   "tunnel": {
-    "title": "SSH-Tunnel",
+    "title": "SSH-Tunnel (Intranet-Penetration) New~",
     "create": "Tunnel erstellen",
     "type": "Tunneltyp",
     "types": {
@@ -165,6 +165,12 @@
     "remotePort": "Remote-Port",
     "activeTunnels": "Aktive Tunnel",
     "notConnected": "Bitte zuerst mit einem Server verbinden",
+    "whatIs": "Ein SSH-Tunnel ist eine verschlüsselte „private Leitung“ zwischen Ihrem PC und dem Server — keine zusätzlichen Firewall-Ports nötig. Die drei Typen unten decken die drei häufigsten Bedürfnisse ab:",
+    "scenario": {
+      "local": "Dienste des Servers vom PC aus nutzen (am häufigsten). Datenbanken wie MySQL/Redis lehnen externe Verbindungen meist ab. Die lokale Weiterleitung „holt sie auf Ihren PC“: Nach der Erstellung erreicht ein Tool, das sich mit 127.0.0.1:3306 verbindet, die Server-Datenbank wie eine lokale. Z. B. Navicat verwaltet das MySQL des Servers.",
+      "remote": "Dem Server (oder anderen) Zugriff auf einen Dienst auf Ihrem PC geben — ideal für Demos. Der Server lauscht auf einem Port; Besuch von ServerIP:Port erreicht Ihren lokalen Dienst. Z. B. einem Kollegen die Dev-Website auf Ihrem Laptop zeigen.",
+      "dynamic": "Den Server in einen sicheren Proxy für Ihren Datenverkehr verwandeln. Proxy von Browser/App auf socks5://127.0.0.1:lokalerPort setzen; alle Anfragen laufen durch den verschlüsselten Tunnel. Z. B. interne Systeme erreichen, die nur im Servernetz erreichbar sind."
+    },
     "portRequired": "Port ist erforderlich",
     "invalidPort": "Ungültiger Port (1-65535)",
     "portInUse": "Port wird bereits von einem anderen Tunnel verwendet",
@@ -175,7 +181,7 @@
     "mapping": "Zuordnung",
     "created": "Tunnel erstellt",
     "closed": "Tunnel geschlossen",
-    "quickActions": "Schnellaktionen - Häufige Dienste weiterleiten:",
+    "quickActions": "Ein-Klick-Vorlagen (am häufigsten: Datenbank des Servers auf den PC holen):",
     "quick": {
       "mysql": "MySQL",
       "redis": "Redis",
@@ -183,12 +189,20 @@
       "mongodb": "MongoDB"
     },
     "desc": {
-      "local": "Leitet einen lokalen Port über den SSH-Server an einen Remote-Dienst weiter. Beispiel: Zugriff auf Remote-MySQL vom lokalen Rechner.",
-      "remote": "Macht einen lokalen Dienst auf dem Remote-Server verfügbar. Der Server lauscht am angegebenen Port und leitet den Datenverkehr an Ihren lokalen Rechner weiter.",
-      "dynamic": "Erstellt einen SOCKS5-Proxy auf Ihrem lokalen Rechner. Der gesamte Datenverkehr wird über den SSH-Server geleitet."
+      "local": "Holt einen Server-Dienst auf Ihren PC. Nach der Erstellung erreicht Software, die sich mit lokalerHost:lokalerPort verbindet, tatsächlich remoteHost:remotePort auf dem Server. Typisch: MySQL des Servers mit Navicat verwalten.",
+      "remote": "Macht einen Dienst auf Ihrem PC für den Server verfügbar. Der Server lauscht auf remotePort; ServerIP:remotePort verbindet zu Ihrem lokalen Dienst. Typisch: einem Kollegen eine lokale Website demonstrieren.",
+      "dynamic": "Startet einen SOCKS5-Proxy auf Ihrem PC. Browser-Proxy auf 127.0.0.1:lokalerPort setzen; der Verkehr läuft durch den verschlüsselten Tunnel. Typisch: Systeme erreichen, die nur im Servernetz erreichbar sind."
     },
     "empty": "Keine aktiven Tunnel. Erstellen Sie einen, um zu beginnen!",
-    "emptyHint": "Mit den Schnellaktionen oben können Sie häufige Dienste wie MySQL, Redis usw. schnell weiterleiten."
+    "emptyHint": "Nutzen Sie eine Ein-Klick-Vorlage oben — z. B. MySQL weiterleiten, dann mit Navicat zu 127.0.0.1:3306 verbinden.",
+    "errors": {
+      "connectFailed": "Der Server kann {{target}} nicht erreichen. Prüfen Sie: ① Läuft der Dienst auf dem Server? ② Ist der Port korrekt? (führen Sie `ss -tlnp` im Server-Terminal aus) ③ Ist die Remote-Adresse korrekt? (Dienste lauschen meist auf 127.0.0.1 — nicht die öffentliche IP verwenden)",
+      "prohibited": "Der Server hat die Kanalweiterleitung verweigert ({{target}}). Wahrscheinliche Ursache: SSH-Weiterleitung ist in sshd_config deaktiviert (AllowTcpForwarding no) — bitten Sie den Server-Administrator, sie zu aktivieren",
+      "localConnectFailed": "Der Server kann Ihren lokalen Dienst {{target}} nicht erreichen. Prüfen Sie: Läuft er? Lauscht er auf 127.0.0.1 oder 0.0.0.0? Ist der Port korrekt?",
+      "socks4": "Der Client hat SOCKS4-Datenverkehr gesendet (erstes Byte 0x04). Stellen Sie das Proxy-Protokoll auf SOCKS5 um — verwenden Sie das Präfix socks5:// (manche Apps behandeln socks:// als SOCKS4)",
+      "httpProxy": "Der Client hat HTTP-Proxy-Datenverkehr gesendet. Stellen Sie den Proxy-Typ auf SOCKS5 um. Hinweis: Die Windows-Systemproxyeinstellungen unterstützen kein SOCKS5 — konfigurieren Sie socks5://127.0.0.1:Port im Browser bzw. in der App",
+      "badGreeting": "Nicht erkennbare Verbindungsdaten ({{detail}}). Stellen Sie sicher, dass der Client-Proxy-Typ SOCKS5 ist"
+    }
   },
   "dockerPanel": {
     "runContainer": "Container ausführen",

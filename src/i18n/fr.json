@@ -151,7 +151,7 @@
     "discussions": "Discussions"
   },
   "tunnel": {
-    "title": "Tunnels SSH",
+    "title": "Tunnels SSH (pénétration d'intranet) New~",
     "create": "Créer un tunnel",
     "type": "Type de tunnel",
     "types": {
@@ -165,6 +165,12 @@
     "remotePort": "Port distant",
     "activeTunnels": "Tunnels actifs",
     "notConnected": "Veuillez d'abord vous connecter à un serveur",
+    "whatIs": "Un tunnel SSH est un « tuyau privé » chiffré qui relie en toute sécurité votre PC au serveur — aucun port supplémentaire à ouvrir dans le pare-feu. Les trois types ci-dessous couvrent les trois besoins les plus courants :",
+    "scenario": {
+      "local": "Utiliser un service du serveur depuis votre PC (le plus courant). Les bases de données comme MySQL/Redis refusent généralement les connexions extérieures. Le transfert local les « amène sur votre PC » : après création, connectez-vous à 127.0.0.1:3306 et vous accédez à la base du serveur comme si elle était locale. Ex. : gérer le MySQL du serveur avec Navicat.",
+      "remote": "Permettre au serveur (ou à d'autres) d'atteindre un service qui tourne sur votre PC — idéal pour les démos. Le serveur écoute sur un port ; visiter IPduserveur:port atteint votre service local. Ex. : montrer à un collègue le site de dev qui tourne sur votre portable.",
+      "dynamic": "Transformez le serveur en proxy sécurisé pour votre trafic. Configurez le proxy de votre navigateur/application sur socks5://127.0.0.1:portlocal ; toutes les requêtes passent par le tunnel chiffré. Ex. : accéder à des systèmes internes uniquement joignables depuis le réseau du serveur."
+    },
     "portRequired": "Le port est requis",
     "invalidPort": "Port invalide (1-65535)",
     "portInUse": "Port déjà utilisé par un autre tunnel",
@@ -175,7 +181,7 @@
     "mapping": "Mappage",
     "created": "Tunnel créé",
     "closed": "Tunnel fermé",
-    "quickActions": "Actions rapides - Transférer des services courants :",
+    "quickActions": "Modèles en un clic (le plus courant : amener la base du serveur sur votre PC) :",
     "quick": {
       "mysql": "MySQL",
       "redis": "Redis",
@@ -183,12 +189,20 @@
       "mongodb": "MongoDB"
     },
     "desc": {
-      "local": "Transfère un port local vers un service distant via le serveur SSH. Exemple : accéder à un MySQL distant depuis votre machine locale.",
-      "remote": "Expose un service local au serveur distant. Le serveur écoute sur le port spécifié et transfère le trafic vers votre machine locale.",
-      "dynamic": "Crée un proxy SOCKS5 sur votre machine locale. Tout le trafic est routé via le serveur SSH."
+      "local": "Amène un service du serveur sur votre PC. Après création, une application de votre PC connectée à hôte local:port local atteint en réalité hôte distant:port distant sur le serveur. Usage typique : gérer le MySQL du serveur avec Navicat.",
+      "remote": "Expose un service de votre PC au serveur. Le serveur écoute sur le port distant ; visiter IPduserveur:portdistant connecte à votre service local. Usage typique : faire une démo d'un site local à un collègue.",
+      "dynamic": "Lance un proxy SOCKS5 sur votre PC. Configurez le proxy du navigateur sur 127.0.0.1:portlocal et votre trafic passe par le tunnel chiffré. Usage typique : accéder à des systèmes uniquement joignables depuis le réseau du serveur."
     },
     "empty": "Aucun tunnel actif. Créez-en un pour commencer !",
-    "emptyHint": "Utilisez les actions rapides ci-dessus pour transférer des services courants comme MySQL, Redis, etc."
+    "emptyHint": "Utilisez un modèle en un clic ci-dessus — ex. transférez MySQL, puis connectez Navicat à 127.0.0.1:3306.",
+    "errors": {
+      "connectFailed": "Le serveur ne peut pas joindre {{target}}. Vérifiez : ① le service est-il démarré sur le serveur ? ② le port est-il correct ? (lancez `ss -tlnp` dans le terminal du serveur) ③ l'adresse distante est-elle correcte ? (les services écoutent généralement sur 127.0.0.1 — n'utilisez pas l'IP publique)",
+      "prohibited": "Le serveur a refusé le transfert du canal ({{target}}). Cause probable : le transfert SSH est désactivé dans sshd_config (AllowTcpForwarding no) — demandez à l'administrateur de l'activer",
+      "localConnectFailed": "Le serveur ne peut pas joindre votre service local {{target}}. Vérifiez : tourne-t-il ? Écoute-t-il sur 127.0.0.1 ou 0.0.0.0 ? Le port est-il correct ?",
+      "socks4": "Le client a envoyé du trafic SOCKS4 (premier octet 0x04). Passez le protocole proxy en SOCKS5 — utilisez le préfixe socks5:// (certaines applications traitent socks:// comme du SOCKS4)",
+      "httpProxy": "Le client a envoyé du trafic proxy HTTP. Passez le type de proxy en SOCKS5. Remarque : les paramètres proxy système de Windows ne prennent pas en charge SOCKS5 — configurez socks5://127.0.0.1:port dans le navigateur ou l'application",
+      "badGreeting": "Données de connexion non reconnues ({{detail}}). Vérifiez que le type de proxy du client est SOCKS5"
+    }
   },
   "dockerPanel": {
     "runContainer": "Exécuter le conteneur",

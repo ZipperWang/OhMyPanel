@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -47,6 +48,63 @@ pub struct TunnelInfo {
     pub remote_host: String,
     pub remote_port: u16,
     pub status: String,
+}
+
+/// Structured tunnel error so the frontend can show a localized message.
+/// `code` is a stable key the UI maps to an i18n string; `target` is the host:port involved.
+pub struct TunnelError {
+    pub code: String,
+    pub target: String,
+    pub raw: String,
+}
+
+impl TunnelError {
+    /// Map a russh channel-open failure to a translatable code.
+    fn from_channel_open(e: &russh::Error, target: String) -> Self {
+        let code = match e {
+            russh::Error::ChannelOpenFailure(russh::ChannelOpenFailure::ConnectFailed) => {
+                "connect_failed"
+            }
+            russh::Error::ChannelOpenFailure(russh::ChannelOpenFailure::AdministrativelyProhibited) => {
+                "prohibited"
+            }
+            _ => "unknown",
+        };
+        Self {
+            code: code.into(),
+            target,
+            raw: e.to_string(),
+        }
+    }
+
+    /// Build an error without a target host:port (used for SOCKS5 greeting failures).
+    fn plain(code: &str, raw: String) -> Self {
+        Self {
+            code: code.into(),
+            target: String::new(),
+            raw,
+        }
+    }
+}
+
+impl From<String> for TunnelError {
+    fn from(s: String) -> Self {
+        Self {
+            code: "unknown".into(),
+            target: String::new(),
+            raw: s,
+        }
+    }
+}
+
+impl From<&str> for TunnelError {
+    fn from(s: &str) -> Self {
+        Self {
+            code: "unknown".into(),
+            target: String::new(),
+            raw: s.into(),
+        }
+    }
 }
 
 /// Manages SSH tunnels
@@ -137,7 +195,7 @@ impl TunnelManager {
     async fn start_local_tunnel(
         &self,
         tunnel_id: String,
-        _session_id: String,
+        session_id: String,
         session: SshSession,
         config: TunnelConfig,
         mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
@@ -166,6 +224,7 @@ impl TunnelManager {
                                 let app_handle = app_handle.clone();
                                 let remote_host = config.remote_host.clone();
                                 let remote_port = config.remote_port;
+                                let session_id = session_id.clone();
 
                                 tokio::spawn(async move {
                                     // Open a direct-tcpip channel
@@ -191,14 +250,22 @@ impl TunnelManager {
                                             {
                                                 let _ = app_handle.emit("tunnel-error", serde_json::json!({
                                                     "tunnelId": tunnel_id,
+                                                    "sessionId": session_id,
                                                     "error": format!("Forward error: {}", e),
                                                 }));
                                             }
                                         }
                                         Err(e) => {
+                                            let err = TunnelError::from_channel_open(
+                                                &e,
+                                                format!("{}:{}", remote_host, remote_port),
+                                            );
                                             let _ = app_handle.emit("tunnel-error", serde_json::json!({
                                                 "tunnelId": tunnel_id,
-                                                "error": format!("Channel open failed: {}", e),
+                                                "sessionId": session_id,
+                                                "code": err.code,
+                                                "target": err.target,
+                                                "error": err.raw,
                                             }));
                                         }
                                     }
@@ -207,6 +274,7 @@ impl TunnelManager {
                             Err(e) => {
                                 let _ = app_handle.emit("tunnel-error", serde_json::json!({
                                     "tunnelId": tunnel_id,
+                                    "sessionId": session_id,
                                     "error": format!("Accept error: {}", e),
                                 }));
                                 break;
@@ -235,7 +303,7 @@ impl TunnelManager {
     async fn start_remote_tunnel(
         &self,
         tunnel_id: String,
-        _session_id: String,
+        session_id: String,
         session: SshSession,
         config: TunnelConfig,
         mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
@@ -274,6 +342,7 @@ impl TunnelManager {
                         let tunnel_id = tunnel_id.clone();
                         let app_handle = app_handle.clone();
                         let local_host = local_host.clone();
+                        let session_id = session_id.clone();
                         tokio::spawn(async move {
                             // Connect to the local service and splice both directions
                             match TcpStream::connect(format!("{}:{}", local_host, local_port)).await {
@@ -282,6 +351,7 @@ impl TunnelManager {
                                     if let Err(e) = Self::forward_bidirectional(&mut local, &mut ch).await {
                                         let _ = app_handle.emit("tunnel-error", serde_json::json!({
                                             "tunnelId": tunnel_id,
+                                            "sessionId": session_id,
                                             "error": format!("Remote forward error: {}", e),
                                         }));
                                     }
@@ -289,6 +359,9 @@ impl TunnelManager {
                                 Err(e) => {
                                     let _ = app_handle.emit("tunnel-error", serde_json::json!({
                                         "tunnelId": tunnel_id,
+                                        "sessionId": session_id,
+                                        "code": "local_connect_failed",
+                                        "target": format!("{}:{}", local_host, local_port),
                                         "error": format!("Local connect failed {}:{}: {}", local_host, local_port, e),
                                     }));
                                 }
@@ -321,7 +394,7 @@ impl TunnelManager {
     async fn start_dynamic_tunnel(
         &self,
         tunnel_id: String,
-        _session_id: String,
+        session_id: String,
         session: SshSession,
         config: TunnelConfig,
         mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
@@ -348,11 +421,15 @@ impl TunnelManager {
                                 let session = session.clone();
                                 let tunnel_id = tunnel_id.clone();
                                 let app_handle = app_handle.clone();
+                                let session_id = session_id.clone();
                                 tokio::spawn(async move {
                                     if let Err(e) = Self::handle_socks5(tcp_stream, session).await {
                                         let _ = app_handle.emit("tunnel-error", serde_json::json!({
                                             "tunnelId": tunnel_id,
-                                            "error": format!("SOCKS5: {}", e),
+                                            "sessionId": session_id,
+                                            "code": e.code,
+                                            "target": e.target,
+                                            "error": e.raw,
                                         }));
                                     }
                                 });
@@ -360,6 +437,7 @@ impl TunnelManager {
                             Err(e) => {
                                 let _ = app_handle.emit("tunnel-error", serde_json::json!({
                                     "tunnelId": tunnel_id,
+                                    "sessionId": session_id,
                                     "error": format!("Accept error: {}", e),
                                 }));
                                 break;
@@ -384,14 +462,42 @@ impl TunnelManager {
 
     /// SOCKS5 handshake + forward. Supports CONNECT with IPv4/domain/IPv6 targets.
     /// ponytail: no-auth method only — matches typical SSH -D usage.
-    async fn handle_socks5(mut tcp: TcpStream, session: SshSession) -> Result<(), String> {
+    async fn handle_socks5(mut tcp: TcpStream, session: SshSession) -> Result<(), TunnelError> {
         // --- greeting: VER NMETHODS METHODS... ---
-        let mut head = [0u8; 2];
-        tcp.read_exact(&mut head).await.map_err(|e| format!("greeting: {}", e))?;
-        if head[0] != 0x05 {
-            return Err("Not a SOCKS5 client".into());
+        // Read VER with a timeout: idle probes (connect-and-hang) can't pile up tasks.
+        let mut ver = [0u8; 1];
+        let read_ok = tokio::time::timeout(Duration::from_secs(10), tcp.read_exact(&mut ver))
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false);
+        if !read_ok {
+            // EOF/reset/idle: probe noise (port scanners, health checks) — close silently.
+            return Ok(());
         }
-        let nmethods = head[1] as usize;
+        if ver[0] != 0x05 {
+            // Classify the wrong-protocol traffic so the UI can give a targeted hint.
+            let first = ver[0];
+            return Err(match first {
+                0x04 => TunnelError::plain("socks4", "client used SOCKS4".into()),
+                b if matches!(
+                    b,
+                    b'G' | b'P' | b'O' | b'H' | b'D' | b'C' | b'T'
+                ) => TunnelError::plain(
+                    "http_proxy",
+                    format!("first byte 0x{:02x} ('{}') — looks like HTTP proxy traffic", b, b as char),
+                ),
+                b => TunnelError::plain(
+                    "bad_greeting",
+                    format!("first byte 0x{:02x} — unrecognized protocol", b),
+                ),
+            });
+        }
+        let mut nm = [0u8; 1];
+        if tcp.read_exact(&mut nm).await.is_err() {
+            // Half handshake (sent VER then disconnected) — also probe noise.
+            return Ok(());
+        }
+        let nmethods = nm[0] as usize;
         let mut methods = vec![0u8; nmethods];
         tcp.read_exact(&mut methods).await.map_err(|e| format!("methods: {}", e))?;
         // Reply: no authentication
@@ -440,7 +546,14 @@ impl TunnelManager {
             .channel_open_direct_tcpip(&host, port, "127.0.0.1", 0)
             .await;
         drop(handle);
-        let mut ch = channel.map_err(|e| format!("channel open: {}", e))?.into_stream();
+        let mut ch = match channel {
+            Ok(ch) => ch.into_stream(),
+            Err(e) => {
+                // Tell the SOCKS5 client: connection refused (matches ssh -D behavior)
+                let _ = tcp.write_all(&[0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await;
+                return Err(TunnelError::from_channel_open(&e, format!("{}:{}", host, port)));
+            }
+        };
 
         // --- success reply ---
         tcp.write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
@@ -448,7 +561,7 @@ impl TunnelManager {
             .map_err(|e| format!("reply: {}", e))?;
 
         // --- bidirectional forward ---
-        Self::forward_bidirectional(&mut tcp, &mut ch).await
+        Self::forward_bidirectional(&mut tcp, &mut ch).await.map_err(Into::into)
     }
 
     /// Forward data bidirectionally between TCP stream and SSH channel

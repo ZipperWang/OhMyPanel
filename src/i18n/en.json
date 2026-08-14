@@ -151,7 +151,7 @@
     "discussions": "Discussions"
   },
   "tunnel": {
-    "title": "SSH Tunnels",
+    "title": "SSH Tunnels (Intranet Penetration) New~",
     "create": "Create Tunnel",
     "type": "Tunnel Type",
     "types": {
@@ -165,6 +165,12 @@
     "remotePort": "Remote Port",
     "activeTunnels": "Active Tunnels",
     "notConnected": "Please connect to a server first",
+    "whatIs": "An SSH tunnel is an encrypted \"private pipe\" between your PC and the server — no extra firewall ports needed. The three types below cover the three most common needs:",
+    "scenario": {
+      "local": "Use a server-side service from your PC (most common). Databases like MySQL/Redis usually refuse outside connections. This \"brings them to your PC\": after creating, your tool connecting to 127.0.0.1:3306 talks to the server's database as if it were local. E.g. Navicat manages the server's MySQL.",
+      "remote": "Let the server (or others) reach a service running on your PC — great for demos and debugging. The server listens on a port; anyone visiting ServerIP:port reaches your local service. E.g. a colleague views the dev website running on your laptop.",
+      "dynamic": "Turn the server into a secure proxy for your traffic. Set your browser/app proxy to socks5://127.0.0.1:localPort; all requests travel through the encrypted tunnel. E.g. access internal systems only reachable from the server's network."
+    },
     "portRequired": "Port is required",
     "invalidPort": "Invalid port (1-65535)",
     "portInUse": "Port already in use by another tunnel",
@@ -175,7 +181,7 @@
     "mapping": "Mapping",
     "created": "Tunnel created",
     "closed": "Tunnel closed",
-    "quickActions": "Quick Actions - Forward common services:",
+    "quickActions": "One-click templates (most common: bring the server's database to your PC):",
     "quick": {
       "mysql": "MySQL",
       "redis": "Redis",
@@ -183,12 +189,20 @@
       "mongodb": "MongoDB"
     },
     "desc": {
-      "local": "Forward a local port to a remote service through the SSH server. Example: Access remote MySQL on your local machine.",
-      "remote": "Expose a local service to the remote server. The server will listen on the specified port and forward traffic to your local machine.",
-      "dynamic": "Create a SOCKS5 proxy on your local machine. All traffic will be routed through the SSH server."
+      "local": "Bring a server-side service to your PC. After creating, software on your PC connecting to localHost:localPort actually reaches remoteHost:remotePort on the server. Typical use: manage the server's MySQL with Navicat.",
+      "remote": "Expose a service on your PC to the server. The server listens on remotePort; anyone visiting ServerIP:remotePort connects to your local service. Typical use: demo a local website to a colleague.",
+      "dynamic": "Run a SOCKS5 proxy on your PC. Set your browser or proxy software to 127.0.0.1:localPort and your traffic flows through the encrypted tunnel. Typical use: access systems only reachable from the server's network."
     },
     "empty": "No active tunnels. Create one to get started!",
-    "emptyHint": "Use quick actions above to forward common services like MySQL, Redis, etc."
+    "emptyHint": "Use a one-click template above — e.g. forward MySQL, then connect with Navicat to 127.0.0.1:3306.",
+    "errors": {
+      "connectFailed": "The server could not reach {{target}}. Check: ① Is the service running on the server? ② Is the port correct? (run `ss -tlnp` in the server terminal) ③ Is the remote address correct? (services usually listen on 127.0.0.1 — don't use the public IP)",
+      "prohibited": "The server refused the channel forward ({{target}}). Likely cause: SSH forwarding is disabled on the server (AllowTcpForwarding no) — ask the server admin to enable it",
+      "localConnectFailed": "The server could not reach your local service {{target}}. Check: is it running? Does it listen on 127.0.0.1 or 0.0.0.0? Is the port correct?",
+      "socks4": "The client sent SOCKS4 traffic (first byte 0x04). Switch the proxy protocol to SOCKS5 — use the socks5:// prefix (some apps treat socks:// as SOCKS4)",
+      "httpProxy": "The client sent HTTP proxy traffic. Switch the proxy type to SOCKS5. Note: Windows system proxy settings don't support SOCKS5 — configure socks5://127.0.0.1:port inside the browser or app",
+      "badGreeting": "Unrecognized connection data ({{detail}}). Make sure the client proxy type is SOCKS5"
+    }
   },
   "dockerPanel": {
     "runContainer": "Run Container",

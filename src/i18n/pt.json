@@ -151,7 +151,7 @@
     "discussions": "Discussões"
   },
   "tunnel": {
-    "title": "Túneis SSH",
+    "title": "Túneis SSH (penetração de intranet) New~",
     "create": "Criar Túnel",
     "type": "Tipo de Túnel",
     "types": {
@@ -165,6 +165,12 @@
     "remotePort": "Porta Remota",
     "activeTunnels": "Túneis Ativos",
     "notConnected": "Conecte-se a um servidor primeiro",
+    "whatIs": "Um túnel SSH é um «cano privado» criptografado que conecta seu PC ao servidor com segurança — sem precisar abrir portas extras no firewall. Os três tipos abaixo cobrem as três necessidades mais comuns:",
+    "scenario": {
+      "local": "Usar um serviço do servidor a partir do seu PC (o mais comum). Bancos como MySQL/Redis normalmente recusam conexões externas. O encaminhamento local os «traz para o seu PC»: após criar, conecte-se a 127.0.0.1:3306 e você acessa o banco do servidor como se fosse local. Ex.: gerenciar o MySQL do servidor com o Navicat.",
+      "remote": "Permitir que o servidor (ou outros) alcancem um serviço rodando no seu PC — ótimo para demonstrações. O servidor escuta em uma porta; visitar IPdoServidor:porta alcança seu serviço local. Ex.: mostrar a um colega o site de dev rodando no seu notebook.",
+      "dynamic": "Transforme o servidor em um proxy seguro para seu tráfego. Configure o proxy do navegador/aplicativo para socks5://127.0.0.1:portaLocal; todas as requisições passam pelo túnel criptografado. Ex.: acessar sistemas internos alcançáveis apenas pela rede do servidor."
+    },
     "portRequired": "A porta é obrigatória",
     "invalidPort": "Porta inválida (1-65535)",
     "portInUse": "Porta já em uso por outro túnel",
@@ -175,7 +181,7 @@
     "mapping": "Mapeamento",
     "created": "Túnel criado",
     "closed": "Túnel fechado",
-    "quickActions": "Ações Rápidas - Encaminhar serviços comuns:",
+    "quickActions": "Modelos de um clique (o mais comum: trazer o banco do servidor para o seu PC):",
     "quick": {
       "mysql": "MySQL",
       "redis": "Redis",
@@ -183,12 +189,20 @@
       "mongodb": "MongoDB"
     },
     "desc": {
-      "local": "Encaminha uma porta local para um serviço remoto através do servidor SSH. Exemplo: acessar o MySQL remoto na sua máquina local.",
-      "remote": "Expõe um serviço local ao servidor remoto. O servidor ouvirá na porta especificada e encaminhará o tráfego para a sua máquina local.",
-      "dynamic": "Cria um proxy SOCKS5 na sua máquina local. Todo o tráfego será roteado pelo servidor SSH."
+      "local": "Traz um serviço do servidor para o seu PC. Após criar, um programa no PC conectado a hostLocal:portaLocal na verdade alcança hostRemoto:portaRemota no servidor. Uso típico: gerenciar o MySQL do servidor com o Navicat.",
+      "remote": "Expõe um serviço do seu PC ao servidor. O servidor escuta em portaRemota; visitar IPdoServidor:portaRemota conecta ao seu serviço local. Uso típico: demonstrar um site local a um colega.",
+      "dynamic": "Executa um proxy SOCKS5 no seu PC. Configure o proxy do navegador para 127.0.0.1:portaLocal e seu tráfego passa pelo túnel criptografado. Uso típico: acessar sistemas alcançáveis apenas pela rede do servidor."
     },
     "empty": "Nenhum túnel ativo. Crie um para começar!",
-    "emptyHint": "Use as ações rápidas acima para encaminhar serviços comuns como MySQL, Redis, etc."
+    "emptyHint": "Use um modelo de um clique acima — ex.: encaminhe o MySQL e conecte o Navicat a 127.0.0.1:3306.",
+    "errors": {
+      "connectFailed": "O servidor não conseguiu alcançar {{target}}. Verifique: ① o serviço está em execução no servidor? ② a porta está correta? (execute `ss -tlnp` no terminal do servidor) ③ o endereço remoto está correto? (os serviços normalmente escutam em 127.0.0.1 — não use o IP público)",
+      "prohibited": "O servidor recusou o encaminhamento do canal ({{target}}). Causa provável: o encaminhamento SSH está desativado no sshd_config (AllowTcpForwarding no) — peça ao administrador para ativá-lo",
+      "localConnectFailed": "O servidor não conseguiu alcançar seu serviço local {{target}}. Verifique: está em execução? Escuta em 127.0.0.1 ou 0.0.0.0? A porta está correta?",
+      "socks4": "O cliente enviou tráfego SOCKS4 (primeiro byte 0x04). Mude o protocolo do proxy para SOCKS5 — use o prefixo socks5:// (alguns apps tratam socks:// como SOCKS4)",
+      "httpProxy": "O cliente enviou tráfego de proxy HTTP. Mude o tipo de proxy para SOCKS5. Observação: as configurações de proxy do sistema Windows não suportam SOCKS5 — configure socks5://127.0.0.1:porta no navegador ou app",
+      "badGreeting": "Dados de conexão não reconhecidos ({{detail}}). Verifique se o tipo de proxy do cliente é SOCKS5"
+    }
   },
   "dockerPanel": {
     "runContainer": "Executar contêiner",

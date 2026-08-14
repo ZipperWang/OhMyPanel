@@ -18,6 +18,14 @@ interface TunnelPanelProps {
   sessionId: string | null
 }
 
+interface TunnelErrorPayload {
+  tunnelId: string
+  error: string
+  code?: string
+  target?: string
+  sessionId?: string
+}
+
 type TunnelType = 'local' | 'remote' | 'dynamic'
 
 export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
@@ -53,8 +61,25 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
 
     const unlistenCreated = listen('tunnel-created', () => loadTunnels())
     const unlistenStatus = listen('tunnel-status', () => loadTunnels())
-    const unlistenError = listen<{ tunnelId: string; error: string }>('tunnel-error', (event) => {
-      setError(event.payload.error)
+    const unlistenError = listen<TunnelErrorPayload>('tunnel-error', (event) => {
+      const { code, target, error, sessionId: errSessionId } = event.payload
+      // Ignore errors from tunnels belonging to other server connections
+      if (errSessionId && errSessionId !== sessionId) return
+      if (code === 'connect_failed' && target) {
+        setError(t('tunnel.errors.connectFailed', { target }))
+      } else if (code === 'prohibited' && target) {
+        setError(t('tunnel.errors.prohibited', { target }))
+      } else if (code === 'local_connect_failed' && target) {
+        setError(t('tunnel.errors.localConnectFailed', { target }))
+      } else if (code === 'socks4') {
+        setError(t('tunnel.errors.socks4'))
+      } else if (code === 'http_proxy') {
+        setError(t('tunnel.errors.httpProxy'))
+      } else if (code === 'bad_greeting') {
+        setError(t('tunnel.errors.badGreeting', { detail: error }))
+      } else {
+        setError(error)
+      }
     })
 
     return () => {
@@ -234,6 +259,19 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
       {error && (
         <div className="alert alert-error">{error}</div>
       )}
+
+      {/* What is a tunnel — plain-language intro */}
+      <div style={{
+        background: '#0d1117',
+        border: '1px solid #30363d',
+        borderRadius: '6px',
+        padding: '12px',
+        marginBottom: '16px',
+      }}>
+        <p style={{ fontSize: '13px', color: '#c9d1d9', margin: '0 0 10px 0', lineHeight: 1.6 }}>
+          💡 {t('tunnel.whatIs')}
+        </p>
+      </div>
 
       {/* Quick Actions */}
       <div className="toolbar">
@@ -436,6 +474,7 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
               border: '1px solid #30363d',
               borderRadius: '6px',
               padding: '10px 12px',
+              lineHeight: 1.7,
             }}>
               {t(`tunnel.desc.${tunnelType}`)}
             </div>
