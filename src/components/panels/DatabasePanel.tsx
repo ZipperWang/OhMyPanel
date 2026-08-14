@@ -698,7 +698,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
       {msg && (
         <div className={`alert ${msg.includes('failed') || msg.includes('Failed') ? 'alert-error' : 'alert-success'}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>{msg}</span>
-          <button onClick={() => setMsg('')} style={{ background: 'none', border: 'none', color: '#8b949e', fontSize: '18px', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }} title="Close">×</button>
+          <button onClick={() => setMsg('')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '18px', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }} title="Close">×</button>
         </div>
       )}
       
@@ -789,7 +789,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                       disabled={!db.password}
                       style={{ opacity: db.password ? 1 : 0.3, cursor: db.password ? 'pointer' : 'not-allowed', fontSize: '14px', lineHeight: 1, padding: '2px 4px' }}
                     >
-                      <span style={visiblePasswords.has(db.name) ? {} : { textDecoration: 'line-through', textDecorationColor: '#f85149', textDecorationThickness: '2px' }}>👁️</span>
+                      <span style={visiblePasswords.has(db.name) ? {} : { textDecoration: 'line-through', textDecorationColor: 'var(--red)', textDecorationThickness: '2px' }}>👁️</span>
                     </button>
                     <button
                       className="icon-btn"
@@ -957,7 +957,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
               <h3 style={{ margin: 0 }}>{t('database.createDatabase')}</h3>
               <button 
                 onClick={() => setShowCreateDialog(false)}
-                style={{ background: 'none', border: 'none', color: '#8b949e', fontSize: '24px', cursor: 'pointer', padding: '0', lineHeight: 1 }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '24px', cursor: 'pointer', padding: '0', lineHeight: 1 }}
                 title="Close"
               >
                 ×
@@ -1072,7 +1072,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                   className="form-input"
                   style={{ minHeight: '100px', resize: 'vertical' as const, fontFamily: 'monospace', fontSize: '13px' }}
                 />
-                <small style={{ color: '#8b949e', fontSize: '12px' }}>
+                <small style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
                   One IP (192.168.1.100) or IP range (192.168.1.% or 10.0.0.0/8) per line
                 </small>
               </div>
@@ -1120,10 +1120,10 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
               title="Close"
             >×</button>
             <h3>{t('database.deleteDatabase')}</h3>
-            <p style={{ color: '#f85149', fontSize: '13px', margin: '8px 0' }}>{t('database.deleteConfirm')} "<strong>{deleteTarget.name}</strong>". {t('common.warning')}!</p>
+            <p style={{ color: 'var(--red)', fontSize: '13px', margin: '8px 0' }}>{t('database.deleteConfirm')} "<strong>{deleteTarget.name}</strong>". {t('common.warning')}!</p>
             
             <div className="form-group">
-              <label style={{ fontSize: '13px' }}>{t('database.databaseName')}: <code style={{ background: '#21262d', padding: '2px 6px', borderRadius: '4px', color: '#f85149' }}>{deleteTarget.name}</code></label>
+              <label style={{ fontSize: '13px' }}>{t('database.databaseName')}: <code style={{ background: 'var(--bg-subtle)', padding: '2px 6px', borderRadius: '4px', color: 'var(--red)' }}>{deleteTarget.name}</code></label>
               <input
                 type="text"
                 value={deleteConfirmName}
@@ -1172,7 +1172,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
               title="Close"
             >×</button>
             <h3>Clear Database</h3>
-            <p style={{ color: '#f85149', fontSize: '13px', margin: '8px 0' }}>This will truncate ALL tables in database "<strong>{clearTarget.name}</strong>". The database and user will be preserved. Type <code style={{ background: '#21262d', padding: '2px 6px', borderRadius: '4px' }}>clear</code> to confirm.</p>
+            <p style={{ color: 'var(--red)', fontSize: '13px', margin: '8px 0' }}>This will truncate ALL tables in database "<strong>{clearTarget.name}</strong>". The database and user will be preserved. Type <code style={{ background: 'var(--bg-subtle)', padding: '2px 6px', borderRadius: '4px' }}>clear</code> to confirm.</p>
             
             <div className="form-group">
               <label style={{ fontSize: '13px' }}>Type "clear" to confirm:</label>
@@ -1279,7 +1279,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
               <h3 style={{ margin: 0 }}>{t('database.accessControl')} - {accessTarget.name}</h3>
               <button 
                 onClick={() => setShowAccessDialog(false)}
-                style={{ background: 'none', border: 'none', color: '#8b949e', fontSize: '24px', cursor: 'pointer', padding: '0', lineHeight: 1 }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '24px', cursor: 'pointer', padding: '0', lineHeight: 1 }}
                 title="Close"
               >
                 ×
@@ -1316,7 +1316,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                   className="form-input"
                   style={{ minHeight: '100px', resize: 'vertical' as const, fontFamily: 'monospace', fontSize: '13px' }}
                 />
-                <small style={{ color: '#8b949e', fontSize: '12px' }}>
+                <small style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
                   One IP (192.168.1.100) or IP range (192.168.1.% or 10.0.0.0/8) per line
                 </small>
               </div>
@@ -1469,16 +1469,16 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
               <h3 style={{ margin: 0 }}>{t('database.backupDatabase')} - {backupTarget}</h3>
             </div>
             
-            <div style={{ marginBottom: '16px', fontSize: '13px', color: '#8b949e' }}>
+            <div style={{ marginBottom: '16px', fontSize: '13px', color: 'var(--text-muted)' }}>
               Backup files are saved in /tmp/db_backups/ on the server (.tar.gz format)
             </div>
             
             {/* Backup list */}
-            <div style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: '16px', border: '1px solid #30363d', borderRadius: '6px' }}>
+            <div style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: '16px', border: '1px solid var(--border)', borderRadius: '6px' }}>
               {loadingBackups ? (
-                <div style={{ textAlign: 'center', padding: '20px', color: '#8b949e' }}>{t('common.loading')}</div>
+                <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>{t('common.loading')}</div>
               ) : backups.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '20px', color: '#8b949e' }}>{t('database.noBackups')}</div>
+                <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>{t('database.noBackups')}</div>
               ) : (
                 <table className="data-table" style={{ margin: 0 }}>
                   <thead>
@@ -1589,7 +1589,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                   style={{ padding: '8px' }}
                 />
                 {selectedFile && (
-                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#8b949e' }}>
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
                     Selected: {selectedFile.name} ({formatBytes(selectedFile.size)})
                   </div>
                 )}
@@ -1598,9 +1598,9 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
               <div className="form-group">
                 <label>{t('database.selectBackup')}:</label>
                 {loadingImportBackups ? (
-                  <div style={{ padding: '12px', textAlign: 'center', color: '#8b949e' }}>{t('common.loading')}</div>
+                  <div style={{ padding: '12px', textAlign: 'center', color: 'var(--text-muted)' }}>{t('common.loading')}</div>
                 ) : importBackups.length === 0 ? (
-                  <div style={{ padding: '12px', textAlign: 'center', color: '#8b949e', border: '1px solid #30363d', borderRadius: '6px' }}>
+                  <div style={{ padding: '12px', textAlign: 'center', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: '6px' }}>
                     {t('database.noBackups')}
                   </div>
                 ) : (
@@ -1620,7 +1620,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
               </div>
             )}
             
-            <div style={{ marginBottom: '16px', padding: '10px', background: '#f8514922', borderRadius: '6px', fontSize: '12px', color: '#f85149' }}>
+            <div style={{ marginBottom: '16px', padding: '10px', background: 'var(--red)22', borderRadius: '6px', fontSize: '12px', color: 'var(--red)' }}>
               ⚠️ {t('common.warning')}: Importing will overwrite existing data.
             </div>
             
@@ -1650,7 +1650,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px', textAlign: 'center' }}>
             <button className="modal-close-btn" onClick={() => setMissingToolModal(false)} title="Close">×</button>
             <div style={{ marginBottom: '16px', fontSize: '16px', fontWeight: 600 }}>{t('files.missingToolTitle')}</div>
-            <div style={{ marginBottom: '20px', fontSize: '13px', color: '#8b949e' }}>
+            <div style={{ marginBottom: '20px', fontSize: '13px', color: 'var(--text-muted)' }}>
               {t('files.missingUnzipTool')}
             </div>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>

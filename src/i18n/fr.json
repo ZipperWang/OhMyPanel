@@ -619,6 +619,9 @@
     "goToSoftware": "Aller au dépôt de logiciels"
   },
   "settings": {
+    "theme": "Thème",
+    "dark": "Sombre",
+    "light": "Clair",
     "title": "Paramètres du serveur",
     "appSettings": "Paramètres de l'application",
     "autoReconnect": "Reconnexion SSH automatique",

@@ -819,10 +819,10 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
             <h3 style={{ color: '#ff7b72' }}>⚠️ {t('redis.flushDatabase')}</h3>
             
             <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(255, 123, 114, 0.1)', borderRadius: '6px', border: '1px solid #ff7b72' }}>
-              <p style={{ margin: '0 0 8px 0', color: '#c9d1d9', fontWeight: 'bold' }}>
+              <p style={{ margin: '0 0 8px 0', color: 'var(--text)', fontWeight: 'bold' }}>
                 {t('redis.flushConfirm', { db: currentDb })}
               </p>
-              <p style={{ margin: '0', color: '#8b949e', fontSize: '13px' }}>
+              <p style={{ margin: '0', color: 'var(--text-muted)', fontSize: '13px' }}>
                 This will permanently delete all data in this database and cannot be undone!
               </p>
             </div>

@@ -619,6 +619,9 @@
     "goToSoftware": "الذهاب إلى مستودع البرمجيات"
   },
   "settings": {
+    "theme": "السمة",
+    "dark": "داكن",
+    "light": "فاتح",
     "title": "إعدادات الخادم",
     "appSettings": "إعدادات التطبيق",
     "autoReconnect": "إعادة اتصال SSH تلقائية",

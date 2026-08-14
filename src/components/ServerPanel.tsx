@@ -37,6 +37,7 @@ interface AppSettings {
   cache_enabled: boolean
   command_timeout_minutes: number
   upload_workers: number
+  theme: string
 }
 
 interface ServerPanelProps {
@@ -208,7 +209,7 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
       <div className="sp-content">
         {/* Terminal always mounted to preserve SSH session */}
         <div style={{ display: activeSection === 'terminal' ? 'block' : 'none', height: '100%' }}>
-          <Terminal ref={termRef} sessionId={sessionId} isActive={activeSection === 'terminal'} />
+          <Terminal ref={termRef} sessionId={sessionId} isActive={activeSection === 'terminal'} theme={appSettings?.theme || 'dark'} />
         </div>
         {/* Files always mounted to preserve state and avoid reload flash */}
         <div style={{ display: activeSection === 'files' ? 'block' : 'none', height: '100%' }}>

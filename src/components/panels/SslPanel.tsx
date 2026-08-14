@@ -174,8 +174,8 @@ export default function SslPanel({ sessionId }: SslPanelProps) {
           <div className="ssl-log-header">
             <span>{activeLog.domain}</span>
             {activeLog.status === 'installing' && <div className="install-spinner" />}
-            {activeLog.status === 'done' && <span style={{ color: '#3fb950' }}>Done</span>}
-            {activeLog.status === 'error' && <span style={{ color: '#f85149' }}>Error</span>}
+            {activeLog.status === 'done' && <span style={{ color: 'var(--green)' }}>Done</span>}
+            {activeLog.status === 'error' && <span style={{ color: 'var(--red)' }}>Error</span>}
           </div>
           <div className="install-log">
             {activeLog.lines.map((line, i) => (
@@ -191,9 +191,9 @@ export default function SslPanel({ sessionId }: SslPanelProps) {
         </div>
       )}
 
-      <div style={{ fontSize: 13, color: '#8b949e', lineHeight: 1.8 }}>
-        <div>{t('ssl.infoNotice')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://letsencrypt.org/') }} style={{ color: '#58a6ff' }}>https://letsencrypt.org/</a></div>
-        <div style={{ color: '#d29922', fontWeight: 600 }}>{t('ssl.infoWarning')}</div>
+      <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.8 }}>
+        <div>{t('ssl.infoNotice')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://letsencrypt.org/') }} style={{ color: 'var(--accent)' }}>https://letsencrypt.org/</a></div>
+        <div style={{ color: 'var(--yellow)', fontWeight: 600 }}>{t('ssl.infoWarning')}</div>
       </div>
     </div>
   )

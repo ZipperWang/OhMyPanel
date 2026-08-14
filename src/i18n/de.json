@@ -619,6 +619,9 @@
     "goToSoftware": "Zum Software-Repository"
   },
   "settings": {
+    "theme": "Design",
+    "dark": "Dunkel",
+    "light": "Hell",
     "title": "Server-Einstellungen",
     "appSettings": "App-Einstellungen",
     "autoReconnect": "SSH-Auto-Wiederverbindung",

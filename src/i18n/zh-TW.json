@@ -619,6 +619,9 @@
     "goToSoftware": "前往軟體庫"
   },
   "settings": {
+    "theme": "主題",
+    "dark": "深色",
+    "light": "淺色",
     "title": "伺服器設定",
     "appSettings": "應用設定",
     "autoReconnect": "SSH 斷線自動重連",

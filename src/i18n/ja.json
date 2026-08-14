@@ -619,6 +619,9 @@
     "goToSoftware": "ソフトウェアリポジトリへ"
   },
   "settings": {
+    "theme": "テーマ",
+    "dark": "ダーク",
+    "light": "ライト",
     "title": "サーバー設定",
     "appSettings": "アプリ設定",
     "autoReconnect": "SSH 自動再接続",

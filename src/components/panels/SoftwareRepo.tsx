@@ -886,7 +886,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
               <>
                 {/* Install method toggle — ponytail: source compile hidden, package only */}
                 <div style={{ marginBottom: '12px', display: 'flex', gap: '8px' }}>
-                  <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '6px', border: '1px solid #238636', background: 'rgba(35,134,54,0.1)', cursor: 'pointer' }}>
+                  <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--green-bg)', background: 'rgba(35,134,54,0.1)', cursor: 'pointer' }}>
                     <input type="radio" name="phpInstallMethod" checked readOnly />
                     <span style={{ fontSize: '13px' }}>{t('software.installMethodPackage')}</span>
                   </label>
@@ -956,7 +956,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                       style={{
                         display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer',
                         padding: '12px 14px', borderRadius: '8px',
-                        border: `1px solid ${selectedMysqlVersion === v.variant ? '#238636' : '#30363d'}`,
+                        border: `1px solid ${selectedMysqlVersion === v.variant ? 'var(--green-bg)' : 'var(--border)'}`,
                         background: selectedMysqlVersion === v.variant ? 'rgba(35,134,54,0.1)' : 'transparent',
                       }}
                     >
@@ -971,11 +971,11 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                         <div style={{ fontWeight: 500, marginBottom: '4px' }}>
                           {v.variant === 'mysql' ? t('software.mysqlLabel') : t('software.mariadbLabel')}
                         </div>
-                        <div style={{ fontSize: '12px', color: '#8b949e', marginBottom: '4px' }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
                           {v.variant === 'mysql' ? t('software.mysqlDesc') : t('software.mariadbDesc')}
                         </div>
                         {v.version && (
-                          <div style={{ fontSize: '12px', color: '#58a6ff' }}>
+                          <div style={{ fontSize: '12px', color: 'var(--accent)' }}>
                             {t('software.mysqlVersionInfo', { version: v.version })}
                           </div>
                         )}
@@ -1011,11 +1011,11 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
           <div className="sw-confirm-dialog" onClick={e => e.stopPropagation()}>
             <div className="sw-confirm-title">{t('software.dockerSourceTitle')}</div>
             <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '10px 12px', borderRadius: '8px', border: `1px solid ${dockerSourceSelected === 'official' ? '#238636' : '#30363d'}`, background: dockerSourceSelected === 'official' ? 'rgba(35,134,54,0.1)' : 'transparent' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '10px 12px', borderRadius: '8px', border: `1px solid ${dockerSourceSelected === 'official' ? 'var(--green-bg)' : 'var(--border)'}`, background: dockerSourceSelected === 'official' ? 'rgba(35,134,54,0.1)' : 'transparent' }}>
                 <input type="radio" name="dockerSource" checked={dockerSourceSelected === 'official'} onChange={() => setDockerSourceSelected('official')} />
                 {t('software.dockerSourceOfficial')}
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '10px 12px', borderRadius: '8px', border: `1px solid ${dockerSourceSelected === 'aliyun' ? '#238636' : '#30363d'}`, background: dockerSourceSelected === 'aliyun' ? 'rgba(35,134,54,0.1)' : 'transparent' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '10px 12px', borderRadius: '8px', border: `1px solid ${dockerSourceSelected === 'aliyun' ? 'var(--green-bg)' : 'var(--border)'}`, background: dockerSourceSelected === 'aliyun' ? 'rgba(35,134,54,0.1)' : 'transparent' }}>
                 <input type="radio" name="dockerSource" checked={dockerSourceSelected === 'aliyun'} onChange={() => setDockerSourceSelected('aliyun')} />
                 {t('software.dockerSourceAliyun')}
               </label>

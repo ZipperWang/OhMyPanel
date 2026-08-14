@@ -22,6 +22,7 @@ interface AppSettings {
   cache_enabled: boolean
   command_timeout_minutes: number
   upload_workers: number
+  theme: string
 }
 
 interface ServerSettingsPanelProps {
@@ -312,6 +313,22 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
                   <span className="toggle-label">{appSettings.close_tab_on_disconnect ? t('common.on') : t('common.off')}</span>
                 </button>
               </div>
+              <div className="settings-row">
+                <span className="settings-label">{t('settings.theme')}</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {(['dark', 'light'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      className={`svc-cfg-btn ${appSettings.theme === mode ? 'primary' : ''}`}
+                      style={{ padding: '4px 14px', fontSize: 12 }}
+                      onClick={() => onUpdateSettings?.({ theme: mode })}
+                      disabled={!onUpdateSettings}
+                    >
+                      {mode === 'dark' ? `🌙 ${t('settings.dark')}` : `☀️ ${t('settings.light')}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="edit-field">
                 <label>{t('settings.reconnectInterval')}</label>
                 <input
@@ -335,7 +352,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
                 />
               </div>
               <div className="edit-field">
-                <label>{t('settings.commandTimeout')} <span style={{ color: '#8b949e', fontWeight: 400 }}>— {t('settings.commandTimeoutHint')}</span></label>
+                <label>{t('settings.commandTimeout')} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— {t('settings.commandTimeoutHint')}</span></label>
                 <input
                   type="number"
                   min="1"
@@ -346,7 +363,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
                 />
               </div>
               <div className="edit-field">
-                <label>{t('settings.uploadWorkers')} <span style={{ color: '#8b949e', fontWeight: 400 }}>— {t('settings.uploadWorkersHint')}</span></label>
+                <label>{t('settings.uploadWorkers')} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— {t('settings.uploadWorkersHint')}</span></label>
                 <input
                   type="number"
                   min="1"
@@ -374,7 +391,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
         {appSettings && (
           <div className="settings-card">
             <div className="settings-card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span>{t('settings.fileCache')} <span style={{ color: '#8b949e', fontWeight: 400, fontSize: 12 }}>({cacheCount} {t('settings.directories')})</span></span>
+              <span>{t('settings.fileCache')} <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 12 }}>({cacheCount} {t('settings.directories')})</span></span>
               <button
                 className={`firewall-toggle ${appSettings.cache_enabled ? 'on' : 'off'}`}
                 onClick={() => onUpdateSettings?.({ cache_enabled: !appSettings.cache_enabled })}
@@ -386,7 +403,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
             </div>
             <div className="settings-card-body">
               <div className="edit-field">
-                <label>{t('settings.cacheTtl')} <span style={{ color: '#8b949e', fontWeight: 400 }}>— {t('settings.cacheTtlHint')}</span></label>
+                <label>{t('settings.cacheTtl')} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— {t('settings.cacheTtlHint')}</span></label>
                 <input
                   type="number"
                   min="1"
@@ -397,7 +414,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
                 />
               </div>
               <div className="edit-field">
-                <label>{t('settings.maxFilesPerDir')} <span style={{ color: '#8b949e', fontWeight: 400 }}>— {t('settings.maxFilesHint')}</span></label>
+                <label>{t('settings.maxFilesPerDir')} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— {t('settings.maxFilesHint')}</span></label>
                 <input
                   type="number"
                   min="1"
@@ -421,7 +438,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
                   className="svc-cfg-btn"
                   onClick={handleClearCache}
                   disabled={cacheClearing || cacheCount === 0}
-                  style={{ background: '#da3633', color: '#fff', borderColor: '#da3633' }}
+                  style={{ background: 'var(--red-strong)', color: '#fff', borderColor: 'var(--red-strong)' }}
                 >
                   {cacheClearing ? t('settings.clearing') : t('settings.clearAllCache')}
                 </button>
@@ -614,10 +631,10 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
                 </>
               )}
               {rebootExecPanel.status === 'done' && (
-                <span style={{ color: '#3fb950' }}>&#10003; {t('settings.completed')}</span>
+                <span style={{ color: 'var(--green)' }}>&#10003; {t('settings.completed')}</span>
               )}
               {rebootExecPanel.status === 'error' && (
-                <span style={{ color: '#f85149' }}>&#10007; Failed</span>
+                <span style={{ color: 'var(--red)' }}>&#10007; Failed</span>
               )}
             </span>
             <button

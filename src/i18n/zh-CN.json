@@ -619,6 +619,9 @@
     "goToSoftware": "前往软件仓库"
   },
   "settings": {
+    "theme": "主题",
+    "dark": "深色",
+    "light": "浅色",
     "title": "服务器设置",
     "appSettings": "应用设置",
     "autoReconnect": "SSH断线自动重连",

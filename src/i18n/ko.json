@@ -619,6 +619,9 @@
     "goToSoftware": "소프트웨어 저장소로 이동"
   },
   "settings": {
+    "theme": "테마",
+    "dark": "다크",
+    "light": "라이트",
     "title": "서버 설정",
     "appSettings": "앱 설정",
     "autoReconnect": "SSH 자동 재연결",

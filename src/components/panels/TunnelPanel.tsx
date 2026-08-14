@@ -237,7 +237,7 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <h2>{t('tunnel.title')}</h2>
           {tunnels.length > 0 && (
-            <span style={{ fontSize: '12px', color: '#3fb950', fontWeight: 'bold' }}>
+            <span style={{ fontSize: '12px', color: 'var(--green)', fontWeight: 'bold' }}>
               {tunnels.length} {t('tunnel.active')}
             </span>
           )}
@@ -262,20 +262,20 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
 
       {/* What is a tunnel — plain-language intro */}
       <div style={{
-        background: '#0d1117',
-        border: '1px solid #30363d',
+        background: 'var(--bg)',
+        border: '1px solid var(--border)',
         borderRadius: '6px',
         padding: '12px',
         marginBottom: '16px',
       }}>
-        <p style={{ fontSize: '13px', color: '#c9d1d9', margin: '0 0 10px 0', lineHeight: 1.6 }}>
+        <p style={{ fontSize: '13px', color: 'var(--text)', margin: '0 0 10px 0', lineHeight: 1.6 }}>
           💡 {t('tunnel.whatIs')}
         </p>
       </div>
 
       {/* Quick Actions */}
       <div className="toolbar">
-        <span style={{ fontSize: '13px', color: '#8b949e', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: '13px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
           {t('tunnel.quickActions')}
         </span>
         {quickActions.map(action => (
@@ -284,7 +284,7 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
             className="btn-secondary"
             onClick={() => handleQuickAction(action.port)}
           >
-            {action.label} <span style={{ color: '#8b949e' }}>:{action.port}</span>
+            {action.label} <span style={{ color: 'var(--text-muted)' }}>:{action.port}</span>
           </button>
         ))}
       </div>
@@ -312,7 +312,7 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
               <tr>
                 <td colSpan={5} style={{ textAlign: 'center', padding: '2rem' }}>
                   <div>{t('tunnel.empty')}</div>
-                  <div style={{ fontSize: '12px', color: '#8b949e', marginTop: '4px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
                     {t('tunnel.emptyHint')}
                   </div>
                 </td>
@@ -326,7 +326,7 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
                       width: '8px',
                       height: '8px',
                       borderRadius: '50%',
-                      backgroundColor: tunnel.status === 'active' ? '#3fb950' : '#8b949e',
+                      backgroundColor: tunnel.status === 'active' ? 'var(--green)' : 'var(--text-muted)',
                       marginRight: '6px',
                     }} />
                     {tunnel.status}
@@ -348,7 +348,7 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
                   </td>
                   <td>
                     <span
-                      style={{ fontFamily: 'monospace', fontSize: '12px', cursor: 'pointer', color: '#58a6ff' }}
+                      style={{ fontFamily: 'monospace', fontSize: '12px', cursor: 'pointer', color: 'var(--accent)' }}
                       title={t('common.copy')}
                       onClick={() => handleCopy(tunnel)}
                     >
@@ -460,18 +460,18 @@ export default function TunnelPanel({ sessionId }: TunnelPanelProps) {
 
             {/* Inline validation hints */}
             {localPort && !isValidPort(localPort) && (
-              <div style={{ color: '#f85149', fontSize: '12px' }}>{t('tunnel.invalidPort')}</div>
+              <div style={{ color: 'var(--red)', fontSize: '12px' }}>{t('tunnel.invalidPort')}</div>
             )}
             {localPort && isValidPort(localPort) && isPortInUse(parseInt(localPort)) && (
-              <div style={{ color: '#d29922', fontSize: '12px' }}>{t('tunnel.portInUse')}</div>
+              <div style={{ color: 'var(--yellow)', fontSize: '12px' }}>{t('tunnel.portInUse')}</div>
             )}
 
             {/* Description */}
             <div style={{
               fontSize: '12px',
-              color: '#8b949e',
-              background: '#0d1117',
-              border: '1px solid #30363d',
+              color: 'var(--text-muted)',
+              background: 'var(--bg)',
+              border: '1px solid var(--border)',
               borderRadius: '6px',
               padding: '10px 12px',
               lineHeight: 1.7,
