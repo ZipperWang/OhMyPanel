@@ -164,6 +164,11 @@
     "activeTunnels": "活跃隧道",
     "notConnected": "请先连接服务器",
     "portRequired": "端口为必填项",
+    "invalidPort": "无效端口 (1-65535)",
+    "portInUse": "该端口已被其他隧道占用",
+    "remotePortRequired": "远程端口为必填项",
+    "invalidRemotePort": "无效远程端口 (1-65535)",
+    "usageHint": "连接命令",
     "quickActions": "快捷操作 - 转发常用服务：",
     "quick": {
       "mysql": "MySQL",
@@ -176,7 +181,8 @@
       "remote": "将本地服务暴露给远程服务器。服务器将监听指定端口并将流量转发到本地。",
       "dynamic": "在本地创建 SOCKS5 代理。所有流量将通过 SSH 服务器路由。"
     },
-    "empty": "暂无活跃隧道，创建一个开始使用吧！"
+    "empty": "暂无活跃隧道，创建一个开始使用吧！",
+    "emptyHint": "使用上方快捷操作可快速转发 MySQL、Redis 等常用服务。"
   },
   "dockerPanel": {
     "runContainer": "运行容器",

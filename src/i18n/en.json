@@ -164,6 +164,11 @@
     "activeTunnels": "Active Tunnels",
     "notConnected": "Please connect to a server first",
     "portRequired": "Port is required",
+    "invalidPort": "Invalid port (1-65535)",
+    "portInUse": "Port already in use by another tunnel",
+    "remotePortRequired": "Remote port is required",
+    "invalidRemotePort": "Invalid remote port (1-65535)",
+    "usageHint": "Connect using",
     "quickActions": "Quick Actions - Forward common services:",
     "quick": {
       "mysql": "MySQL",
@@ -176,7 +181,8 @@
       "remote": "Expose a local service to the remote server. The server will listen on the specified port and forward traffic to your local machine.",
       "dynamic": "Create a SOCKS5 proxy on your local machine. All traffic will be routed through the SSH server."
     },
-    "empty": "No active tunnels. Create one to get started!"
+    "empty": "No active tunnels. Create one to get started!",
+    "emptyHint": "Use quick actions above to forward common services like MySQL, Redis, etc."
   },
   "dockerPanel": {
     "runContainer": "Run Container",
