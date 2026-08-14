@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
-use crate::ssh::SshSession;
+use crate::ssh::{ForwardedTcpip, SshSession};
 
 /// Tunnel types supported
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -49,13 +51,14 @@ pub struct TunnelInfo {
 
 /// Manages SSH tunnels
 pub struct TunnelManager {
-    tunnels: Mutex<HashMap<String, ActiveTunnel>>,
+    /// Arc so spawned tunnel tasks can remove themselves on exit (no zombie entries).
+    tunnels: Arc<Mutex<HashMap<String, ActiveTunnel>>>,
 }
 
 impl TunnelManager {
     pub fn new() -> Self {
         Self {
-            tunnels: Mutex::new(HashMap::new()),
+            tunnels: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -77,6 +80,9 @@ impl TunnelManager {
             shutdown_tx: Some(shutdown_tx),
         };
 
+        // Snapshot for spawned tasks: they remove their entry when exiting
+        let tunnels_reg = self.tunnels.clone();
+
         match config.tunnel_type {
             TunnelType::Local => {
                 self.start_local_tunnel(
@@ -86,6 +92,7 @@ impl TunnelManager {
                     config.clone(),
                     shutdown_rx,
                     app_handle.clone(),
+                    tunnels_reg,
                 )
                 .await?;
             }
@@ -97,6 +104,7 @@ impl TunnelManager {
                     config.clone(),
                     shutdown_rx,
                     app_handle.clone(),
+                    tunnels_reg,
                 )
                 .await?;
             }
@@ -108,6 +116,7 @@ impl TunnelManager {
                     config.clone(),
                     shutdown_rx,
                     app_handle.clone(),
+                    tunnels_reg,
                 )
                 .await?;
             }
@@ -124,14 +133,16 @@ impl TunnelManager {
     }
 
     /// Start a local port forwarding tunnel (ssh -L)
+    #[allow(clippy::too_many_arguments)]
     async fn start_local_tunnel(
         &self,
         tunnel_id: String,
-        session_id: String,
+        _session_id: String,
         session: SshSession,
         config: TunnelConfig,
         mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
         app_handle: AppHandle,
+        tunnels_reg: Arc<Mutex<HashMap<String, ActiveTunnel>>>,
     ) -> Result<(), String> {
         let bind_addr = format!("{}:{}", config.local_host, config.local_port);
         let listener = TcpListener::bind(&bind_addr)
@@ -152,7 +163,6 @@ impl TunnelManager {
                             Ok((mut tcp_stream, addr)) => {
                                 let session = session.clone();
                                 let tunnel_id = tunnel_id.clone();
-                                let _session_id = session_id.clone();
                                 let app_handle = app_handle.clone();
                                 let remote_host = config.remote_host.clone();
                                 let remote_port = config.remote_port;
@@ -204,29 +214,33 @@ impl TunnelManager {
                         }
                     }
                     _ = &mut shutdown_rx => {
-                        let _ = app_handle.emit("tunnel-status", serde_json::json!({
-                            "tunnelId": tunnel_id,
-                            "status": "stopped",
-                            "message": "Tunnel stopped",
-                        }));
                         break;
                     }
                 }
             }
+            // Self-cleanup: remove entry so the frontend list stays accurate
+            tunnels_reg.lock().await.remove(&tunnel_id);
+            let _ = app_handle.emit("tunnel-status", serde_json::json!({
+                "tunnelId": tunnel_id,
+                "status": "stopped",
+                "message": "Tunnel stopped",
+            }));
         });
 
         Ok(())
     }
 
     /// Start a remote port forwarding tunnel (ssh -R)
+    #[allow(clippy::too_many_arguments)]
     async fn start_remote_tunnel(
         &self,
         tunnel_id: String,
         _session_id: String,
         session: SshSession,
         config: TunnelConfig,
-        shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+        mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
         app_handle: AppHandle,
+        tunnels_reg: Arc<Mutex<HashMap<String, ActiveTunnel>>>,
     ) -> Result<(), String> {
         // Request the server to listen on the remote port
         let handle = session.handle.clone();
@@ -237,29 +251,61 @@ impl TunnelManager {
             .map_err(|e| format!("Remote forward request denied: {}", e))?;
         drop(handle_guard);
 
+        // Register ourselves: the SshHandler routes server-side forwarded
+        // connections to us via this channel, keyed by the server port.
+        let (fwd_tx, mut fwd_rx) = mpsc::unbounded_channel::<ForwardedTcpip>();
+        session.forwarded_reg.lock().unwrap().insert(bound_port, fwd_tx);
+
         let _ = app_handle.emit("tunnel-status", serde_json::json!({
             "tunnelId": tunnel_id,
             "status": "listening",
-            "message": format!("Remote tunnel listening on {}:{} (server will forward to {}:{})", 
+            "message": format!("Remote tunnel listening on {}:{} (server will forward to {}:{})",
                 config.remote_host, bound_port, config.local_host, config.local_port),
         }));
 
-        // Note: For remote forwarding, the server sends us channels via
-        // server_channel_open_forwarded_tcpip callback. We need to handle those
-        // in the SshHandler. For now, we'll use a simpler approach where we
-        // spawn a task that handles incoming forwarded connections.
-        
         let remote_host = config.remote_host.clone();
-        let remote_port = bound_port;
-        let _local_host = config.local_host.clone();
-        let _local_port = config.local_port;
+        let local_host = config.local_host.clone();
+        let local_port = config.local_port;
 
         tokio::spawn(async move {
-            // Wait for shutdown signal
-            let _ = shutdown_rx.await;
-            // Cancel the forward request
+            loop {
+                tokio::select! {
+                    Some(conn) = fwd_rx.recv() => {
+                        let tunnel_id = tunnel_id.clone();
+                        let app_handle = app_handle.clone();
+                        let local_host = local_host.clone();
+                        tokio::spawn(async move {
+                            // Connect to the local service and splice both directions
+                            match TcpStream::connect(format!("{}:{}", local_host, local_port)).await {
+                                Ok(mut local) => {
+                                    let mut ch = conn.channel.into_stream();
+                                    if let Err(e) = Self::forward_bidirectional(&mut local, &mut ch).await {
+                                        let _ = app_handle.emit("tunnel-error", serde_json::json!({
+                                            "tunnelId": tunnel_id,
+                                            "error": format!("Remote forward error: {}", e),
+                                        }));
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = app_handle.emit("tunnel-error", serde_json::json!({
+                                        "tunnelId": tunnel_id,
+                                        "error": format!("Local connect failed {}:{}: {}", local_host, local_port, e),
+                                    }));
+                                }
+                            }
+                        });
+                    }
+                    _ = &mut shutdown_rx => {
+                        break;
+                    }
+                }
+            }
+            // Unregister + cancel the forward request
+            session.forwarded_reg.lock().unwrap().remove(&bound_port);
             let handle = session.handle.lock().await;
-            let _ = handle.cancel_tcpip_forward(&remote_host, remote_port).await;
+            let _ = handle.cancel_tcpip_forward(&remote_host, bound_port).await;
+            drop(handle);
+            tunnels_reg.lock().await.remove(&tunnel_id);
             let _ = app_handle.emit("tunnel-status", serde_json::json!({
                 "tunnelId": tunnel_id,
                 "status": "stopped",
@@ -271,14 +317,16 @@ impl TunnelManager {
     }
 
     /// Start a dynamic (SOCKS5) tunnel (ssh -D)
+    #[allow(clippy::too_many_arguments)]
     async fn start_dynamic_tunnel(
         &self,
         tunnel_id: String,
         _session_id: String,
-        _session: SshSession,
+        session: SshSession,
         config: TunnelConfig,
         mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
         app_handle: AppHandle,
+        tunnels_reg: Arc<Mutex<HashMap<String, ActiveTunnel>>>,
     ) -> Result<(), String> {
         let bind_addr = format!("{}:{}", config.local_host, config.local_port);
         let listener = TcpListener::bind(&bind_addr)
@@ -291,30 +339,22 @@ impl TunnelManager {
             "message": format!("SOCKS5 proxy listening on {}", bind_addr),
         }));
 
-        // ponytail: SOCKS5 implementation - minimal but functional
-        // For a full implementation, consider using a SOCKS5 library
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     accept_result = listener.accept() => {
                         match accept_result {
-                            Ok((mut tcp_stream, _addr)) => {
+                            Ok((tcp_stream, _addr)) => {
+                                let session = session.clone();
                                 let tunnel_id = tunnel_id.clone();
                                 let app_handle = app_handle.clone();
-                                // Spawn handler for this SOCKS5 connection
                                 tokio::spawn(async move {
-                                    // SOCKS5 handshake
-                                    let mut buf = [0u8; 260];
-                                    if tcp_stream.read(&mut buf).await.is_err() {
-                                        return;
+                                    if let Err(e) = Self::handle_socks5(tcp_stream, session).await {
+                                        let _ = app_handle.emit("tunnel-error", serde_json::json!({
+                                            "tunnelId": tunnel_id,
+                                            "error": format!("SOCKS5: {}", e),
+                                        }));
                                     }
-                                    // For now, just reject all connections
-                                    // A full SOCKS5 implementation would parse the request
-                                    // and open direct-tcpip channels accordingly
-                                    let _ = app_handle.emit("tunnel-error", serde_json::json!({
-                                        "tunnelId": tunnel_id,
-                                        "error": "SOCKS5 not fully implemented yet",
-                                    }));
                                 });
                             }
                             Err(e) => {
@@ -327,18 +367,88 @@ impl TunnelManager {
                         }
                     }
                     _ = &mut shutdown_rx => {
-                        let _ = app_handle.emit("tunnel-status", serde_json::json!({
-                            "tunnelId": tunnel_id,
-                            "status": "stopped",
-                            "message": "SOCKS5 proxy stopped",
-                        }));
                         break;
                     }
                 }
             }
+            tunnels_reg.lock().await.remove(&tunnel_id);
+            let _ = app_handle.emit("tunnel-status", serde_json::json!({
+                "tunnelId": tunnel_id,
+                "status": "stopped",
+                "message": "SOCKS5 proxy stopped",
+            }));
         });
 
         Ok(())
+    }
+
+    /// SOCKS5 handshake + forward. Supports CONNECT with IPv4/domain/IPv6 targets.
+    /// ponytail: no-auth method only — matches typical SSH -D usage.
+    async fn handle_socks5(mut tcp: TcpStream, session: SshSession) -> Result<(), String> {
+        // --- greeting: VER NMETHODS METHODS... ---
+        let mut head = [0u8; 2];
+        tcp.read_exact(&mut head).await.map_err(|e| format!("greeting: {}", e))?;
+        if head[0] != 0x05 {
+            return Err("Not a SOCKS5 client".into());
+        }
+        let nmethods = head[1] as usize;
+        let mut methods = vec![0u8; nmethods];
+        tcp.read_exact(&mut methods).await.map_err(|e| format!("methods: {}", e))?;
+        // Reply: no authentication
+        tcp.write_all(&[0x05, 0x00]).await.map_err(|e| format!("reply: {}", e))?;
+
+        // --- request: VER CMD RSV ATYP ADDR PORT ---
+        let mut req = [0u8; 3];
+        tcp.read_exact(&mut req).await.map_err(|e| format!("request: {}", e))?;
+        if req[0] != 0x05 {
+            return Err("Bad SOCKS5 version".into());
+        }
+        if req[1] != 0x01 {
+            // rep=0x07 (command not supported)
+            let _ = tcp.write_all(&[0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await;
+            return Err("Only CONNECT is supported".into());
+        }
+        let mut atyp = [0u8; 1];
+        tcp.read_exact(&mut atyp).await.map_err(|e| format!("atyp: {}", e))?;
+        let host = match atyp[0] {
+            0x01 => {
+                let mut a = [0u8; 4];
+                tcp.read_exact(&mut a).await.map_err(|e| format!("addr: {}", e))?;
+                std::net::Ipv4Addr::from(a).to_string()
+            }
+            0x03 => {
+                let mut len = [0u8; 1];
+                tcp.read_exact(&mut len).await.map_err(|e| format!("dlen: {}", e))?;
+                let mut d = vec![0u8; len[0] as usize];
+                tcp.read_exact(&mut d).await.map_err(|e| format!("domain: {}", e))?;
+                String::from_utf8_lossy(&d).to_string()
+            }
+            0x04 => {
+                let mut a = [0u8; 16];
+                tcp.read_exact(&mut a).await.map_err(|e| format!("addr6: {}", e))?;
+                std::net::Ipv6Addr::from(a).to_string()
+            }
+            _ => return Err("Unsupported address type".into()),
+        };
+        let mut pb = [0u8; 2];
+        tcp.read_exact(&mut pb).await.map_err(|e| format!("port: {}", e))?;
+        let port = u16::from_be_bytes(pb) as u32;
+
+        // --- open direct-tcpip channel through SSH ---
+        let handle = session.handle.lock().await;
+        let channel = handle
+            .channel_open_direct_tcpip(&host, port, "127.0.0.1", 0)
+            .await;
+        drop(handle);
+        let mut ch = channel.map_err(|e| format!("channel open: {}", e))?.into_stream();
+
+        // --- success reply ---
+        tcp.write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+            .await
+            .map_err(|e| format!("reply: {}", e))?;
+
+        // --- bidirectional forward ---
+        Self::forward_bidirectional(&mut tcp, &mut ch).await
     }
 
     /// Forward data bidirectionally between TCP stream and SSH channel
