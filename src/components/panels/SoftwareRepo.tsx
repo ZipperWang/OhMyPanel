@@ -904,8 +904,8 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                       borderRadius: '4px',
                       border: '1px solid #ccc',
                       fontSize: '14px',
-                      background: 'var(--bg-secondary, #fff)',
-                      color: 'var(--text-primary, #000)',
+                      background: 'var(--bg-panel)',
+                      color: 'var(--text)',
                     }}
                   >
                     {availableVersions.map(ver => (
@@ -1122,7 +1122,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
                     border: '1px solid #ccc', fontSize: '14px',
-                    background: 'var(--bg-secondary, #fff)', color: 'var(--text-primary, #000)',
+                    background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 />
               </div>
@@ -1136,7 +1136,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
                     border: '1px solid #ccc', fontSize: '14px',
-                    background: 'var(--bg-secondary, #fff)', color: 'var(--text-primary, #000)',
+                    background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 />
               </div>
@@ -1150,7 +1150,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
                     border: '1px solid #ccc', fontSize: '14px',
-                    background: 'var(--bg-secondary, #fff)', color: 'var(--text-primary, #000)',
+                    background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 />
               </div>
@@ -1236,7 +1236,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
                     border: '1px solid #ccc', fontSize: '14px',
-                    background: 'var(--bg-secondary, #fff)', color: 'var(--text-primary, #000)',
+                    background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 />
               </div>
@@ -1250,7 +1250,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
                     border: '1px solid #ccc', fontSize: '14px',
-                    background: 'var(--bg-secondary, #fff)', color: 'var(--text-primary, #000)',
+                    background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 />
               </div>
@@ -1262,7 +1262,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
                     border: '1px solid #ccc', fontSize: '14px',
-                    background: 'var(--bg-secondary, #fff)', color: 'var(--text-primary, #000)',
+                    background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 >
                   <option value="other">{t('software.catOther')}</option>

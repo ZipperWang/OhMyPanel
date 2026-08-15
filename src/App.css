@@ -3008,8 +3008,8 @@ body.dragging-files * {
   position: absolute;
   bottom: 74px;
   left: 12px;
-  background: var(--bg-secondary, #2d2d2d);
-  border: 1px solid var(--border-color, #444);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   z-index: 11;
@@ -3027,18 +3027,18 @@ body.dragging-files * {
 }
 
 .fb-upload-menu-item:hover {
-  background: var(--bg-hover, #3a3a3a);
+  background: var(--bg-subtle);
 }
 
 .fb-upload-menu-item + .fb-upload-menu-item {
-  border-top: 1px solid var(--border-color, #444);
+  border-top: 1px solid var(--border);
 }
 
 .fb-upload-menu-hint {
   padding: 6px 14px;
   font-size: 11px;
-  color: #888;
-  border-top: 1px solid var(--border-color, #444);
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
   white-space: nowrap;
 }
 
@@ -5128,6 +5128,8 @@ body.dragging-files * {
 
 .firewall-table-row:last-child { border-bottom: none; }
 .firewall-table-row:hover { background: var(--bg-panel); }
+.firewall-table-row.danger { background: var(--red-soft); }
+.firewall-table-row.danger:hover { background: var(--red-soft); }
 
 .fw-col-port { flex: 2; font-family: 'Consolas', monospace; }
 .fw-col-proto { flex: 1; color: var(--text-muted); }
@@ -5222,6 +5224,27 @@ body.dragging-files * {
 .firewall-confirm-btn.danger:hover { background: var(--red); }
 .firewall-confirm-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* Port kill dialog — larger fonts & method explainer */
+.port-kill-dialog { min-width: 420px; max-width: 480px; }
+.port-kill-dialog .firewall-confirm-title { font-size: 18px; }
+.port-kill-dialog .firewall-confirm-msg { font-size: 15px; line-height: 1.5; }
+.port-kill-dialog .docker-confirm-input { font-size: 16px; padding: 10px 12px; }
+.port-kill-dialog .firewall-confirm-btn { font-size: 14px; padding: 9px 18px; }
+.port-kill-methods { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.port-kill-method {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle, #f6f6f6);
+}
+.port-kill-method b { font-size: 15px; display: block; margin-bottom: 4px; }
+.port-kill-method span { font-size: 13.5px; color: var(--text-muted); line-height: 1.6; }
+.port-kill-method.term { border-left: 3px solid var(--warn, #d98e00); }
+.port-kill-method.kill { border-left: 3px solid var(--red, #c0392b); }
+.port-kill-method.kill b { color: var(--red, #c0392b); }
+.port-kill-danger { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: var(--red-soft, #fdeaea); color: var(--red, #c0392b); font-size: 14px; line-height: 1.5; }
+.port-kill-confirm-hint { font-size: 13px; color: var(--text-faint, #888); margin-top: 6px; }
+
 /* Toggle Switch */
 .firewall-toggle {
   display: flex;
@@ -5283,6 +5306,239 @@ body.dragging-files * {
   opacity: 0.6;
 }
 
+/* --- Firewall enhancements --- */
+.firewall-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.firewall-notice.success {
+  background: var(--green-soft);
+  border-color: var(--green-soft-strong);
+}
+
+.firewall-notice.info {
+  background: var(--accent)14;
+  border-color: var(--accent)33;
+  color: var(--accent);
+}
+
+/* Stats cards */
+.fw-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.fw-stat-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fw-stat-num {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.fw-stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.fw-stat-card.total .fw-stat-num { color: var(--accent); }
+.fw-stat-card.allow .fw-stat-num { color: var(--green); }
+.fw-stat-card.deny .fw-stat-num { color: var(--red); }
+.fw-stat-card.reject .fw-stat-num { color: #d29922; }
+
+/* Quick ports */
+.fw-quick-ports {
+  margin-bottom: 16px;
+}
+
+.fw-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.fw-section-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.fw-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.fw-quick-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.fw-quick-chip:hover:not(:disabled) { border-color: var(--accent); }
+.fw-quick-chip:disabled { opacity: 0.6; cursor: wait; }
+
+.fw-quick-chip.open {
+  background: var(--green-soft);
+  border-color: var(--green-soft-strong);
+}
+
+.fw-quick-label {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fw-quick-port {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex: 1;
+  text-align: right;
+}
+
+.fw-quick-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+}
+
+.fw-quick-dot.open {
+  background: var(--green);
+  color: #fff;
+}
+
+/* Toolbar: search + filter + actions */
+.fw-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.fw-search {
+  flex: 1;
+  max-width: 320px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+
+.fw-search:focus { border-color: var(--accent); }
+
+.fw-filter {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+
+.fw-toolbar-spacer { flex: 1; }
+
+/* Rule row expand + copy */
+.firewall-table-row {
+  cursor: pointer;
+}
+
+.firewall-table-row.expanded {
+  background: var(--bg-panel);
+}
+
+.fw-copy-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+  margin-right: 4px;
+}
+
+.fw-copy-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.fw-copy-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.fw-rule-detail {
+  background: var(--bg-subtle);
+  border-left: 3px solid var(--accent);
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 0 6px 6px 0;
+}
+
+.fw-rule-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.fw-rule-raw {
+  display: block;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text);
+  background: var(--bg-panel);
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.fw-col-source-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.firewall-confirm-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
 /* ===== Software Repository ===== */
 .sw-panel {
   max-width: 900px;
@@ -5306,14 +5562,14 @@ body.dragging-files * {
   border-radius: 8px;
   padding: 16px;
   margin-bottom: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
 }
 
 .sw-sources-header h3 {
   margin: 0 0 12px 0;
   font-size: 14px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text);
 }
 
 .sw-sources-actions {
@@ -5330,7 +5586,7 @@ body.dragging-files * {
 .sw-category-title {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-faint);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 10px;
@@ -5345,7 +5601,7 @@ body.dragging-files * {
 
 .sw-card {
   background: var(--bg-panel);
-  border: 1px solid var(--bg-subtle);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px;
   display: flex;
@@ -5417,7 +5673,7 @@ body.dragging-files * {
 
 .sw-not-installed {
   font-size: 12px;
-  color: var(--text-faint);
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -6979,9 +7235,44 @@ body.dragging-files * {
   color: var(--text);
 }
 
+.docker-confirm-del-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.docker-confirm-input {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.docker-confirm-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.docker-confirm-input::placeholder {
+  color: var(--text-faint);
+}
+
 .docker-warn {
   color: var(--yellow);
   font-size: 12px;
+}
+
+.docker-warn-red {
+  display: block;
+  margin-top: 6px;
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .docker-confirm-actions {
