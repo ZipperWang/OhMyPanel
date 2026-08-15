@@ -61,6 +61,8 @@ pub fn run() {
             commands::config::clear_proxy_env,
             // Settings
             commands::config::settings_load, commands::config::settings_save,
+            // Data Directory
+            commands::config::get_data_dir, commands::config::open_data_dir,
             // Favorites
             commands::config::favorites_list, commands::config::favorites_add, commands::config::favorites_remove,
             // Server
@@ -129,6 +131,8 @@ pub fn run() {
             // Tunnels
             commands::tunnel::tunnel_create, commands::tunnel::tunnel_close,
             commands::tunnel::tunnel_list, commands::tunnel::tunnel_get,
+            // Port Management
+            commands::port::port_list, commands::port::port_query, commands::port::port_kill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

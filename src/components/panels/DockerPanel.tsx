@@ -65,6 +65,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
   const [containerLogs, setContainerLogs] = useState('')
   const [logsLoading, setLogsLoading] = useState(false)
   const [confirmDeleteContainer, setConfirmDeleteContainer] = useState<DockerContainer | null>(null)
+  const [deleteContainerInput, setDeleteContainerInput] = useState('')
   const [commitContainer, setCommitContainer] = useState<DockerContainer | null>(null)
   const [commitImageName, setCommitImageName] = useState('')
   const [commitMessage, setCommitMessage] = useState('')
@@ -78,6 +79,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
   const [batchRunning, setBatchRunning] = useState(false)
   const [batchResult, setBatchResult] = useState<{ action: string; results: DockerBatchResult[] } | null>(null)
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false)
+  const [batchDeleteConfirmInput, setBatchDeleteConfirmInput] = useState('')
 
   // Images
   const [images, setImages] = useState<DockerImage[]>([])
@@ -235,6 +237,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
     if (!sessionId) return
     clearMessages()
     setConfirmDeleteContainer(null)
+    setDeleteContainerInput('')
     setContainerAction(container.id + 'delete')
     try {
       await invoke('server_docker_container_remove', { sessionId, containerId: container.id, force })
@@ -262,11 +265,18 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
 
   const clearSelection = () => setSelectedIds(new Set())
 
-  // ponytail: stop/pause only make sense on running containers — filter eligible ones
+  // ponytail: stop/restart only make sense on running containers — filter eligible ones
   const eligibleIds = (action: string): string[] => {
     if (action === 'delete') return Array.from(selectedIds)
-    if (action === 'pause' || action === 'stop' || action === 'restart') {
+    if (action === 'stop' || action === 'restart') {
       return Array.from(selectedIds).filter(id => containers.find(c => c.id === id)?.state === 'running')
+    }
+    if (action === 'start') {
+      // start only applies to non-running, non-paused containers (paused must be unpaused first)
+      return Array.from(selectedIds).filter(id => {
+        const state = containers.find(c => c.id === id)?.state
+        return state !== 'running' && state !== 'paused'
+      })
     }
     return Array.from(selectedIds)
   }
@@ -302,6 +312,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
     if (ids.length === 0) return
     const hasRunning = ids.some(id => containers.find(c => c.id === id)?.state === 'running')
     setBatchDeleteConfirm(false)
+    setBatchDeleteConfirmInput('')
     clearMessages()
     setBatchRunning(true)
     try {
@@ -583,7 +594,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
                         )}
                         <button className="docker-action-btn" onClick={() => handleViewLogs(c)} disabled={!!containerAction} title={t('dockerPanel.logs')}>📋</button>
                         <button className="docker-action-btn" onClick={() => handleOpenCommit(c)} disabled={!!containerAction} title={t('dockerPanel.commit')}>📦</button>
-                        <button className="docker-action-btn danger" onClick={() => setConfirmDeleteContainer(c)} disabled={!!containerAction} title={t('dockerPanel.delete')}>🗑</button>
+                        <button className="docker-action-btn danger" onClick={() => { setConfirmDeleteContainer(c); setDeleteContainerInput('') }} disabled={!!containerAction} title={t('dockerPanel.delete')}>🗑</button>
                         {containerAction === c.id + 'stop' || containerAction === c.id + 'start' || containerAction === c.id + 'restart' || containerAction === c.id + 'pause' || containerAction === c.id + 'unpause' || containerAction === c.id + 'delete' ? (
                           <span className="docker-action-loading">...</span>
                         ) : null}
@@ -603,30 +614,31 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
                 )}
                 <button
                   className="docker-btn"
+                  onClick={() => handleBatchAction('start')}
+                  disabled={batchRunning || selectedIds.size === 0}
+                  title={t('dockerPanel.start')}
+                >
+                  ▶ {t('dockerPanel.batchStart')}
+                </button>
+                <button
+                  className="docker-btn"
                   onClick={() => handleBatchAction('stop')}
-                  disabled={batchRunning}
+                  disabled={batchRunning || selectedIds.size === 0}
                   title={t('dockerPanel.stop')}
                 >
                   ⏹ {t('dockerPanel.batchStop')}
                 </button>
                 <button
                   className="docker-btn"
-                  onClick={() => handleBatchAction('pause')}
-                  disabled={batchRunning}
-                  title={t('dockerPanel.pause')}
-                >
-                  ⏸ {t('dockerPanel.batchPause')}
-                </button>
-                <button
-                  className="docker-btn danger"
                   onClick={() => {
                     if (selectedIds.size === 0) {
                       setError(t('dockerPanel.batchNoEligible'))
                       return
                     }
                     setBatchDeleteConfirm(true)
+                    setBatchDeleteConfirmInput('')
                   }}
-                  disabled={batchRunning}
+                  disabled={batchRunning || selectedIds.size === 0}
                 >
                   🗑 {t('dockerPanel.batchDelete')}
                 </button>
@@ -787,17 +799,40 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
           <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
             <button 
               className="modal-close-btn"
-              onClick={() => setConfirmDeleteContainer(null)}
+              onClick={() => {
+                setConfirmDeleteContainer(null)
+                setDeleteContainerInput('')
+              }}
               title={t('dockerPanel.close')}
             >×</button>
             <div className="docker-confirm-title">{t('dockerPanel.deleteContainerTitle')}</div>
             <div className="docker-confirm-msg">
               {t('dockerPanel.deleteContainerMsg', { name: confirmDeleteContainer.name })}
               {confirmDeleteContainer.state === 'running' && <span className="docker-warn">{t('dockerPanel.forceRemoveWarn')}</span>}
+              {confirmDeleteContainer.state === 'paused' && <span className="docker-warn-red">{t('dockerPanel.pausedNeedStop')}</span>}
+              <div className="docker-confirm-del-hint">{t('dockerPanel.batchDeleteTypeDel')}</div>
+              <input
+                className="docker-confirm-input"
+                type="text"
+                placeholder={t('dockerPanel.batchDeleteInputPlaceholder')}
+                value={deleteContainerInput}
+                onChange={(e) => setDeleteContainerInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && deleteContainerInput === 'del') handleDeleteContainer(confirmDeleteContainer, confirmDeleteContainer.state === 'running')
+                }}
+                autoFocus
+              />
             </div>
             <div className="docker-confirm-actions">
-              <button className="docker-btn" onClick={() => setConfirmDeleteContainer(null)}>{t('dockerPanel.cancel')}</button>
-              <button className="docker-btn danger" onClick={() => handleDeleteContainer(confirmDeleteContainer, confirmDeleteContainer.state === 'running')}>
+              <button className="docker-btn" onClick={() => {
+                setConfirmDeleteContainer(null)
+                setDeleteContainerInput('')
+              }}>{t('dockerPanel.cancel')}</button>
+              <button
+                className="docker-btn danger"
+                onClick={() => handleDeleteContainer(confirmDeleteContainer, confirmDeleteContainer.state === 'running')}
+                disabled={deleteContainerInput !== 'del'}
+              >
                 {t('dockerPanel.delete')}
               </button>
             </div>
@@ -832,17 +867,42 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
           <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
             <button
               className="modal-close-btn"
-              onClick={() => setBatchDeleteConfirm(false)}
+              onClick={() => {
+                setBatchDeleteConfirm(false)
+                setBatchDeleteConfirmInput('')
+              }}
               title={t('dockerPanel.close')}
             >×</button>
             <div className="docker-confirm-title">{t('dockerPanel.batchDeleteTitle')}</div>
             <div className="docker-confirm-msg">
               {t('dockerPanel.batchDeleteConfirmMsg', { count: selectedIds.size, running: batchSelectedRunningCount })}
               {batchSelectedRunningCount > 0 && <span className="docker-warn">{t('dockerPanel.forceRemoveWarn')}</span>}
+              <div className="docker-confirm-del-hint">{t('dockerPanel.batchDeleteTypeDel')}</div>
+              <input
+                className="docker-confirm-input"
+                type="text"
+                placeholder={t('dockerPanel.batchDeleteInputPlaceholder')}
+                value={batchDeleteConfirmInput}
+                onChange={(e) => setBatchDeleteConfirmInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && batchDeleteConfirmInput === 'del') handleBatchDelete()
+                }}
+                autoFocus
+              />
             </div>
             <div className="docker-confirm-actions">
-              <button className="docker-btn" onClick={() => setBatchDeleteConfirm(false)}>{t('dockerPanel.cancel')}</button>
-              <button className="docker-btn danger" onClick={handleBatchDelete}>{t('dockerPanel.delete')}</button>
+              <button
+                className="docker-btn"
+                onClick={() => {
+                  setBatchDeleteConfirm(false)
+                  setBatchDeleteConfirmInput('')
+                }}
+              >{t('dockerPanel.cancel')}</button>
+              <button
+                className="docker-btn danger"
+                onClick={handleBatchDelete}
+                disabled={batchDeleteConfirmInput !== 'del'}
+              >{t('dockerPanel.delete')}</button>
             </div>
           </div>
         </div>

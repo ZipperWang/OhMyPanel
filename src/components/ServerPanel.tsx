@@ -12,6 +12,7 @@ import SitesPanel from './panels/SitesPanel'
 import SslPanel from './panels/SslPanel'
 import MonitorPanel from './panels/MonitorPanel'
 import FirewallPanel from './panels/FirewallPanel'
+import PortPanel from './panels/PortPanel'
 import SoftwareRepo from './panels/SoftwareRepo'
 import ServerSettingsPanel from './panels/ServerSettingsPanel'
 import UpdatePanel from './panels/UpdatePanel'
@@ -25,7 +26,7 @@ import Terminal from './Terminal'
 import type { TerminalHandle } from './Terminal'
 import FileBrowser, { type FileBrowserHandle } from './FileBrowser'
 
-type PanelSection = 'dashboard' | 'terminal' | 'files' | 'software' | 'nginx' | 'php' | 'sites' | 'logs' | 'ssl' | 'monitor' | 'firewall' | 'tunnel' | 'bbr' | 'docker' | 'database' | 'redis' | 'update' | 'settings' | 'discussions'
+type PanelSection = 'dashboard' | 'terminal' | 'files' | 'software' | 'nginx' | 'php' | 'sites' | 'logs' | 'ssl' | 'monitor' | 'firewall' | 'port' | 'tunnel' | 'bbr' | 'docker' | 'database' | 'redis' | 'update' | 'settings' | 'discussions'
 
 interface AppSettings {
   auto_reconnect: boolean
@@ -72,7 +73,8 @@ const NAV_ITEMS: { key: PanelSection; labelKey: string; icon: string }[] = [
   { key: 'logs', labelKey: 'nav.logs', icon: '📋' },
   { key: 'monitor', labelKey: 'nav.monitor', icon: '📈' },
   { key: 'firewall', labelKey: 'nav.firewall', icon: '🧱' },
-  { key: 'tunnel', labelKey: 'nav.tunnel', icon: '🔌' },
+  { key: 'port', labelKey: 'nav.port', icon: '🔌' },
+  { key: 'tunnel', labelKey: 'nav.tunnel', icon: '🔗' },
   { key: 'bbr', labelKey: 'nav.bbr', icon: '🚀' },
   { key: 'update', labelKey: 'nav.update', icon: '🔄' },
   { key: 'settings', labelKey: 'nav.settings', icon: '⚙' },
@@ -169,6 +171,8 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
         return <MonitorPanel sessionId={sessionId} />
       case 'firewall':
         return <FirewallPanel sessionId={sessionId} />
+      case 'port':
+        return <PortPanel sessionId={sessionId} />
       // case 'software': removed - always mounted below
       case 'bbr':
         return <BbrPanel sessionId={sessionId} />

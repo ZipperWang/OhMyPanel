@@ -65,6 +65,11 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
   const [cacheCount, setCacheCount] = useState<number>(0)
   const [cacheClearing, setCacheClearing] = useState(false)
 
+  // Data directory state
+  const [dataDir, setDataDir] = useState('')
+  const [openingDir, setOpeningDir] = useState(false)
+  const [dirError, setDirError] = useState('')
+
   // Uptime state
   const [bootTime, setBootTime] = useState('')
   const [uptimeDuration, setUptimeDuration] = useState('')
@@ -114,11 +119,33 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
     }
   }, [])
 
+  // ponytail: fetch local SQLite data directory path
+  const fetchDataDir = useCallback(async () => {
+    try {
+      const dir = await invoke<string>('get_data_dir')
+      setDataDir(dir)
+    } catch { /* ignore */ }
+  }, [])
+
+  // Open the local SQLite data directory in the system file explorer
+  const handleOpenDataDir = useCallback(async () => {
+    setDirError('')
+    setOpeningDir(true)
+    try {
+      await invoke('open_data_dir')
+    } catch (e) {
+      setDirError(String(e))
+    } finally {
+      setOpeningDir(false)
+    }
+  }, [])
+
   useEffect(() => {
     fetchAuthMode()
     fetchUptime()
     fetchCacheCount()
-  }, [fetchAuthMode, fetchUptime, fetchCacheCount])
+    fetchDataDir()
+  }, [fetchAuthMode, fetchUptime, fetchCacheCount, fetchDataDir])
 
   // Sync input values when appSettings changes
   useEffect(() => {
@@ -446,6 +473,32 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
             </div>
           </div>
         )}
+
+        {/* Data Directory */}
+        <div className="settings-card">
+          <div className="settings-card-header">{t('settings.dataDirectory')}</div>
+          <div className="settings-card-body">
+            <div className="settings-row">
+              <span className="settings-label">{t('settings.dataDirPath')}</span>
+              <span className="settings-value" style={{ wordBreak: 'break-all', textAlign: 'right' }}>
+                {dataDir || t('common.loading')}
+              </span>
+            </div>
+            <div className="settings-hint">
+              {t('settings.dataDirHint')}
+            </div>
+            {dirError && <div className="settings-error">{t('settings.openDataDirFailed', { error: dirError })}</div>}
+            <div className="settings-btn-row">
+              <button
+                className="svc-cfg-btn primary"
+                onClick={handleOpenDataDir}
+                disabled={openingDir || !dataDir}
+              >
+                {openingDir ? '...' : t('settings.openDataDir')}
+              </button>
+            </div>
+          </div>
+        </div>
 
         {/* System Info */}
         <div className="settings-card">

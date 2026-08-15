@@ -272,12 +272,13 @@ pub async fn server_firewall_add(
     port: &str,
     protocol: &str,
     action: &str,
+    source: Option<&str>,
 ) -> Result<String, String> {
     let mgr = ssh_mgr.lock().await;
     let session = mgr.get_session(session_id)?;
     let cache = mgr.cache.clone();
     drop(mgr);
-    let result = server::add_firewall_rule(&session, &cache, session_id, port, protocol, action).await;
+    let result = server::add_firewall_rule(&session, &cache, session_id, port, protocol, action, source.unwrap_or("")).await;
     cache.invalidate(session_id, &["firewall"]);
     result
 }
@@ -289,12 +290,13 @@ pub async fn server_firewall_remove(
     port: &str,
     protocol: &str,
     action: &str,
+    source: Option<&str>,
 ) -> Result<String, String> {
     let mgr = ssh_mgr.lock().await;
     let session = mgr.get_session(session_id)?;
     let cache = mgr.cache.clone();
     drop(mgr);
-    let result = server::remove_firewall_rule(&session, &cache, session_id, port, protocol, action).await;
+    let result = server::remove_firewall_rule(&session, &cache, session_id, port, protocol, action, source.unwrap_or("")).await;
     cache.invalidate(session_id, &["firewall"]);
     result
 }
