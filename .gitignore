@@ -51,6 +51,9 @@ src-tauri/.cargo/config.toml
 # Documentation
 docs/
 
+# Internal application notes (not for open source)
+Codex_Open_Source_Application.md
+
 # Website
 website/
 website2/
