@@ -881,7 +881,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
             {versionsLoading ? (
               <div style={{ padding: '16px', textAlign: 'center' }}>{t('software.queryingVersions')}</div>
             ) : versionsError ? (
-              <div className="sw-confirm-warning" style={{ color: '#e74c3c' }}>{versionsError}</div>
+              <div className="sw-confirm-warning" style={{ color: 'var(--red)' }}>{versionsError}</div>
             ) : (
               <>
                 {/* Install method toggle — ponytail: source compile hidden, package only */}
@@ -902,7 +902,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                       width: '100%',
                       padding: '8px 12px',
                       borderRadius: '4px',
-                      border: '1px solid #ccc',
+                      border: '1px solid var(--border)',
                       fontSize: '14px',
                       background: 'var(--bg-panel)',
                       color: 'var(--text)',
@@ -946,7 +946,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
             {mysqlVersionsLoading ? (
               <div style={{ padding: '16px', textAlign: 'center' }}>{t('software.queryingVersions')}</div>
             ) : mysqlVersionsError ? (
-              <div className="sw-confirm-warning" style={{ color: '#e74c3c' }}>{mysqlVersionsError}</div>
+              <div className="sw-confirm-warning" style={{ color: 'var(--red)' }}>{mysqlVersionsError}</div>
             ) : (
               <>
                 <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -1045,7 +1045,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
             {sourcesLoading ? (
               <div style={{ padding: '16px', textAlign: 'center' }}>{t('software.loadingSources')}</div>
             ) : sourcesError ? (
-              <div className="sw-confirm-warning" style={{ color: '#e74c3c' }}>{sourcesError}</div>
+              <div className="sw-confirm-warning" style={{ color: 'var(--red)' }}>{sourcesError}</div>
             ) : removableSources.length === 0 ? (
               <div style={{ padding: '16px', textAlign: 'center' }}>{t('software.noOldSources')}</div>
             ) : (
@@ -1058,7 +1058,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                         display: 'flex',
                         alignItems: 'center',
                         padding: '8px',
-                        borderBottom: '1px solid #eee',
+                        borderBottom: '1px solid var(--border)',
                         cursor: 'pointer',
                       }}
                     >
@@ -1121,7 +1121,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   placeholder={t('software.sourceNamePlaceholder')}
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
-                    border: '1px solid #ccc', fontSize: '14px',
+                    border: '1px solid var(--border)', fontSize: '14px',
                     background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 />
@@ -1135,7 +1135,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   placeholder={t('software.sourceUrlPlaceholder')}
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
-                    border: '1px solid #ccc', fontSize: '14px',
+                    border: '1px solid var(--border)', fontSize: '14px',
                     background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 />
@@ -1149,7 +1149,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   placeholder={t('software.sourceGpgKeyPlaceholder')}
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
-                    border: '1px solid #ccc', fontSize: '14px',
+                    border: '1px solid var(--border)', fontSize: '14px',
                     background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 />
@@ -1157,7 +1157,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
             </div>
 
             {addSourceError && (
-              <div className="sw-confirm-warning" style={{ color: '#e74c3c' }}>{addSourceError}</div>
+              <div className="sw-confirm-warning" style={{ color: 'var(--red)' }}>{addSourceError}</div>
             )}
 
             <div className="sw-confirm-actions">
@@ -1235,7 +1235,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   placeholder={t('software.packageNamePlaceholder')}
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
-                    border: '1px solid #ccc', fontSize: '14px',
+                    border: '1px solid var(--border)', fontSize: '14px',
                     background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 />
@@ -1249,7 +1249,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   placeholder={t('software.displayNamePlaceholder')}
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
-                    border: '1px solid #ccc', fontSize: '14px',
+                    border: '1px solid var(--border)', fontSize: '14px',
                     background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 />
@@ -1261,7 +1261,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                   onChange={e => setAddCustomCategory(e.target.value)}
                   style={{
                     width: '100%', padding: '8px 12px', borderRadius: '4px',
-                    border: '1px solid #ccc', fontSize: '14px',
+                    border: '1px solid var(--border)', fontSize: '14px',
                     background: 'var(--bg-panel)', color: 'var(--text)',
                   }}
                 >
@@ -1276,7 +1276,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
             </div>
 
             {addCustomError && (
-              <div className="sw-confirm-warning" style={{ color: '#e74c3c' }}>{addCustomError}</div>
+              <div className="sw-confirm-warning" style={{ color: 'var(--red)' }}>{addCustomError}</div>
             )}
 
             <div className="sw-confirm-actions">

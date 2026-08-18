@@ -29,7 +29,6 @@ interface FirewallPanelProps {
 
 // Common service ports for one-click open/close
 const QUICK_PORTS = [
-  { port: '22', protocol: 'tcp', label: 'SSH' },
   { port: '80', protocol: 'tcp', label: 'HTTP' },
   { port: '443', protocol: 'tcp', label: 'HTTPS' },
   { port: '3306', protocol: 'tcp', label: 'MySQL' },
@@ -37,10 +36,6 @@ const QUICK_PORTS = [
   { port: '6379', protocol: 'tcp', label: 'Redis' },
   { port: '27017', protocol: 'tcp', label: 'MongoDB' },
   { port: '21', protocol: 'tcp', label: 'FTP' },
-  { port: '8080', protocol: 'tcp', label: 'HTTP-Alt' },
-  { port: '8888', protocol: 'tcp', label: 'Panel' },
-  { port: '9000', protocol: 'tcp', label: 'PHP-FPM' },
-  { port: '2375', protocol: 'tcp', label: 'Docker' },
 ]
 
 export default function FirewallPanel({ sessionId }: FirewallPanelProps) {

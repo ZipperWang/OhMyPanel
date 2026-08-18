@@ -1662,7 +1662,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
           >
             {t('files.go')} ➜
           </button>
-          <div style={{ width: '1px', height: '20px', background: '#575b5cff', margin: '0 18px' }} />
+          <div style={{ width: '1px', height: '20px', background: 'var(--border)', margin: '0 18px' }} />
           <div style={{ position: 'relative' }} ref={favoritesDropdownRef}>
             <button
               className="fb-btn fb-btn-favorites"

@@ -101,7 +101,8 @@ pub fn run() {
             commands::server_ops::server_reboot, commands::server_ops::server_get_uptime,
             commands::server_ops::server_deploy_pubkey, commands::server_ops::server_get_ssh_auth_mode,
             commands::server_ops::server_set_ssh_auth_mode, commands::server_ops::server_get_bbr_status,
-            commands::server_ops::server_set_bbr_status, commands::server_ops::server_get_site_logs,
+            commands::server_ops::server_set_bbr_status, commands::server_ops::server_get_gateway_ports_status,
+            commands::server_ops::server_set_gateway_ports, commands::server_ops::server_get_site_logs,
             commands::server_ops::server_read_site_log,
             // File Browser
             commands::fb::fb_favorites_list, commands::fb::fb_favorites_add, commands::fb::fb_favorites_remove,
@@ -129,8 +130,11 @@ pub fn run() {
             commands::server_ops::custom_software_list, commands::server_ops::custom_software_add, commands::server_ops::custom_software_remove, commands::server_ops::custom_software_action,
             commands::server_ops::server_check_installation,
             // Tunnels
-            commands::tunnel::tunnel_create, commands::tunnel::tunnel_close,
+            commands::tunnel::tunnel_create, commands::tunnel::tunnel_close, commands::tunnel::tunnel_close_batch,
+            commands::tunnel::tunnel_delete, commands::tunnel::tunnel_restore,
             commands::tunnel::tunnel_list, commands::tunnel::tunnel_get,
+            commands::tunnel::tunnel_update_note, commands::tunnel::tunnel_delete_batch,
+            commands::tunnel::tunnel_restore_batch,
             // Port Management
             commands::port::port_list, commands::port::port_query, commands::port::port_kill,
         ])

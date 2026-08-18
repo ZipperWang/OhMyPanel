@@ -183,7 +183,11 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
       case 'docker':
         return <DockerPanel sessionId={sessionId} onNavigateToSoftware={() => setActiveSection('software')} />
       case 'tunnel':
-        return <TunnelPanel sessionId={sessionId} />
+        return <TunnelPanel
+          sessionId={sessionId}
+          serverHost={connHost ? (connHost.includes('_') ? connHost.slice(0, connHost.lastIndexOf('_')) : connHost) : undefined}
+          connUsername={connUsername}
+        />
       case 'settings':
         return <ServerSettingsPanel sessionId={sessionId} appSettings={appSettings} onToggleAutoReconnect={onToggleAutoReconnect} onUpdateSettings={onUpdateSettings} />
       default:

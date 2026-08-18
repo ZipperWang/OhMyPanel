@@ -6693,6 +6693,113 @@ echo "BBR_DISABLED"
     Ok(if enable { "BBR enabled successfully." } else { "BBR disabled successfully." }.to_string())
 }
 
+// ===== SSH GatewayPorts (public access for remote forwarding) =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct GatewayPortsStatus {
+    pub enabled: bool,
+    pub value: String,
+}
+
+/// Read the effective GatewayPorts setting for remote forwarding.
+/// `sshd -T` prints the effective config (needs root); falls back to parsing
+/// sshd_config when `sshd -T` is unavailable.
+pub async fn get_gateway_ports_status(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<GatewayPortsStatus, String> {
+    // ponytail: cache status for connection lifetime
+    if let Some(cached) = cache.get(session_id, "gateway_ports", 0) {
+        if let Ok(status) = serde_json::from_str::<GatewayPortsStatus>(&cached) {
+            return Ok(status);
+        }
+    }
+    let cmd = r#"
+SUDO=""
+if [ "$(id -u)" != "0" ]; then SUDO="sudo -n "; fi
+GP=$($SUDO sshd -T 2>/dev/null | grep -i '^gatewayports' | awk '{print $2; exit}')
+if [ -z "$GP" ]; then
+  GP=$(grep -iE '^[[:space:]]*[^#]*gatewayports' /etc/ssh/sshd_config 2>/dev/null | tail -1 | awk '{print $2}' | tr 'A-Z' 'a-z')
+fi
+echo "GP=${GP:-unknown}"
+"#;
+    let (stdout, _stderr, _code) = crate::ssh::session_exec_with_output(session, cmd, 10).await?;
+    let mut value = "unknown".to_string();
+    for line in stdout.lines() {
+        if let Some(v) = line.strip_prefix("GP=") {
+            value = v.trim().to_string();
+        }
+    }
+    let result = GatewayPortsStatus {
+        enabled: value == "yes",
+        value,
+    };
+    // ponytail: cache status
+    if let Ok(json) = serde_json::to_string(&result) {
+        cache.put(session_id, "gateway_ports", json);
+    }
+    Ok(result)
+}
+
+/// Enable or disable GatewayPorts in sshd_config, validate with `sshd -t`,
+/// then restart sshd. Backs up sshd_config first and restores it if the
+/// config test fails. Works for root or passwordless-sudo users.
+pub async fn set_gateway_ports(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    enable: bool,
+) -> Result<String, String> {
+    let setting = if enable { "yes" } else { "no" };
+    let cmd = format!(r#"
+SUDO=""
+if [ "$(id -u)" != "0" ]; then SUDO="sudo -n "; fi
+CFG=/etc/ssh/sshd_config
+BK="$CFG.gw.$(date +%Y%m%d%H%M%S)"
+if ! $SUDO cp "$CFG" "$BK" 2>/dev/null; then
+  echo "GATEWAY_ERROR:need_root: cannot write $CFG — login as root or configure passwordless sudo"
+  exit 1
+fi
+if $SUDO grep -qE '^[[:space:]]*#?[[:space:]]*GatewayPorts' "$CFG"; then
+  $SUDO sed -i -E 's/^[[:space:]]*#?[[:space:]]*GatewayPorts.*/GatewayPorts {setting}/' "$CFG"
+else
+  echo 'GatewayPorts {setting}' | $SUDO tee -a "$CFG" > /dev/null
+fi
+if ! $SUDO sshd -t; then
+  echo "GATEWAY_ERROR:config_test_failed: sshd config test failed — original config restored"
+  $SUDO cp "$BK" "$CFG"
+  exit 1
+fi
+if ! ($SUDO systemctl restart sshd 2>/dev/null || $SUDO systemctl restart ssh 2>/dev/null || $SUDO service sshd restart 2>/dev/null || $SUDO service ssh restart 2>/dev/null); then
+  echo "GATEWAY_ERROR:restart_failed: failed to restart sshd — config changed but not applied"
+  exit 1
+fi
+echo "GATEWAY_OK"
+"#);
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 30).await?;
+    if stdout.contains("GATEWAY_ERROR") {
+        let msg = stdout
+            .lines()
+            .find(|l| l.contains("GATEWAY_ERROR"))
+            .unwrap_or("GATEWAY_ERROR:unknown")
+            .replace("GATEWAY_ERROR:", "");
+        return Err(msg);
+    }
+    if code != 0 {
+        return Err(format!("Failed to set GatewayPorts: {}", stderr.trim()));
+    }
+    if !stdout.contains("GATEWAY_OK") {
+        return Err("Failed to set GatewayPorts".to_string());
+    }
+    Ok(if enable {
+        "GatewayPorts enabled successfully."
+    } else {
+        "GatewayPorts disabled successfully."
+    }
+    .to_string())
+}
+
 // ===== Site Logs =====
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

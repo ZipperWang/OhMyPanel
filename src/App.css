@@ -211,7 +211,7 @@ body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #4CAF50;
+  background: var(--green);
   margin-right: 6px;
   vertical-align: middle;
 }
@@ -423,7 +423,7 @@ body {
 .sidebar-edit-input:focus {
   border-color: var(--accent-strong);
   box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.15);
-  background: #0a0e14;
+  background: var(--bg-panel);
 }
 
 .sidebar-edit-action-btn {
@@ -1193,7 +1193,7 @@ body {
 }
 
 .error-dialog {
-  background: #1a1a1a;
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 24px;
@@ -1416,7 +1416,7 @@ body {
 
 .fb-btn-favorites {
   background: transparent;
-  color: #fff;
+  color: var(--text);
   border: none;
   border-radius: 1px;
   padding: 6px 16px;
@@ -1425,6 +1425,7 @@ body {
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
+  width: auto;
   transition: background 0.15s;
 }
 
@@ -1504,39 +1505,39 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: #ffffff;
-  border: 1px solid #d0d7de;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 5px 8px;
   min-width: 0;
 }
 .fb-search-box:focus-within {
-  border-color: #0969da;
+  border-color: var(--accent-strong);
 }
 .fb-search-input {
   background: transparent;
   border: none;
   outline: none;
-  color: #1f2328;
+  color: var(--text);
   font-size: 12px;
   width: 100%;
   min-width: 60px;
   max-width: 140px;
 }
 .fb-search-input::placeholder {
-  color: #656d76;
+  color: var(--text-muted);
 }
 .fb-search-clear {
   background: none;
   border: none;
-  color: #656d76;
+  color: var(--text-muted);
   font-size: 10px;
   cursor: pointer;
   padding: 0 2px;
   line-height: 1;
 }
 .fb-search-clear:hover {
-  color: #1f2328;
+  color: var(--text);
 }
 
 .fb-search-hint {
@@ -1631,7 +1632,7 @@ body.dragging-files * {
 }
 
 .fb-item.fb-item-dragover {
-  background: #1f2a38;
+  background: var(--accent-soft, rgba(88, 166, 255, 0.08));
   outline: 2px dashed var(--accent);
   outline-offset: -2px;
   animation: drag-pulse 0.8s ease-in-out infinite;
@@ -1643,7 +1644,7 @@ body.dragging-files * {
 }
 
 .fb-item.fb-item-dropinto {
-  background: #1a2636;
+  background: var(--accent-soft, rgba(88, 166, 255, 0.15));
   outline-style: solid;
   outline-width: 2px;
   outline-color: var(--green);
@@ -2024,7 +2025,7 @@ body.dragging-files * {
   padding: 8px 12px;
   font-size: 11px;
   font-family: 'Cascadia Code', 'Consolas', monospace;
-  color: #7ee787;
+  color: var(--accent-hover);
   overflow-y: auto;
   flex: 1;
   white-space: pre-wrap;
@@ -4356,8 +4357,8 @@ body.dragging-files * {
 }
 
 .sites-search {
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-strong);
   padding: 5px 10px;
@@ -4368,8 +4369,8 @@ body.dragging-files * {
 }
 
 .sites-search:focus {
-  border-color: rgba(88,166,255,0.5);
-  background: rgba(255,255,255,0.08);
+  border-color: var(--accent);
+  background: var(--bg-panel);
 }
 
 .sites-search::placeholder {
@@ -4966,8 +4967,8 @@ body.dragging-files * {
 }
 
 .firewall-notice {
-  background: #23883522;
-  border: 1px solid #23883544;
+  background: var(--green-soft);
+  border: 1px solid var(--green-soft-strong);
   color: var(--green);
   padding: 8px 12px;
   border-radius: 6px;
@@ -5011,7 +5012,7 @@ body.dragging-files * {
 }
 
 .firewall-badge.inactive {
-  background: #9e6a03;
+  background: var(--yellow);
   color: #fff;
 }
 
@@ -5356,7 +5357,7 @@ body.dragging-files * {
 .fw-stat-card.total .fw-stat-num { color: var(--accent); }
 .fw-stat-card.allow .fw-stat-num { color: var(--green); }
 .fw-stat-card.deny .fw-stat-num { color: var(--red); }
-.fw-stat-card.reject .fw-stat-num { color: #d29922; }
+.fw-stat-card.reject .fw-stat-num { color: var(--yellow); }
 
 /* Quick ports */
 .fw-quick-ports {
@@ -6007,13 +6008,13 @@ body.dragging-files * {
 }
 
 .ssl-badge-on {
-  background: #0d3117;
+  background: var(--green-bg-soft);
   color: var(--green);
   border: 1px solid var(--green-bg);
 }
 
 .ssl-badge-off {
-  background: #1c1208;
+  background: var(--bg-subtle);
   color: var(--text-muted);
   border: 1px solid var(--border);
 }
@@ -6950,7 +6951,7 @@ body.dragging-files * {
 .docker-col-image { flex: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 .docker-col-status { flex: 1.5; }
 .docker-col-ports { flex: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 11px; }
-.docker-col-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+.docker-col-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
 /* Batch selection column */
 .docker-col-check { flex: 0 0 28px; display: flex; align-items: center; }
@@ -7054,13 +7055,15 @@ body.dragging-files * {
 .docker-state-unknown { color: var(--text-muted); }
 
 .docker-action-btn {
-  padding: 2px 6px;
+  padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg-subtle);
   color: var(--text);
   cursor: pointer;
   font-size: 12px;
+  white-space: nowrap;
+  line-height: 1.4;
 }
 
 .docker-action-btn:hover {
@@ -7733,8 +7736,8 @@ body.dragging-files * {
 }
 
 .search-input {
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-strong);
   padding: 8px 12px;
@@ -7745,8 +7748,8 @@ body.dragging-files * {
 }
 
 .search-input:focus {
-  border-color: rgba(88,166,255,0.5);
-  background: rgba(255,255,255,0.08);
+  border-color: var(--accent);
+  background: var(--bg-panel);
 }
 
 .search-input::placeholder {

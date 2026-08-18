@@ -26,6 +26,7 @@ pub struct TunnelConfig {
     pub local_port: u16,
     pub remote_host: String,
     pub remote_port: u16,
+    pub note: String,
 }
 
 /// Active tunnel info
@@ -34,6 +35,7 @@ pub struct ActiveTunnel {
     pub id: String,
     pub session_id: String,
     pub config: TunnelConfig,
+    pub created_at: i64,
     pub shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
@@ -48,6 +50,8 @@ pub struct TunnelInfo {
     pub remote_host: String,
     pub remote_port: u16,
     pub status: String,
+    pub created_at: i64,
+    pub note: String,
 }
 
 /// Structured tunnel error so the frontend can show a localized message.
@@ -120,21 +124,32 @@ impl TunnelManager {
         }
     }
 
-    /// Create a new tunnel
+    /// Create a new tunnel. `tunnel_id` is supplied by the caller so restored
+    /// tunnels keep the same persisted id. `created_at` is optional: pass
+    /// `Some(ts)` when restoring so the tunnel keeps its original position in
+    /// the list; pass `None` for brand-new tunnels.
     pub async fn create_tunnel(
         &self,
+        tunnel_id: String,
         session_id: String,
         session: SshSession,
         config: TunnelConfig,
         app_handle: AppHandle,
+        created_at: Option<i64>,
     ) -> Result<String, String> {
-        let tunnel_id = uuid::Uuid::new_v4().to_string();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let created_at = created_at.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64
+        });
 
         let active_tunnel = ActiveTunnel {
             id: tunnel_id.clone(),
             session_id: session_id.clone(),
             config: config.clone(),
+            created_at,
             shutdown_tx: Some(shutdown_tx),
         };
 
@@ -203,9 +218,10 @@ impl TunnelManager {
         tunnels_reg: Arc<Mutex<HashMap<String, ActiveTunnel>>>,
     ) -> Result<(), String> {
         let bind_addr = format!("{}:{}", config.local_host, config.local_port);
-        let listener = TcpListener::bind(&bind_addr)
-            .await
-            .map_err(|e| format!("Failed to bind {}: {}", bind_addr, e))?;
+        let listener = TcpListener::bind(&bind_addr).await.map_err(|e| match e.kind() {
+            std::io::ErrorKind::AddrInUse => format!("Failed to bind {}: 这个本地端口已被使用。", bind_addr),
+            _ => format!("Failed to bind {}: {}", bind_addr, e),
+        })?;
 
         let _ = app_handle.emit("tunnel-status", serde_json::json!({
             "tunnelId": tunnel_id,
@@ -313,11 +329,19 @@ impl TunnelManager {
         // Request the server to listen on the remote port
         let handle = session.handle.clone();
         let mut handle_guard = handle.lock().await;
-        let bound_port = handle_guard
+        let mut bound_port = handle_guard
             .tcpip_forward(&config.remote_host, config.remote_port as u32)
             .await
             .map_err(|e| format!("Remote forward request denied: {}", e))?;
         drop(handle_guard);
+
+        // russh returns 0 when the server confirms a specific requested port:
+        // RFC 4254 §7.1 — the SSH_MSG_REQUEST_SUCCESS reply carries no port
+        // number in that case, and russh maps it to 0. Fall back to the
+        // requested port so forwarded connections are routed to us correctly.
+        if bound_port == 0 {
+            bound_port = config.remote_port as u32;
+        }
 
         // Register ourselves: the SshHandler routes server-side forwarded
         // connections to us via this channel, keyed by the server port.
@@ -402,9 +426,10 @@ impl TunnelManager {
         tunnels_reg: Arc<Mutex<HashMap<String, ActiveTunnel>>>,
     ) -> Result<(), String> {
         let bind_addr = format!("{}:{}", config.local_host, config.local_port);
-        let listener = TcpListener::bind(&bind_addr)
-            .await
-            .map_err(|e| format!("Failed to bind {}: {}", bind_addr, e))?;
+        let listener = TcpListener::bind(&bind_addr).await.map_err(|e| match e.kind() {
+            std::io::ErrorKind::AddrInUse => format!("Failed to bind {}: 这个本地端口已被使用。", bind_addr),
+            _ => format!("Failed to bind {}: {}", bind_addr, e),
+        })?;
 
         let _ = app_handle.emit("tunnel-status", serde_json::json!({
             "tunnelId": tunnel_id,
@@ -656,6 +681,8 @@ impl TunnelManager {
                 remote_host: t.config.remote_host.clone(),
                 remote_port: t.config.remote_port,
                 status: "active".to_string(),
+                created_at: t.created_at,
+                note: t.config.note.clone(),
             })
             .collect()
     }
@@ -679,6 +706,18 @@ impl TunnelManager {
                 remote_host: t.config.remote_host.clone(),
                 remote_port: t.config.remote_port,
                 status: "active".to_string(),
+                created_at: t.created_at,
+                note: t.config.note.clone(),
             })
+    }
+
+    /// Update the note of an active tunnel in memory. No-op when the tunnel is
+    /// not running (stopped): the caller still persists the change to the DB.
+    pub async fn update_note(&self, tunnel_id: &str, note: String) -> Result<(), String> {
+        let mut tunnels = self.tunnels.lock().await;
+        if let Some(tunnel) = tunnels.get_mut(tunnel_id) {
+            tunnel.config.note = note;
+        }
+        Ok(())
     }
 }

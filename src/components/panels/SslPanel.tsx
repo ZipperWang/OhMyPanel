@@ -157,7 +157,7 @@ export default function SslPanel({ sessionId }: SslPanelProps) {
               <div className="site-card-actions">
                 <button
                   className="svc-cfg-btn"
-                  style={{ background: '#16a34a', color: '#fff', border: '1px solid #15803d' }}
+                  style={{ background: 'var(--green-bg)', color: '#fff', border: '1px solid var(--green-strong)' }}
                   onClick={() => handleInstall(site.domain)}
                   disabled={logs[site.domain]?.status === 'installing'}
                 >

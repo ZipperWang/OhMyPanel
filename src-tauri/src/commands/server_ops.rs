@@ -530,6 +530,33 @@ pub async fn server_set_bbr_status(
 }
 
 #[tauri::command]
+pub async fn server_get_gateway_ports_status(
+    ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
+    session_id: &str,
+) -> Result<GatewayPortsStatus, String> {
+    let mgr = ssh_mgr.lock().await;
+    let session = mgr.get_session(session_id)?;
+    let cache = mgr.cache.clone();
+    drop(mgr);
+    server::get_gateway_ports_status(&session, &cache, session_id).await
+}
+
+#[tauri::command]
+pub async fn server_set_gateway_ports(
+    ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
+    session_id: &str,
+    enable: bool,
+) -> Result<String, String> {
+    let mgr = ssh_mgr.lock().await;
+    let session = mgr.get_session(session_id)?;
+    let cache = mgr.cache.clone();
+    drop(mgr);
+    let result = server::set_gateway_ports(&session, &cache, session_id, enable).await;
+    cache.invalidate(session_id, &["gateway_ports"]);
+    result
+}
+
+#[tauri::command]
 pub async fn server_get_site_logs(
     ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
     session_id: &str,
