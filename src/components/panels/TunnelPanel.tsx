@@ -58,7 +58,6 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername }: Tun
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
-  const [copiedId, setCopiedId] = useState<string | null>(null)
   const [gpStatus, setGpStatus] = useState<GatewayPortsStatus | null>(null)
   const [gpSaving, setGpSaving] = useState(false)
   const [gpMsg, setGpMsg] = useState('')
@@ -181,6 +180,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername }: Tun
       await invoke('ssh_reconnect', { sessionId })
       setMsg(reconnectAction === 'disable' ? t('tunnel.reconnectDoneDisable') : t('tunnel.reconnectDone'))
       setShowReconnectConfirm(false)
+      setShowCreate(false)
       // 重连后旧隧道已失效，刷新列表与 GatewayPorts 状态
       await Promise.all([loadTunnels(), fetchGatewayPorts()])
     } catch (e) {
@@ -400,17 +400,6 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername }: Tun
     }
   }
 
-  const handleCopy = async (tunnel: TunnelInfo) => {
-    try {
-      // 复制的内容必须与表格显示一致（按类型区分的完整连接命令）
-      await navigator.clipboard.writeText(getConnectionCommand(tunnel))
-      setCopiedId(tunnel.id)
-      setTimeout(() => setCopiedId(null), 2000)
-    } catch (e) {
-      setError(String(e))
-    }
-  }
-
   const resetForm = () => {
     setTunnelType('local')
     setLocalHost('127.0.0.1')
@@ -471,41 +460,6 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername }: Tun
 
   const getTunnelDescription = (tunnel: TunnelInfo) =>
     `${getTunnelEndpoint(tunnel)} ${getTunnelSecondary(tunnel)}`
-
-  // 按目标端口匹配常用客户端命令模板（host/port 为用户的连接入口）
-  const buildPortCmd = (targetPort: number, host: string, port: number): string | undefined => {
-    switch (targetPort) {
-      case 3306: return `mysql -h ${host} -P ${port} -u root -p`
-      case 5432: return `psql -h ${host} -p ${port} -U postgres`
-      case 6379: return `redis-cli -h ${host} -p ${port}`
-      case 27017: return `mongosh "mongodb://${host}:${port}"`
-      default: return undefined
-    }
-  }
-
-  const getConnectionCommand = (tunnel: TunnelInfo): string => {
-    if (tunnel.tunnel_type === 'dynamic') {
-      return `export ALL_PROXY=socks5://${tunnel.local_host}:${tunnel.local_port}`
-    }
-    if (tunnel.tunnel_type === 'remote') {
-      // 服务器转发（-R）：连接入口在服务器上（remote_host:remote_port），不是本机。
-      const host = serverHost || tunnel.remote_host
-      // GatewayPorts 开启 → 服务器监听 0.0.0.0，可直接连服务器地址
-      if (gpStatus?.enabled) {
-        return buildPortCmd(tunnel.remote_port, host, tunnel.remote_port) || `${host}:${tunnel.remote_port}`
-      }
-      // GatewayPorts 未开启（默认）→ 服务器只监听 127.0.0.1，需先 SSH 到服务器再连
-      const userPrefix = connUsername ? `${connUsername}@` : ''
-      const sshCmd = `ssh ${userPrefix}${host}`
-      const inner = buildPortCmd(tunnel.remote_port, '127.0.0.1', tunnel.remote_port)
-      return inner
-        ? `${sshCmd} -t "${inner}"`
-        : `${sshCmd} -t "curl 127.0.0.1:${tunnel.remote_port}"`
-    }
-    // 本地转发（-L）：连接入口在本机 local_host:local_port
-    return buildPortCmd(tunnel.remote_port, tunnel.local_host, tunnel.local_port) ||
-      `${tunnel.local_host}:${tunnel.local_port}`
-  }
 
   const quickActions = [
     { label: t('tunnel.quick.mysql'), port: 3306 },
@@ -626,20 +580,19 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername }: Tun
               <th>{t('tunnel.type')}</th>
               <th>{t('tunnel.mapping')}</th>
               <th>{t('tunnel.note')}</th>
-              <th>{t('tunnel.usageHint')}</th>
               <th>{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '2rem' }}>
+                <td colSpan={6} style={{ textAlign: 'center', padding: '2rem' }}>
                   {t('common.loading')}
                 </td>
               </tr>
             ) : tunnels.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '2rem' }}>
+                <td colSpan={6} style={{ textAlign: 'center', padding: '2rem' }}>
                   <div>{t('tunnel.empty')}</div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
                     {t('tunnel.emptyHint')}
@@ -782,30 +735,6 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername }: Tun
                   </td>
                   <td>
                     {tunnel.status === 'active' ? (
-                      <span
-                        style={{
-                          fontFamily: 'monospace',
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          color: 'var(--accent)',
-                          display: 'inline-block',
-                          maxWidth: '240px',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          verticalAlign: 'bottom',
-                        }}
-                        title={`${getConnectionCommand(tunnel)}\n${t('common.copy')}`}
-                        onClick={() => handleCopy(tunnel)}
-                      >
-                        {copiedId === tunnel.id ? '✓' : getConnectionCommand(tunnel)}
-                      </span>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
-                    )}
-                  </td>
-                  <td>
-                    {tunnel.status === 'active' ? (
                       <>
                         <button
                           className="btn-secondary"
@@ -899,7 +828,13 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername }: Tun
                     key={type}
                     className={tunnelType === type ? 'btn-primary' : 'btn-secondary'}
                     style={{ padding: '6px 12px', fontSize: '12px' }}
-                    onClick={() => setTunnelType(type)}
+                    onClick={() => {
+                      setTunnelType(type)
+                      // 服务器转发：GatewayPorts 开启 → 服务器地址为当前服务器IP，否则 127.0.0.1
+                      if (type === 'remote') {
+                        setRemoteHost(gpStatus?.enabled ? (serverHost || '127.0.0.1') : '127.0.0.1')
+                      }
+                    }}
                   >
                     {t(`tunnel.types.${type}`)}
                   </button>
