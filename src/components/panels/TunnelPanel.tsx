@@ -45,7 +45,7 @@ interface GatewayPortsStatus {
 
 type TunnelType = 'local' | 'remote' | 'dynamic'
 
-export default function TunnelPanel({ sessionId, serverHost, connUsername }: TunnelPanelProps) {
+export default function TunnelPanel({ sessionId, serverHost, connUsername: _connUsername }: TunnelPanelProps) {
   const { t } = useTranslation()
   const [tunnels, setTunnels] = useState<TunnelInfo[]>([])
   const [showCreate, setShowCreate] = useState(false)
@@ -60,8 +60,6 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername }: Tun
   const [error, setError] = useState('')
   const [gpStatus, setGpStatus] = useState<GatewayPortsStatus | null>(null)
   const [gpSaving, setGpSaving] = useState(false)
-  const [gpMsg, setGpMsg] = useState('')
-  const [gpMsgType, setGpMsgType] = useState<'error' | 'success'>('error')
   const [showReconnectConfirm, setShowReconnectConfirm] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
   // 重连确认框对应的操作（开启/关闭），决定文案
@@ -116,25 +114,6 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername }: Tun
       setGpStatus(null)
     }
   }, [sessionId])
-
-  const handleSetGatewayPorts = async (enable: boolean) => {
-    if (!sessionId) return
-    setGpSaving(true)
-    setGpMsg('')
-    try {
-      const result = await invoke<string>('server_set_gateway_ports', { sessionId, enable })
-      setGpMsgType('success')
-      // 开启后旧会话的转发请求仍按旧配置处理，提示用户重连才真正生效
-      setGpMsg(enable ? `${result} ${t('tunnel.gatewayReconnectHint')}` : result)
-      await fetchGatewayPorts()
-    } catch (e) {
-      setGpMsgType('error')
-      setGpMsg(String(e))
-      await fetchGatewayPorts()
-    } finally {
-      setGpSaving(false)
-    }
-  }
 
   // 创建对话框内「开启」按钮 / 「点击此处开启」链接 → 开启后弹重连确认框
   const handleEnableGatewayFromDialog = async () => {
