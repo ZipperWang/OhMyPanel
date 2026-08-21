@@ -6,12 +6,20 @@ on:
       - main
     paths:
       - .github/workflows/apply-hardening-from-main.yml
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: >-
+      github.event_name == 'push' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'hardening/host-key-and-branding')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
