@@ -3,8 +3,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
 
 interface SshKeyPair {
-  private_key_pem: string
   public_key_openssh: string
+  private_key_path: string
 }
 
 interface SshAuthMode {
@@ -268,23 +268,10 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
       const kp = await invoke<SshKeyPair>('ssh_generate_keypair', { algorithm: keyAlgorithm })
       setKeyPair(kp)
     } catch (e) {
-      setKeyError(String(e))
+      const message = String(e)
+      if (!message.toLowerCase().includes('cancelled')) setKeyError(message)
     } finally {
       setKeyGenLoading(false)
-    }
-  }
-
-  // Download private key
-  const handleDownloadKey = async () => {
-    if (!keyPair) return
-    try {
-      await invoke<string>('save_key_to_local', {
-        content: keyPair.private_key_pem,
-        fileName: `id_${keyAlgorithm}`,
-      })
-    } catch (e) {
-      const msg = String(e)
-      if (!msg.includes('cancelled')) setKeyError(msg)
     }
   }
 
@@ -608,11 +595,11 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
                       value={keyPair.public_key_openssh}
                       rows={3}
                     />
+                    <div className="settings-hint">
+                      {t('settings.privateKeySaved', { path: keyPair.private_key_path })}
+                    </div>
                   </div>
                   <div className="settings-btn-row">
-                    <button className="svc-cfg-btn" onClick={handleDownloadKey}>
-                      {t('settings.downloadPrivateKey')}
-                    </button>
                     <button
                       className="svc-cfg-btn primary"
                       onClick={handleDeployKey}

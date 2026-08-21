@@ -1,30 +1,71 @@
 use std::sync::Arc;
 use tauri::Emitter;
 use tokio::sync::Mutex as AsyncMutex;
+use crate::db::HostKeyStore;
 use crate::ssh::{self, SshManager};
 use crate::server;
 use crate::tunnel::TunnelManager;
+use crate::DbPool;
 
 #[tauri::command]
 pub async fn ssh_connect(
     ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
+    db: tauri::State<'_, DbPool>,
     app: tauri::AppHandle,
     config: serde_json::Value,
 ) -> Result<String, String> {
     let session_id = uuid::Uuid::new_v4().to_string();
     let host = config["host"].as_str().unwrap_or("").to_string();
-    let port = config["port"].as_u64().unwrap_or(22) as u16;
+    let port_value = config["port"].as_u64().unwrap_or(22);
+    let port = u16::try_from(port_value).map_err(|_| "Invalid SSH port".to_string())?;
+    if port == 0 {
+        return Err("Invalid SSH port".to_string());
+    }
     let username = config["username"].as_str().unwrap_or("").to_string();
     let password = config["password"].as_str().map(|s| s.to_string());
     let key_path = config["keyPath"].as_str().map(|s| s.to_string());
     let cols = config["cols"].as_u64().unwrap_or(80) as u32;
     let rows = config["rows"].as_u64().unwrap_or(24) as u32;
+    let trusted_host_key = {
+        let conn = db.lock().map_err(|_| "SSH host key database is unavailable".to_string())?;
+        HostKeyStore::get(&conn, &host, port)?
+    }
+    .map(|record| {
+        russh_keys::parse_public_key_base64(&record.key_base64)
+            .map_err(|e| format!("Stored SSH host key is invalid: {}", e))
+    })
+    .transpose()?;
     // ponytail: network operations without lock — only acquire briefly to insert session
-    let session = SshManager::do_connect(session_id.clone(), host, port, username, password, key_path, app.clone(), cols, rows).await?;
+    let session = SshManager::do_connect(
+        session_id.clone(),
+        host,
+        port,
+        username,
+        password,
+        key_path,
+        trusted_host_key,
+        app.clone(),
+        cols,
+        rows,
+    )
+    .await?;
     let mgr = ssh_mgr.lock().await;
     mgr.insert_session(session_id.clone(), session, app);
     drop(mgr);
     Ok(session_id)
+}
+
+#[tauri::command]
+pub fn ssh_trust_host_key(
+    db: tauri::State<'_, DbPool>,
+    host: &str,
+    port: u16,
+    key_base64: &str,
+    replace: bool,
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|_| "SSH host key database is unavailable".to_string())?;
+    HostKeyStore::trust(&conn, host, port, key_base64, replace)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -345,25 +386,26 @@ pub async fn ssh_reconnect(
 }
 
 #[tauri::command]
-pub async fn ssh_generate_keypair(algorithm: String) -> Result<server::SshKeyPair, String> {
-    tokio::task::spawn_blocking(move || server::generate_ssh_keypair(&algorithm))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-}
-
-#[tauri::command]
-pub async fn save_key_to_local(app: tauri::AppHandle, content: &str, file_name: &str) -> Result<String, String> {
+pub async fn ssh_generate_keypair(
+    app: tauri::AppHandle,
+    algorithm: String,
+) -> Result<server::SshKeyPair, String> {
     use tauri_plugin_dialog::DialogExt;
     let (tx, rx) = tokio::sync::oneshot::channel::<Option<tauri_plugin_dialog::FilePath>>();
     let dialog = app.dialog().file();
-    dialog.set_file_name(file_name).save_file(move |path| { let _ = tx.send(path); });
+    dialog
+        .set_file_name(format!("id_{}", algorithm))
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
     let local_path = match rx.await.map_err(|_| "Dialog cancelled")? {
         Some(p) => p,
         None => return Err("Save cancelled".to_string()),
     };
-    let local_str = local_path.to_string();
-    std::fs::write(&local_str, content).map_err(|e| format!("Failed to write key: {}", e))?;
-    #[cfg(unix)]
-    { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&local_str, std::fs::Permissions::from_mode(0o600)); }
-    Ok(local_str)
+    let local_path = local_path
+        .into_path()
+        .map_err(|_| "Private key must be saved to a local file".to_string())?;
+    tokio::task::spawn_blocking(move || server::generate_ssh_keypair(&algorithm, &local_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }

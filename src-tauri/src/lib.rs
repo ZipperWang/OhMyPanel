@@ -55,7 +55,7 @@ pub fn run() {
             commands::ssh::ssh_check_space, commands::ssh::ssh_upload, commands::ssh::ssh_upload_chunk, commands::ssh::ssh_sftp_reset, commands::ssh::ssh_upload_files_batch, commands::ssh::ssh_create_dirs_batch, commands::ssh::ssh_exec, commands::ssh::ssh_download_file,
             commands::ssh::ssh_download_to_local, commands::ssh::ssh_save_as_local, commands::ssh::ssh_save_pause, commands::ssh::ssh_save_resume, commands::ssh::ssh_save_stop,
             commands::ssh::ssh_compress, commands::ssh::ssh_extract, commands::ssh::ssh_reconnect,
-            commands::ssh::ssh_generate_keypair, commands::ssh::save_key_to_local,
+            commands::ssh::ssh_generate_keypair, commands::ssh::ssh_trust_host_key,
             // Config
             commands::config::config_list, commands::config::config_save, commands::config::config_delete, commands::config::config_save_credentials,
             commands::config::clear_proxy_env,

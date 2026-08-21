@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use russh::client::{self, Handler};
 use russh::ChannelMsg;
+use russh_keys::PublicKeyBase64;
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
 
@@ -78,6 +80,34 @@ pub struct SshHandler {
     /// Remote-forward registrations: server listen port -> tunnel receiver.
     /// The server names the port in server_channel_open_forwarded_tcpip.
     pub forwarded_reg: Arc<std::sync::Mutex<HashMap<u32, mpsc::UnboundedSender<ForwardedTcpip>>>>,
+    expected_host_key: Option<russh_keys::key::PublicKey>,
+    host_key_check: Arc<std::sync::Mutex<HostKeyCheckState>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PresentedHostKey {
+    algorithm: String,
+    fingerprint: String,
+    key_base64: String,
+}
+
+#[derive(Default)]
+struct HostKeyCheckState {
+    presented: Option<PresentedHostKey>,
+    accepted: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HostKeyVerificationError {
+    kind: &'static str,
+    host: String,
+    port: u16,
+    algorithm: String,
+    fingerprint: String,
+    key_base64: String,
+    expected_fingerprint: Option<String>,
 }
 
 #[async_trait]
@@ -86,9 +116,20 @@ impl Handler for SshHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh_keys::key::PublicKey,
+        server_public_key: &russh_keys::key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        let accepted = self
+            .expected_host_key
+            .as_ref()
+            .is_some_and(|expected| expected == server_public_key);
+        let mut state = self.host_key_check.lock().unwrap();
+        state.presented = Some(PresentedHostKey {
+            algorithm: server_public_key.name().to_string(),
+            fingerprint: server_public_key.fingerprint(),
+            key_base64: server_public_key.public_key_base64(),
+        });
+        state.accepted = accepted;
+        Ok(accepted)
     }
 
     /// Remote forwarding: the server opens a channel for a new incoming connection.
@@ -116,6 +157,7 @@ pub struct ConnectInfo {
     pub username: String,
     pub password: Option<String>,
     pub key_path: Option<String>,
+    pub host_key: russh_keys::key::PublicKey,
     pub cols: u32,
     pub rows: u32,
 }
@@ -139,6 +181,55 @@ pub struct SshSession {
 pub struct TransferControl {
     pub paused: AtomicBool,
     pub stopped: AtomicBool,
+}
+
+fn host_key_verification_error(
+    host: &str,
+    port: u16,
+    expected: Option<&russh_keys::key::PublicKey>,
+    check: &Arc<std::sync::Mutex<HostKeyCheckState>>,
+) -> Option<String> {
+    let state = check.lock().ok()?;
+    if state.accepted {
+        return None;
+    }
+    let presented = state.presented.as_ref()?;
+    let error = HostKeyVerificationError {
+        kind: if expected.is_some() { "changed" } else { "unknown" },
+        host: host.to_string(),
+        port,
+        algorithm: presented.algorithm.clone(),
+        fingerprint: presented.fingerprint.clone(),
+        key_base64: presented.key_base64.clone(),
+        expected_fingerprint: expected.map(|key| key.fingerprint()),
+    };
+    let serialized = serde_json::to_string(&error).ok()?;
+    Some(format!("HOST_KEY_VERIFICATION:{}", serialized))
+}
+
+fn load_secret_key_protected(path: &str) -> Result<russh_keys::key::KeyPair, String> {
+    const MAX_PRIVATE_KEY_BYTES: usize = 1024 * 1024;
+
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("Failed to open key: {}", e))?;
+    let mut secret = russh::CryptoVec::new();
+    while secret.len() <= MAX_PRIVATE_KEY_BYTES {
+        let remaining = MAX_PRIVATE_KEY_BYTES + 1 - secret.len();
+        let read_size = remaining.min(8192);
+        let read = secret
+            .read(read_size, &mut file)
+            .map_err(|e| format!("Failed to read key: {}", e))?;
+        if read == 0 {
+            break;
+        }
+    }
+    if secret.len() > MAX_PRIVATE_KEY_BYTES {
+        return Err("Private key file exceeds the 1 MiB limit".to_string());
+    }
+    let secret_text = std::str::from_utf8(secret.as_ref())
+        .map_err(|e| format!("Private key is not valid UTF-8: {}", e))?;
+    russh_keys::decode_secret_key(secret_text, None)
+        .map_err(|e| format!("Failed to decode key: {}", e))
 }
 
 pub struct SshManager {
@@ -166,11 +257,24 @@ impl SshManager {
         username: String,
         password: Option<String>,
         key_path: Option<String>,
+        host_key: russh_keys::key::PublicKey,
         app_handle: AppHandle,
         cols: u32,
         rows: u32,
     ) -> Result<(), String> {
-        let session = Self::do_connect(session_id.clone(), host, port, username, password, key_path, app_handle.clone(), cols, rows).await?;
+        let session = Self::do_connect(
+            session_id.clone(),
+            host,
+            port,
+            username,
+            password,
+            key_path,
+            Some(host_key),
+            app_handle.clone(),
+            cols,
+            rows,
+        )
+        .await?;
         self.sessions.write().unwrap().insert(session_id, session);
         Ok(())
     }
@@ -205,12 +309,16 @@ impl SshManager {
         username: String,
         password: Option<String>,
         key_path: Option<String>,
+        trusted_host_key: Option<russh_keys::key::PublicKey>,
         app_handle: AppHandle,
         cols: u32,
         rows: u32,
     ) -> Result<SshSession, String> {
+        let host_key_check = Arc::new(std::sync::Mutex::new(HostKeyCheckState::default()));
         let handler = SshHandler {
             forwarded_reg: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            expected_host_key: trusted_host_key.clone(),
+            host_key_check: host_key_check.clone(),
         };
         let forwarded_reg = handler.forwarded_reg.clone();
         let mut ssh_config = client::Config::default();
@@ -221,25 +329,64 @@ impl SshManager {
         let config = Arc::new(ssh_config);
         let addr_str = format!("{}:{}", host, port);
         // ponytail: 15s timeout for TCP+SSH handshake — prevents indefinite hang on unreachable servers
-        let mut sh = tokio::time::timeout(std::time::Duration::from_secs(15), client::connect(config, &addr_str, handler))
-            .await
-            .map_err(|_| format!("Connection timeout: {}:{} unreachable", host, port))?
-            .map_err(|e| format!("Connection failed: {}", e))?;
+        let mut sh = match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            client::connect(config, &addr_str, handler),
+        )
+        .await
+        {
+            Err(_) => return Err(format!("Connection timeout: {}:{} unreachable", host, port)),
+            Ok(Ok(handle)) => handle,
+            Ok(Err(error)) => {
+                if let Some(verification_error) = host_key_verification_error(
+                    &host,
+                    port,
+                    trusted_host_key.as_ref(),
+                    &host_key_check,
+                ) {
+                    return Err(verification_error);
+                }
+                return Err(format!("Connection failed: {}", error));
+            }
+        };
+        let trusted_host_key = trusted_host_key
+            .ok_or_else(|| "SSH host key was not trusted".to_string())?;
 
         // Authenticate
         if let Some(ref kp) = key_path {
-            let key = russh_keys::load_secret_key(kp, None)
-                .map_err(|e| format!("Failed to load key: {}", e))?;
-            let auth_ok = sh.authenticate_publickey(&username, Arc::new(key))
-                .await
-                .map_err(|e| format!("Key auth error: {}", e))?;
+            let key = load_secret_key_protected(kp)?;
+            let auth_result = tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                sh.authenticate_publickey(&username, Arc::new(key)),
+            )
+            .await;
+            let auth_ok = match auth_result {
+                Ok(result) => result.map_err(|e| format!("Key auth error: {}", e))?,
+                Err(_) => {
+                    let _ = sh
+                        .disconnect(russh::Disconnect::ByApplication, "Authentication timeout", "en")
+                        .await;
+                    return Err("Key authentication timed out".to_string());
+                }
+            };
             if !auth_ok {
                 return Err("Key auth failed: server rejected the key".to_string());
             }
         } else if let Some(ref pw) = password {
-            let auth_ok = sh.authenticate_password(&username, pw)
-                .await
-                .map_err(|e| format!("Password auth error: {}", e))?;
+            let auth_result = tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                sh.authenticate_password(&username, pw),
+            )
+            .await;
+            let auth_ok = match auth_result {
+                Ok(result) => result.map_err(|e| format!("Password auth error: {}", e))?,
+                Err(_) => {
+                    let _ = sh
+                        .disconnect(russh::Disconnect::ByApplication, "Authentication timeout", "en")
+                        .await;
+                    return Err("Password authentication timed out".to_string());
+                }
+            };
             if !auth_ok {
                 return Err("Password auth failed: incorrect password".to_string());
             }
@@ -332,6 +479,7 @@ impl SshManager {
             username: username.clone(),
             password: password.clone(),
             key_path: key_path.clone(),
+            host_key: trusted_host_key,
             cols,
             rows,
         };
@@ -1216,20 +1364,21 @@ impl SshManager {
         let info = self.get_connect_info(session_id).ok_or("Session not found")?;
         // ponytail: use AppHandle from command context — self.app_handle is never initialised
         self.disconnect(session_id).await.ok();
-        let result = tokio::time::timeout(std::time::Duration::from_secs(30), self.connect(
+        let result = tokio::time::timeout(std::time::Duration::from_secs(40), self.connect(
             session_id.to_string(),
             info.host,
             info.port,
             info.username,
             info.password,
             info.key_path,
+            info.host_key,
             app_handle,
             info.cols,
             info.rows,
         )).await;
         match result {
             Ok(r) => r,
-            Err(_) => Err("Reconnect timed out (30s)".to_string()),
+            Err(_) => Err("Reconnect timed out (40s)".to_string()),
         }
     }
 }
@@ -1637,6 +1786,45 @@ pub async fn session_disconnect(session: &SshSession) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn generated_public_key() -> russh_keys::key::PublicKey {
+        russh_keys::key::KeyPair::generate_ed25519()
+            .unwrap()
+            .clone_public_key()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn host_key_check_accepts_only_pinned_key() {
+        let trusted = generated_public_key();
+        let changed = generated_public_key();
+        let check = Arc::new(std::sync::Mutex::new(HostKeyCheckState::default()));
+        let mut handler = SshHandler {
+            forwarded_reg: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            expected_host_key: Some(trusted.clone()),
+            host_key_check: check.clone(),
+        };
+        assert!(handler.check_server_key(&trusted).await.unwrap());
+        assert!(!handler.check_server_key(&changed).await.unwrap());
+        let error = host_key_verification_error("host", 22, Some(&trusted), &check).unwrap();
+        assert!(error.contains("\"kind\":\"changed\""));
+        assert!(error.contains(&changed.fingerprint()));
+    }
+
+    #[tokio::test]
+    async fn host_key_check_rejects_unknown_key() {
+        let presented = generated_public_key();
+        let check = Arc::new(std::sync::Mutex::new(HostKeyCheckState::default()));
+        let mut handler = SshHandler {
+            forwarded_reg: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            expected_host_key: None,
+            host_key_check: check.clone(),
+        };
+        assert!(!handler.check_server_key(&presented).await.unwrap());
+        let error = host_key_verification_error("host", 22, None, &check).unwrap();
+        assert!(error.contains("\"kind\":\"unknown\""));
+        assert!(error.contains(&presented.fingerprint()));
+    }
 
     // ===== parse_curl_progress =====
 

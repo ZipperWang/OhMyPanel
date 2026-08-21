@@ -1,4 +1,5 @@
-use rusqlite::Connection as SqliteConn;
+use rusqlite::{Connection as SqliteConn, OptionalExtension};
+use russh_keys::PublicKeyBase64;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -107,6 +108,16 @@ pub fn init_db() -> Result<Mutex<SqliteConn>, String> {
             note TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE IF NOT EXISTS ssh_host_keys (
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            key_base64 TEXT NOT NULL,
+            algorithm TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            trusted_at INTEGER NOT NULL,
+            PRIMARY KEY(host, port)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_tunnels_server_key ON tunnels(server_key);"
     ).map_err(|e| format!("Failed to create tables: {}", e))?;
 
@@ -167,11 +178,109 @@ pub fn init_db() -> Result<Mutex<SqliteConn>, String> {
 
     // Update schema version to latest
     conn.execute(
-        "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '4')",
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '5')",
         [],
     ).map_err(|e| format!("Failed to update schema_version: {}", e))?;
 
     Ok(Mutex::new(conn))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostKeyRecord {
+    pub host: String,
+    pub port: u16,
+    pub key_base64: String,
+    pub algorithm: String,
+    pub fingerprint: String,
+    pub trusted_at: i64,
+}
+
+pub struct HostKeyStore;
+
+impl HostKeyStore {
+    pub fn normalize_host(host: &str) -> Result<String, String> {
+        let normalized = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        if normalized.is_empty() {
+            return Err("SSH host cannot be empty".to_string());
+        }
+        Ok(normalized)
+    }
+
+    pub fn get(conn: &SqliteConn, host: &str, port: u16) -> Result<Option<HostKeyRecord>, String> {
+        let host = Self::normalize_host(host)?;
+        conn.query_row(
+            "SELECT host, port, key_base64, algorithm, fingerprint, trusted_at FROM ssh_host_keys WHERE host = ?1 AND port = ?2",
+            rusqlite::params![host, port],
+            |row| {
+                Ok(HostKeyRecord {
+                    host: row.get(0)?,
+                    port: row.get(1)?,
+                    key_base64: row.get(2)?,
+                    algorithm: row.get(3)?,
+                    fingerprint: row.get(4)?,
+                    trusted_at: row.get(5)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| format!("Failed to read trusted SSH host key: {}", e))
+    }
+
+    pub fn trust(
+        conn: &SqliteConn,
+        host: &str,
+        port: u16,
+        key_base64: &str,
+        replace: bool,
+    ) -> Result<HostKeyRecord, String> {
+        if port == 0 {
+            return Err("SSH port must be greater than zero".to_string());
+        }
+        let host = Self::normalize_host(host)?;
+        let public_key = russh_keys::parse_public_key_base64(key_base64)
+            .map_err(|e| format!("Invalid SSH host key: {}", e))?;
+        let record = HostKeyRecord {
+            host: host.clone(),
+            port,
+            key_base64: public_key.public_key_base64(),
+            algorithm: public_key.name().to_string(),
+            fingerprint: public_key.fingerprint(),
+            trusted_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64,
+        };
+
+        match Self::get(conn, &host, port)? {
+            Some(existing) if existing.key_base64 == record.key_base64 => return Ok(existing),
+            Some(_) if !replace => {
+                return Err("A different SSH host key is already trusted for this host".to_string())
+            }
+            None if replace => return Err("No trusted SSH host key exists to replace".to_string()),
+            _ => {}
+        }
+
+        conn.execute(
+            "INSERT INTO ssh_host_keys (host, port, key_base64, algorithm, fingerprint, trusted_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(host, port) DO UPDATE SET
+                 key_base64 = excluded.key_base64,
+                 algorithm = excluded.algorithm,
+                 fingerprint = excluded.fingerprint,
+                 trusted_at = excluded.trusted_at",
+            rusqlite::params![
+                record.host,
+                record.port,
+                record.key_base64,
+                record.algorithm,
+                record.fingerprint,
+                record.trusted_at,
+            ],
+        )
+        .map_err(|e| format!("Failed to save trusted SSH host key: {}", e))?;
+
+        Ok(record)
+    }
 }
 
 // ===== File Browser Favorites =====
@@ -638,9 +747,46 @@ mod tests {
              CREATE TABLE db_remarks (server_host TEXT NOT NULL, db_name TEXT NOT NULL, remark TEXT NOT NULL DEFAULT '', PRIMARY KEY(server_host, db_name));
              CREATE TABLE db_credentials (server_host TEXT NOT NULL, db_name TEXT NOT NULL, db_user TEXT NOT NULL DEFAULT '', password TEXT NOT NULL DEFAULT '', access_type TEXT NOT NULL DEFAULT 'local', allowed_ip TEXT NOT NULL DEFAULT '', PRIMARY KEY(server_host, db_name));
              CREATE TABLE site_metadata (server_host TEXT NOT NULL, domain TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(server_host, domain));
-             CREATE TABLE custom_software (server_host TEXT NOT NULL, package_name TEXT NOT NULL, display_name TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'other', PRIMARY KEY(server_host, package_name));"
+             CREATE TABLE custom_software (server_host TEXT NOT NULL, package_name TEXT NOT NULL, display_name TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'other', PRIMARY KEY(server_host, package_name));
+             CREATE TABLE ssh_host_keys (host TEXT NOT NULL, port INTEGER NOT NULL, key_base64 TEXT NOT NULL, algorithm TEXT NOT NULL, fingerprint TEXT NOT NULL, trusted_at INTEGER NOT NULL, PRIMARY KEY(host, port));"
         ).unwrap();
         conn
+    }
+
+    fn generated_host_key() -> String {
+        let key_pair = russh_keys::key::KeyPair::generate_ed25519().unwrap();
+        key_pair.clone_public_key().unwrap().public_key_base64()
+    }
+
+    #[test]
+    fn host_key_store_normalizes_and_persists() {
+        let conn = test_conn();
+        let key = generated_host_key();
+        let saved = HostKeyStore::trust(&conn, " Example.COM. ", 22, &key, false).unwrap();
+        let loaded = HostKeyStore::get(&conn, "example.com", 22).unwrap().unwrap();
+        assert_eq!(saved, loaded);
+        assert_eq!(loaded.host, "example.com");
+        assert_eq!(loaded.fingerprint, russh_keys::parse_public_key_base64(&key).unwrap().fingerprint());
+    }
+
+    #[test]
+    fn host_key_store_requires_explicit_replacement() {
+        let conn = test_conn();
+        let first = generated_host_key();
+        let second = generated_host_key();
+        HostKeyStore::trust(&conn, "host", 2222, &first, false).unwrap();
+        assert!(HostKeyStore::trust(&conn, "host", 2222, &second, false).is_err());
+        HostKeyStore::trust(&conn, "host", 2222, &second, true).unwrap();
+        let loaded = HostKeyStore::get(&conn, "host", 2222).unwrap().unwrap();
+        assert_eq!(loaded.key_base64, second);
+    }
+
+    #[test]
+    fn host_key_store_rejects_invalid_input() {
+        let conn = test_conn();
+        assert!(HostKeyStore::trust(&conn, "host", 0, &generated_host_key(), false).is_err());
+        assert!(HostKeyStore::trust(&conn, "host", 22, "invalid", false).is_err());
+        assert!(HostKeyStore::trust(&conn, "", 22, &generated_host_key(), false).is_err());
     }
 
     // ===== FbFavorites =====

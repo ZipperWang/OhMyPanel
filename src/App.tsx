@@ -61,6 +61,39 @@ interface ActiveSession {
   initialSection: string
 }
 
+interface HostKeyVerification {
+  kind: 'unknown' | 'changed'
+  host: string
+  port: number
+  algorithm: string
+  fingerprint: string
+  keyBase64: string
+  expectedFingerprint?: string
+}
+
+const parseHostKeyVerification = (error: unknown): HostKeyVerification | null => {
+  const message = String(error)
+  const marker = 'HOST_KEY_VERIFICATION:'
+  const markerIndex = message.indexOf(marker)
+  if (markerIndex < 0) return null
+  try {
+    const parsed = JSON.parse(message.slice(markerIndex + marker.length)) as HostKeyVerification
+    if (
+      (parsed.kind === 'unknown' || parsed.kind === 'changed') &&
+      typeof parsed.host === 'string' &&
+      typeof parsed.port === 'number' &&
+      typeof parsed.algorithm === 'string' &&
+      typeof parsed.fingerprint === 'string' &&
+      typeof parsed.keyBase64 === 'string'
+    ) {
+      return parsed
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
 function App() {
   const { t } = useTranslation()
   // ponytail: multi-session — sessions array + active tab, backend already supports N concurrent SSH
@@ -693,7 +726,7 @@ function App() {
       return
     }
 
-    const doConnect = (username: string, password?: string, keyPath?: string) => {
+    const doConnect = async (username: string, password?: string, keyPath?: string) => {
       setConnectingServerId(conn.id)
       setError('')
       const hostKey = `${conn.host}_${conn.port}`
@@ -701,16 +734,57 @@ function App() {
       // ponytail: estimate PTY size from window so shell prompt renders correctly on first draw
       const estCols = Math.max(80, Math.floor((window.innerWidth - (sidebarVisible ? sidebarWidth + 10 : 40) - 20) / 8.4))
       const estRows = Math.max(24, Math.floor((window.innerHeight - 100) / 17))
-      // ponytail: parallel SSH + DB read → no flash, correct page rendered immediately
-      Promise.all([
-        Promise.race([
-          invoke<string>('ssh_connect', {
-            config: { host: conn.host, port: conn.port, username, password, keyPath, cols: estCols, rows: estRows },
-          }),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Connection timeout')), 20000)),
-        ]),
-        invoke<string>('ui_state_get', { key: panelKey }).catch(() => ''),
-      ]).then(([sid, savedPanel]) => {
+      const savedPanelPromise = invoke<string>('ui_state_get', { key: panelKey }).catch(() => '')
+      try {
+        let sid = ''
+        let hostKeyUpdates = 0
+        while (!sid) {
+          try {
+            sid = await invoke<string>('ssh_connect', {
+              config: { host: conn.host, port: conn.port, username, password, keyPath, cols: estCols, rows: estRows },
+            })
+          } catch (error) {
+            const verification = parseHostKeyVerification(error)
+            if (!verification || hostKeyUpdates >= 2) throw error
+            const fingerprint = `SHA256:${verification.fingerprint}`
+            let approved = false
+            if (verification.kind === 'unknown') {
+              approved = window.confirm([
+                `The authenticity of ${verification.host}:${verification.port} cannot be established.`,
+                `Algorithm: ${verification.algorithm}`,
+                `Fingerprint: ${fingerprint}`,
+                '',
+                'Verify this fingerprint through an independent channel before trusting it.',
+                'Trust this host key and continue?',
+              ].join('\n'))
+            } else {
+              const expected = verification.expectedFingerprint
+                ? `SHA256:${verification.expectedFingerprint}`
+                : 'unknown'
+              const typed = window.prompt([
+                `WARNING: The SSH host key for ${verification.host}:${verification.port} has changed.`,
+                `Previously trusted: ${expected}`,
+                `Presented now: ${fingerprint}`,
+                '',
+                'This can indicate a man-in-the-middle attack.',
+                `After independently verifying the change, type ${fingerprint} to replace the trusted key.`,
+              ].join('\n'))
+              approved = typed?.trim() === fingerprint
+              if (typed !== null && !approved) {
+                window.alert('Fingerprint did not match. The trusted host key was not changed.')
+              }
+            }
+            if (!approved) return
+            await invoke('ssh_trust_host_key', {
+              host: verification.host,
+              port: verification.port,
+              keyBase64: verification.keyBase64,
+              replace: verification.kind === 'changed',
+            })
+            hostKeyUpdates += 1
+          }
+        }
+        const savedPanel = await savedPanelPromise
         if (existing) {
           // ponytail: reconnect to existing disconnected tab — update sessionId, keep tab
           setSessions(prev => prev.map(s => s.configId === conn.id ? { ...s, sessionId: sid } : s))
@@ -736,11 +810,13 @@ function App() {
           localStorage.setItem('welcome_last_shown', String(Date.now()))
           setTimeout(() => setShowWelcome(false), 4000)
         }
-      }).catch(e => {
+      } catch (e) {
         const msg = String(e)
         const { type, message } = classifyError(msg)
         setErrorDialog({ visible: true, message, type })
-      }).finally(() => setConnectingServerId(null))
+      } finally {
+        setConnectingServerId(null)
+      }
     }
 
     let password: string | undefined
@@ -759,8 +835,8 @@ function App() {
       return
     }
 
-    doConnect(conn.username, password, keyPath)
-  }, [sessions, connectedConfigIds])
+    void doConnect(conn.username, password, keyPath)
+  }, [sessions, connectedConfigIds, sidebarVisible, sidebarWidth])
 
   // Listen for reconnect-after-edit from Sidebar (Connect button)
   useEffect(() => {

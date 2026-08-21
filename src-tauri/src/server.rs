@@ -6344,10 +6344,10 @@ echo "ACTION_SUCCESS"
 
 // ===== Server Settings =====
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug)]
 pub struct SshKeyPair {
-    pub private_key_pem: String,
     pub public_key_openssh: String,
+    pub private_key_path: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -6357,8 +6357,21 @@ pub struct SshAuthMode {
 }
 
 /// Generate SSH key pair locally (no SSH connection needed)
-pub fn generate_ssh_keypair(algorithm: &str) -> Result<SshKeyPair, String> {
+pub fn generate_ssh_keypair(
+    algorithm: &str,
+    destination: &std::path::Path,
+) -> Result<SshKeyPair, String> {
     use russh_keys::PublicKeyBase64;
+    use std::io::Write;
+
+    if let Ok(metadata) = std::fs::symlink_metadata(destination) {
+        if metadata.file_type().is_symlink() {
+            return Err("Refusing to overwrite a symbolic link".to_string());
+        }
+        if !metadata.is_file() {
+            return Err("Private key destination is not a file".to_string());
+        }
+    }
 
     let key_pair = match algorithm {
         "ed25519" => KeyPair::generate_ed25519()
@@ -6368,19 +6381,38 @@ pub fn generate_ssh_keypair(algorithm: &str) -> Result<SshKeyPair, String> {
         _ => return Err(format!("Unsupported algorithm: {}. Use 'ed25519' or 'rsa'.", algorithm)),
     };
 
-    let mut pem_buf = Vec::new();
+    let mut pem_buf = russh::CryptoVec::new();
     russh_keys::encode_pkcs8_pem(&key_pair, &mut pem_buf)
         .map_err(|e| format!("Failed to encode private key: {}", e))?;
-    let private_key_pem = String::from_utf8(pem_buf)
-        .map_err(|e| format!("Invalid UTF-8 in PEM output: {}", e))?;
 
     let public_key = key_pair.clone_public_key()
         .map_err(|e| format!("Failed to extract public key: {}", e))?;
     let public_key_openssh = format!("{} {}", public_key.name(), public_key.public_key_base64());
 
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(destination)
+        .map_err(|e| format!("Failed to open private key destination: {}", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to secure private key permissions: {}", e))?;
+    }
+    file.write_all(pem_buf.as_ref())
+        .map_err(|e| format!("Failed to write private key: {}", e))?;
+    file.sync_all()
+        .map_err(|e| format!("Failed to finalize private key: {}", e))?;
+
     Ok(SshKeyPair {
-        private_key_pem,
         public_key_openssh,
+        private_key_path: destination.to_string_lossy().into_owned(),
     })
 }
 
@@ -9752,4 +9784,34 @@ pub async fn kill_pid(
         });
     }
     Ok(format!("Process {} killed with {}", pid, if force { "SIGKILL" } else { "SIGTERM" }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempKeyFile(std::path::PathBuf);
+
+    impl Drop for TempKeyFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    fn generated_private_key_is_written_without_crossing_serialization() {
+        let path = std::env::temp_dir().join(format!(
+            "ohmypanel-key-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let cleanup = TempKeyFile(path.clone());
+        let generated = generate_ssh_keypair("ed25519", &path).unwrap();
+        let serialized = serde_json::to_string(&generated).unwrap();
+        let private_key = std::fs::read(&path).unwrap();
+        assert_eq!(generated.private_key_path, path.to_string_lossy());
+        assert!(generated.public_key_openssh.starts_with("ssh-ed25519 "));
+        assert!(!serialized.contains("PRIVATE KEY"));
+        assert!(private_key.starts_with(b"-----BEGIN PRIVATE KEY-----"));
+        drop(cleanup);
+    }
 }
