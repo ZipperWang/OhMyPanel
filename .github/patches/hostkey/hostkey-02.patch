@@ -1,0 +1,439 @@
+diff --git a/src-tauri/src/ssh.rs b/src-tauri/src/ssh.rs
+index 95a0dce..104b24e 100644
+--- a/src-tauri/src/ssh.rs
++++ b/src-tauri/src/ssh.rs
+@@ -1,5 +1,6 @@
+ use std::collections::HashMap;
+ use std::io::Cursor;
++use std::path::PathBuf;
+ use std::sync::Arc;
+ use std::sync::atomic::{AtomicBool, Ordering};
+ use async_trait::async_trait;
+@@ -8,6 +9,7 @@ use russh::ChannelMsg;
+ use tauri::{AppHandle, Emitter, Manager};
+ use tokio::sync::{mpsc, Mutex};
+ 
++use crate::host_key::{verify_or_trust_host_key, HostKeyProblem};
+ use crate::tunnel::TunnelManager;
+ 
+ // ===== SSH Response Cache =====
+@@ -78,6 +80,12 @@ pub struct SshHandler {
+     /// Remote-forward registrations: server listen port -> tunnel receiver.
+     /// The server names the port in server_channel_open_forwarded_tcpip.
+     pub forwarded_reg: Arc<std::sync::Mutex<HashMap<u32, mpsc::UnboundedSender<ForwardedTcpip>>>>,
++    host: String,
++    port: u16,
++    known_hosts_path: PathBuf,
++    trust_new_host_key: bool,
++    expected_host_key_fingerprint: Option<String>,
++    host_key_problem: Arc<std::sync::Mutex<Option<HostKeyProblem>>>,
+ }
+ 
+ #[async_trait]
+@@ -86,9 +94,24 @@ impl Handler for SshHandler {
+ 
+     async fn check_server_key(
+         &mut self,
+-        _server_public_key: &russh_keys::key::PublicKey,
++        server_public_key: &russh_keys::key::PublicKey,
+     ) -> Result<bool, Self::Error> {
+-        Ok(true)
++        match verify_or_trust_host_key(
++            &self.host,
++            self.port,
++            server_public_key,
++            &self.known_hosts_path,
++            self.trust_new_host_key,
++            self.expected_host_key_fingerprint.as_deref(),
++        ) {
++            Ok(()) => Ok(true),
++            Err(problem) => {
++                if let Ok(mut slot) = self.host_key_problem.lock() {
++                    *slot = Some(problem);
++                }
++                Ok(false)
++            }
++        }
+     }
+ 
+     /// Remote forwarding: the server opens a channel for a new incoming connection.
+@@ -166,11 +189,26 @@ impl SshManager {
+         username: String,
+         password: Option<String>,
+         key_path: Option<String>,
++        trust_new_host_key: bool,
++        expected_host_key_fingerprint: Option<String>,
+         app_handle: AppHandle,
+         cols: u32,
+         rows: u32,
+     ) -> Result<(), String> {
+-        let session = Self::do_connect(session_id.clone(), host, port, username, password, key_path, app_handle.clone(), cols, rows).await?;
++        let session = Self::do_connect(
++            session_id.clone(),
++            host,
++            port,
++            username,
++            password,
++            key_path,
++            trust_new_host_key,
++            expected_host_key_fingerprint,
++            app_handle.clone(),
++            cols,
++            rows,
++        )
++        .await?;
+         self.sessions.write().unwrap().insert(session_id, session);
+         Ok(())
+     }
+@@ -205,12 +243,22 @@ impl SshManager {
+         username: String,
+         password: Option<String>,
+         key_path: Option<String>,
++        trust_new_host_key: bool,
++        expected_host_key_fingerprint: Option<String>,
+         app_handle: AppHandle,
+         cols: u32,
+         rows: u32,
+     ) -> Result<SshSession, String> {
++        let known_hosts_path = crate::db::db_dir().join("known_hosts");
++        let host_key_problem = Arc::new(std::sync::Mutex::new(None));
+         let handler = SshHandler {
+             forwarded_reg: Arc::new(std::sync::Mutex::new(HashMap::new())),
++            host: host.clone(),
++            port,
++            known_hosts_path,
++            trust_new_host_key,
++            expected_host_key_fingerprint,
++            host_key_problem: host_key_problem.clone(),
+         };
+         let forwarded_reg = handler.forwarded_reg.clone();
+         let mut ssh_config = client::Config::default();
+@@ -221,10 +269,26 @@ impl SshManager {
+         let config = Arc::new(ssh_config);
+         let addr_str = format!("{}:{}", host, port);
+         // ponytail: 15s timeout for TCP+SSH handshake — prevents indefinite hang on unreachable servers
+-        let mut sh = tokio::time::timeout(std::time::Duration::from_secs(15), client::connect(config, &addr_str, handler))
+-            .await
+-            .map_err(|_| format!("Connection timeout: {}:{} unreachable", host, port))?
+-            .map_err(|e| format!("Connection failed: {}", e))?;
++        let connect_result = tokio::time::timeout(
++            std::time::Duration::from_secs(15),
++            client::connect(config, &addr_str, handler),
++        )
++        .await
++        .map_err(|_| format!("Connection timeout: {}:{} unreachable", host, port))?;
++
++        let mut sh = match connect_result {
++            Ok(handle) => handle,
++            Err(error) => {
++                let problem = host_key_problem
++                    .lock()
++                    .ok()
++                    .and_then(|slot| slot.clone());
++                if let Some(problem) = problem {
++                    return Err(problem.to_wire_error());
++                }
++                return Err(format!("Connection failed: {error}"));
++            }
++        };
+ 
+         // Authenticate
+         if let Some(ref kp) = key_path {
+@@ -1223,6 +1287,8 @@ impl SshManager {
+             info.username,
+             info.password,
+             info.key_path,
++            false,
++            None,
+             app_handle,
+             info.cols,
+             info.rows,
+diff --git a/src/App.tsx b/src/App.tsx
+index 05a25c7..6f43dd7 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -7,6 +7,7 @@ import Sidebar from './components/Sidebar'
+ import ServerPanel from './components/ServerPanel'
+ import type { TerminalHandle } from './components/Terminal'
+ import './App.css'
++import './host-key.css'
+ 
+ interface UploadItem {
+   file: File
+@@ -61,6 +62,69 @@ interface ActiveSession {
+   initialSection: string
+ }
+ 
++type HostKeyProblemKind = 'unknown' | 'changed' | 'fingerprintMismatch' | 'storage'
++
++interface HostKeyProblem {
++  kind: HostKeyProblemKind
++  host: string
++  port: number
++  algorithm: string
++  fingerprint: string
++  knownHostsPath: string
++  line?: number
++  details?: string
++}
++
++const HOST_KEY_ERROR_PREFIX = 'OHMYPANEL_HOST_KEY:'
++
++function parseHostKeyProblem(error: unknown): HostKeyProblem | null {
++  const raw = error instanceof Error ? error.message : String(error)
++  const prefixIndex = raw.indexOf(HOST_KEY_ERROR_PREFIX)
++  if (prefixIndex < 0) return null
++
++  const payload = raw.slice(prefixIndex + HOST_KEY_ERROR_PREFIX.length).trim()
++  const candidates = [payload]
++  const firstBrace = payload.indexOf('{')
++  const lastBrace = payload.lastIndexOf('}')
++  if (firstBrace >= 0 && lastBrace > firstBrace) {
++    candidates.push(payload.slice(firstBrace, lastBrace + 1))
++  }
++
++  for (const candidate of candidates) {
++    try {
++      const parsed = JSON.parse(candidate) as Partial<HostKeyProblem>
++      if (
++        (parsed.kind === 'unknown' || parsed.kind === 'changed' || parsed.kind === 'fingerprintMismatch' || parsed.kind === 'storage') &&
++        typeof parsed.host === 'string' &&
++        typeof parsed.port === 'number' &&
++        typeof parsed.algorithm === 'string' &&
++        typeof parsed.fingerprint === 'string' &&
++        typeof parsed.knownHostsPath === 'string'
++      ) {
++        return parsed as HostKeyProblem
++      }
++    } catch {
++      // Try the next candidate.
++    }
++  }
++
++  return null
++}
++
++function formatHostKeyProblem(problem: HostKeyProblem): string {
++  const endpoint = `${problem.host}:${problem.port}`
++  if (problem.kind === 'changed') {
++    return `SECURITY WARNING: The SSH host key for ${endpoint} has changed. The connection was blocked to prevent a possible man-in-the-middle attack. Presented key: ${problem.algorithm} ${problem.fingerprint}. Verify the server fingerprint through a trusted channel before changing the stored entry${problem.line ? ` at line ${problem.line}` : ''} in ${problem.knownHostsPath}.`
++  }
++  if (problem.kind === 'fingerprintMismatch') {
++    return `The SSH host key for ${endpoint} changed between confirmation and connection. The connection was blocked. Presented key: ${problem.algorithm} ${problem.fingerprint}.`
++  }
++  if (problem.kind === 'storage') {
++    return `Host-key verification failed for ${endpoint}: ${problem.details || 'the known_hosts file could not be accessed'}. File: ${problem.knownHostsPath}`
++  }
++  return `The SSH host key for ${endpoint} is not trusted. Presented key: ${problem.algorithm} ${problem.fingerprint}. Reconnect manually to review and confirm it.`
++}
++
+ function App() {
+   const { t } = useTranslation()
+   // ponytail: multi-session — sessions array + active tab, backend already supports N concurrent SSH
+@@ -75,6 +139,8 @@ function App() {
+   const termRefMap = useRef(new Map<string, TerminalHandle | null>())
+   const activeTermRef = useRef<TerminalHandle | null>(null)
+   const [errorDialog, setErrorDialog] = useState<{ visible: boolean; message: string; type: 'auth' | 'network' | 'connection' | 'other' } | null>(null)
++  const [hostKeyDialog, setHostKeyDialog] = useState<HostKeyProblem | null>(null)
++  const hostKeyTrustActionRef = useRef<(() => void) | null>(null)
+   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null)
+ 
+   // Settings
+@@ -612,7 +678,16 @@ function App() {
+             reconnectingActiveRef.current.delete(sess.configId)
+             reconnectAttemptRef.current.delete(sess.configId)
+             setReconnectingSessions(prev => { const m = new Map(prev); m.delete(sess.configId); return m })
+-          } catch {
++          } catch (e) {
++            const hostKeyProblem = parseHostKeyProblem(e)
++            if (hostKeyProblem) {
++              reconnectingActiveRef.current.delete(sess.configId)
++              reconnectAttemptRef.current.delete(sess.configId)
++              setReconnectingSessions(prev => { const m = new Map(prev); m.delete(sess.configId); return m })
++              setErrorDialog({ visible: true, message: formatHostKeyProblem(hostKeyProblem), type: 'connection' })
++              handleDisconnectAction(sess.configId)
++              return
++            }
+             // ponytail: no showToast here — reconnect bar renders from state, no flicker
+             setTimeout(attemptReconnect, settings.reconnect_interval * 1000)
+           }
+@@ -693,7 +768,13 @@ function App() {
+       return
+     }
+ 
+-    const doConnect = (username: string, password?: string, keyPath?: string) => {
++    const doConnect = (
++      username: string,
++      password?: string,
++      keyPath?: string,
++      trustHostKey = false,
++      expectedHostKeyFingerprint?: string,
++    ) => {
+       setConnectingServerId(conn.id)
+       setError('')
+       const hostKey = `${conn.host}_${conn.port}`
+@@ -705,12 +786,24 @@ function App() {
+       Promise.all([
+         Promise.race([
+           invoke<string>('ssh_connect', {
+-            config: { host: conn.host, port: conn.port, username, password, keyPath, cols: estCols, rows: estRows },
++            config: {
++              host: conn.host,
++              port: conn.port,
++              username,
++              password,
++              keyPath,
++              trustHostKey,
++              expectedHostKeyFingerprint,
++              cols: estCols,
++              rows: estRows,
++            },
+           }),
+           new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Connection timeout')), 20000)),
+         ]),
+         invoke<string>('ui_state_get', { key: panelKey }).catch(() => ''),
+       ]).then(([sid, savedPanel]) => {
++        hostKeyTrustActionRef.current = null
++        setHostKeyDialog(null)
+         if (existing) {
+           // ponytail: reconnect to existing disconnected tab — update sessionId, keep tab
+           setSessions(prev => prev.map(s => s.configId === conn.id ? { ...s, sessionId: sid } : s))
+@@ -737,6 +830,21 @@ function App() {
+           setTimeout(() => setShowWelcome(false), 4000)
+         }
+       }).catch(e => {
++        const hostKeyProblem = parseHostKeyProblem(e)
++        if (hostKeyProblem?.kind === 'unknown' && !trustHostKey) {
++          hostKeyTrustActionRef.current = () => {
++            setHostKeyDialog(null)
++            doConnect(username, password, keyPath, true, hostKeyProblem.fingerprint)
++          }
++          setHostKeyDialog(hostKeyProblem)
++          return
++        }
++        if (hostKeyProblem) {
++          hostKeyTrustActionRef.current = null
++          setHostKeyDialog(null)
++          setErrorDialog({ visible: true, message: formatHostKeyProblem(hostKeyProblem), type: 'connection' })
++          return
++        }
+         const msg = String(e)
+         const { type, message } = classifyError(msg)
+         setErrorDialog({ visible: true, message, type })
+@@ -838,6 +946,44 @@ function App() {
+           )}
+         </div>
+         
++        {/* First-use SSH host-key confirmation */}
++        {hostKeyDialog && (
++          <div className="error-dialog-overlay" onClick={() => {
++            hostKeyTrustActionRef.current = null
++            setHostKeyDialog(null)
++          }}>
++            <div className="error-dialog host-key-dialog" onClick={(e) => e.stopPropagation()}>
++              <button className="error-dialog-close" onClick={() => {
++                hostKeyTrustActionRef.current = null
++                setHostKeyDialog(null)
++              }}>×</button>
++              <div className="error-dialog-icon">🔑</div>
++              <div className="error-dialog-title">Confirm SSH server identity</div>
++              <div className="error-dialog-message host-key-message">
++                This is the first connection to this server. Compare the fingerprint with a value obtained from the server console or another trusted channel before continuing.
++              </div>
++              <div className="host-key-details">
++                <div><span>Server</span><code>{hostKeyDialog.host}:{hostKeyDialog.port}</code></div>
++                <div><span>Algorithm</span><code>{hostKeyDialog.algorithm}</code></div>
++                <div><span>SHA-256 fingerprint</span><code>{hostKeyDialog.fingerprint}</code></div>
++              </div>
++              <div className="host-key-actions">
++                <button className="host-key-cancel-btn" onClick={() => {
++                  hostKeyTrustActionRef.current = null
++                  setHostKeyDialog(null)
++                }}>{t('common.cancel')}</button>
++                <button className="error-dialog-btn" onClick={() => {
++                  const trustAction = hostKeyTrustActionRef.current
++                  hostKeyTrustActionRef.current = null
++                  trustAction?.()
++                }}>
++                  Trust this key and connect
++                </button>
++              </div>
++            </div>
++          </div>
++        )}
++
+         {/* Error Dialog */}
+         {errorDialog?.visible && (
+           <div className="error-dialog-overlay" onClick={() => setErrorDialog(null)}>
+diff --git a/src/host-key.css b/src/host-key.css
+new file mode 100644
+index 0000000..975eb24
+--- /dev/null
++++ b/src/host-key.css
+@@ -0,0 +1,66 @@
++/* SSH host-key confirmation */
++.host-key-dialog {
++  width: 560px;
++}
++
++.host-key-message {
++  margin-bottom: 14px;
++  text-align: left;
++}
++
++.host-key-details {
++  display: grid;
++  gap: 10px;
++  margin-bottom: 18px;
++  padding: 14px;
++  border: 1px solid var(--border);
++  border-radius: 8px;
++  background: var(--bg-subtle);
++}
++
++.host-key-details > div {
++  display: grid;
++  grid-template-columns: 145px minmax(0, 1fr);
++  align-items: start;
++  gap: 12px;
++}
++
++.host-key-details span {
++  color: var(--text-muted);
++  font-size: 13px;
++}
++
++.host-key-details code {
++  overflow-wrap: anywhere;
++  color: var(--text-heading);
++  font-size: 12px;
++  line-height: 1.5;
++  user-select: text;
++}
++
++.host-key-actions {
++  display: grid;
++  grid-template-columns: 1fr 2fr;
++  gap: 10px;
++}
++
++.host-key-cancel-btn {
++  padding: 10px 16px;
++  border: 1px solid var(--border);
++  border-radius: 6px;
++  background: var(--bg-subtle);
++  color: var(--text);
++  font-size: 14px;
++  cursor: pointer;
++}
++
++.host-key-cancel-btn:hover {
++  background: var(--border);
++}
++
++@media (max-width: 640px) {
++  .host-key-details > div,
++  .host-key-actions {
++    grid-template-columns: 1fr;
++  }
++}
