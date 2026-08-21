@@ -1,0 +1,472 @@
+diff --git a/README.md b/README.md
+index a7fa405..5308eec 100644
+--- a/README.md
++++ b/README.md
+@@ -108,6 +108,7 @@ If you have any suggestions or feedback, feel free to share them in [GitHub Disc
+ 
+ ### 🔌 Connection & Terminal
+ - 🔑 SSH password / key authentication with credential storage
++- 🛡️ SSH host-key verification with explicit first-use fingerprint confirmation and changed-key blocking
+ - ️ Full-featured xterm.js terminal with clipboard, web links, and search
+ -  Auto-reconnect on connection loss
+ - 🖥️ Multi-server quick switch — one-click switching in sidebar with independent session states
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+index b50ff28..aa18205 100644
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -106,6 +106,7 @@ OhMyPanel — 免费开源，下一代 Linux 服务器管理面板软件。
+ 
+ ### 🔌 连接与终端
+ - 🔑 SSH 密码 / 密钥认证，支持凭证存储
++- 🛡️ SSH 主机密钥校验：首次连接明确核对指纹，密钥变化时强制阻断
+ - ️ 基于 xterm.js 的全功能终端，支持剪贴板、超链接和搜索
+ -  断线自动重连
+ - 🖥️ 多服务器快速切换管理 — 侧边栏一键切换，会话状态独立保持
+diff --git a/SECURITY.md b/SECURITY.md
+new file mode 100644
+index 0000000..040380f
+--- /dev/null
++++ b/SECURITY.md
+@@ -0,0 +1,18 @@
++# Security policy
++
++## SSH host-key verification
++
++OhMyPanel verifies the SSH server host key before sending a password or using a private key.
++
++- A previously trusted key must match the entry in the app-owned `known_hosts` file.
++- A server seen for the first time is blocked until the user explicitly confirms the displayed SHA-256 fingerprint.
++- The confirmation retry is bound to that exact fingerprint. A different key presented between the prompt and retry is rejected.
++- A changed key is always rejected and is never overwritten automatically, including during automatic reconnect.
++
++The `known_hosts` path is shown in host-key error messages. On Unix systems the app applies mode `0600` to this file.
++
++After a legitimate server rebuild or host-key rotation, verify the new fingerprint through the provider console or another trusted channel. Then remove only the obsolete entry from the displayed `known_hosts` file and reconnect. Do not delete or replace an entry merely to suppress a warning.
++
++## Reporting vulnerabilities
++
++Open a private GitHub security advisory for this repository when possible. Avoid including credentials, private keys, server addresses, or other sensitive deployment data in public issues.
+diff --git a/src-tauri/src/commands/ssh.rs b/src-tauri/src/commands/ssh.rs
+index 39d7b69..b484f03 100644
+--- a/src-tauri/src/commands/ssh.rs
++++ b/src-tauri/src/commands/ssh.rs
+@@ -17,10 +17,27 @@ pub async fn ssh_connect(
+     let username = config["username"].as_str().unwrap_or("").to_string();
+     let password = config["password"].as_str().map(|s| s.to_string());
+     let key_path = config["keyPath"].as_str().map(|s| s.to_string());
++    let trust_new_host_key = config["trustHostKey"].as_bool().unwrap_or(false);
++    let expected_host_key_fingerprint = config["expectedHostKeyFingerprint"]
++        .as_str()
++        .map(|s| s.to_string());
+     let cols = config["cols"].as_u64().unwrap_or(80) as u32;
+     let rows = config["rows"].as_u64().unwrap_or(24) as u32;
+     // ponytail: network operations without lock — only acquire briefly to insert session
+-    let session = SshManager::do_connect(session_id.clone(), host, port, username, password, key_path, app.clone(), cols, rows).await?;
++    let session = SshManager::do_connect(
++        session_id.clone(),
++        host,
++        port,
++        username,
++        password,
++        key_path,
++        trust_new_host_key,
++        expected_host_key_fingerprint,
++        app.clone(),
++        cols,
++        rows,
++    )
++    .await?;
+     let mgr = ssh_mgr.lock().await;
+     mgr.insert_session(session_id.clone(), session, app);
+     drop(mgr);
+diff --git a/src-tauri/src/host_key.rs b/src-tauri/src/host_key.rs
+new file mode 100644
+index 0000000..ffd7b29
+--- /dev/null
++++ b/src-tauri/src/host_key.rs
+@@ -0,0 +1,374 @@
++use russh_keys::key::PublicKey;
++use serde::Serialize;
++use std::fs::{self, OpenOptions};
++use std::path::Path;
++
++pub const HOST_KEY_ERROR_PREFIX: &str = "OHMYPANEL_HOST_KEY:";
++
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub enum HostKeyProblemKind {
++    Unknown,
++    Changed,
++    FingerprintMismatch,
++    Storage,
++}
++
++#[derive(Debug, Clone, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct HostKeyProblem {
++    pub kind: HostKeyProblemKind,
++    pub host: String,
++    pub port: u16,
++    pub algorithm: String,
++    pub fingerprint: String,
++    pub known_hosts_path: String,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub line: Option<usize>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub details: Option<String>,
++}
++
++impl HostKeyProblem {
++    fn new(
++        kind: HostKeyProblemKind,
++        host: &str,
++        port: u16,
++        public_key: &PublicKey,
++        known_hosts_path: &Path,
++    ) -> Self {
++        Self {
++            kind,
++            host: host.to_string(),
++            port,
++            algorithm: public_key.name().to_string(),
++            fingerprint: format!("SHA256:{}", public_key.fingerprint()),
++            known_hosts_path: known_hosts_path.to_string_lossy().into_owned(),
++            line: None,
++            details: None,
++        }
++    }
++
++    pub fn to_wire_error(&self) -> String {
++        match serde_json::to_string(self) {
++            Ok(payload) => format!("{HOST_KEY_ERROR_PREFIX}{payload}"),
++            Err(_) => format!(
++                "{HOST_KEY_ERROR_PREFIX}{}",
++                serde_json::json!({
++                    "kind": "storage",
++                    "host": self.host.clone(),
++                    "port": self.port,
++                    "algorithm": self.algorithm.clone(),
++                    "fingerprint": self.fingerprint.clone(),
++                    "knownHostsPath": self.known_hosts_path.clone(),
++                    "details": "failed to serialize host-key error"
++                })
++            ),
++        }
++    }
++}
++
++fn ensure_known_hosts_file(path: &Path) -> Result<(), String> {
++    if let Some(parent) = path.parent() {
++        fs::create_dir_all(parent)
++            .map_err(|error| format!("failed to create known_hosts directory: {error}"))?;
++    }
++
++    match OpenOptions::new().write(true).create_new(true).open(path) {
++        Ok(_) => {}
++        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
++        Err(error) => return Err(format!("failed to create known_hosts file: {error}")),
++    }
++
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::PermissionsExt;
++        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
++            .map_err(|error| format!("failed to secure known_hosts permissions: {error}"))?;
++    }
++
++    Ok(())
++}
++
++/// Verify a server key against the app-owned known_hosts file.
++///
++/// New keys are rejected unless `trust_new_key` is true and the fingerprint
++/// still matches the exact value that the user confirmed in the UI. Existing
++/// keys that change are always rejected and are never overwritten.
++pub fn verify_or_trust_host_key(
++    host: &str,
++    port: u16,
++    public_key: &PublicKey,
++    known_hosts_path: &Path,
++    trust_new_key: bool,
++    expected_fingerprint: Option<&str>,
++) -> Result<(), HostKeyProblem> {
++    if let Err(error) = ensure_known_hosts_file(known_hosts_path) {
++        let mut problem = HostKeyProblem::new(
++            HostKeyProblemKind::Storage,
++            host,
++            port,
++            public_key,
++            known_hosts_path,
++        );
++        problem.details = Some(error);
++        return Err(problem);
++    }
++
++    match russh_keys::check_known_hosts_path(host, port, public_key, known_hosts_path) {
++        Ok(true) => Ok(()),
++        Ok(false) => {
++            let problem = HostKeyProblem::new(
++                HostKeyProblemKind::Unknown,
++                host,
++                port,
++                public_key,
++                known_hosts_path,
++            );
++
++            if !trust_new_key {
++                return Err(problem);
++            }
++
++            if expected_fingerprint != Some(problem.fingerprint.as_str()) {
++                let mut mismatch = HostKeyProblem::new(
++                    HostKeyProblemKind::FingerprintMismatch,
++                    host,
++                    port,
++                    public_key,
++                    known_hosts_path,
++                );
++                mismatch.details = Some(
++                    "the server key no longer matches the fingerprint confirmed by the user"
++                        .to_string(),
++                );
++                return Err(mismatch);
++            }
++
++            if let Err(error) =
++                russh_keys::learn_known_hosts_path(host, port, public_key, known_hosts_path)
++            {
++                let mut storage = HostKeyProblem::new(
++                    HostKeyProblemKind::Storage,
++                    host,
++                    port,
++                    public_key,
++                    known_hosts_path,
++                );
++                storage.details = Some(format!("failed to save trusted host key: {error}"));
++                return Err(storage);
++            }
++
++            #[cfg(unix)]
++            {
++                use std::os::unix::fs::PermissionsExt;
++                if let Err(error) =
++                    fs::set_permissions(known_hosts_path, fs::Permissions::from_mode(0o600))
++                {
++                    let mut storage = HostKeyProblem::new(
++                        HostKeyProblemKind::Storage,
++                        host,
++                        port,
++                        public_key,
++                        known_hosts_path,
++                    );
++                    storage.details =
++                        Some(format!("failed to secure known_hosts permissions: {error}"));
++                    return Err(storage);
++                }
++            }
++
++            match russh_keys::check_known_hosts_path(host, port, public_key, known_hosts_path) {
++                Ok(true) => Ok(()),
++                Ok(false) => {
++                    let mut storage = HostKeyProblem::new(
++                        HostKeyProblemKind::Storage,
++                        host,
++                        port,
++                        public_key,
++                        known_hosts_path,
++                    );
++                    storage.details = Some(
++                        "trusted host key was written but could not be verified afterwards"
++                            .to_string(),
++                    );
++                    Err(storage)
++                }
++                Err(error) => {
++                    let mut storage = HostKeyProblem::new(
++                        HostKeyProblemKind::Storage,
++                        host,
++                        port,
++                        public_key,
++                        known_hosts_path,
++                    );
++                    storage.details = Some(format!(
++                        "trusted host key was written but verification failed: {error}"
++                    ));
++                    Err(storage)
++                }
++            }
++        }
++        Err(russh_keys::Error::KeyChanged { line }) => {
++            let mut problem = HostKeyProblem::new(
++                HostKeyProblemKind::Changed,
++                host,
++                port,
++                public_key,
++                known_hosts_path,
++            );
++            problem.line = Some(line);
++            Err(problem)
++        }
++        Err(error) => {
++            let mut problem = HostKeyProblem::new(
++                HostKeyProblemKind::Storage,
++                host,
++                port,
++                public_key,
++                known_hosts_path,
++            );
++            problem.details = Some(format!("failed to check known_hosts: {error}"));
++            Err(problem)
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::path::PathBuf;
++
++    struct TempKnownHosts {
++        dir: PathBuf,
++        file: PathBuf,
++    }
++
++    impl TempKnownHosts {
++        fn new() -> Self {
++            let dir = std::env::temp_dir().join(format!(
++                "ohmypanel-host-key-test-{}",
++                uuid::Uuid::new_v4()
++            ));
++            fs::create_dir_all(&dir).unwrap();
++            let file = dir.join("known_hosts");
++            Self { dir, file }
++        }
++    }
++
++    impl Drop for TempKnownHosts {
++        fn drop(&mut self) {
++            let _ = fs::remove_dir_all(&self.dir);
++        }
++    }
++
++    fn key_one() -> PublicKey {
++        russh_keys::parse_public_key_base64(
++            "AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ",
++        )
++        .unwrap()
++    }
++
++    fn key_two() -> PublicKey {
++        russh_keys::parse_public_key_base64(
++            "AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G1sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X",
++        )
++        .unwrap()
++    }
++
++    #[test]
++    fn unknown_key_is_rejected_without_user_trust() {
++        let temp = TempKnownHosts::new();
++        let key = key_one();
++
++        let error = verify_or_trust_host_key(
++            "example.com",
++            22,
++            &key,
++            &temp.file,
++            false,
++            None,
++        )
++        .unwrap_err();
++
++        assert_eq!(error.kind, HostKeyProblemKind::Unknown);
++        assert_eq!(error.fingerprint, format!("SHA256:{}", key.fingerprint()));
++    }
++
++    #[test]
++    fn confirmed_fingerprint_is_persisted_and_reused() {
++        let temp = TempKnownHosts::new();
++        let key = key_one();
++        let fingerprint = format!("SHA256:{}", key.fingerprint());
++
++        verify_or_trust_host_key(
++            "example.com",
++            2222,
++            &key,
++            &temp.file,
++            true,
++            Some(&fingerprint),
++        )
++        .unwrap();
++
++        verify_or_trust_host_key(
++            "example.com",
++            2222,
++            &key,
++            &temp.file,
++            false,
++            None,
++        )
++        .unwrap();
++    }
++
++    #[test]
++    fn trust_retry_rejects_a_different_fingerprint() {
++        let temp = TempKnownHosts::new();
++        let key = key_one();
++
++        let error = verify_or_trust_host_key(
++            "example.com",
++            22,
++            &key,
++            &temp.file,
++            true,
++            Some("SHA256:not-the-confirmed-key"),
++        )
++        .unwrap_err();
++
++        assert_eq!(error.kind, HostKeyProblemKind::FingerprintMismatch);
++        assert!(fs::read_to_string(&temp.file).unwrap().is_empty());
++    }
++
++    #[test]
++    fn changed_key_is_rejected_even_when_trust_is_requested() {
++        let temp = TempKnownHosts::new();
++        let original = key_one();
++        let replacement = key_two();
++        let original_fingerprint = format!("SHA256:{}", original.fingerprint());
++        let replacement_fingerprint = format!("SHA256:{}", replacement.fingerprint());
++
++        verify_or_trust_host_key(
++            "example.com",
++            22,
++            &original,
++            &temp.file,
++            true,
++            Some(&original_fingerprint),
++        )
++        .unwrap();
++
++        let error = verify_or_trust_host_key(
++            "example.com",
++            22,
++            &replacement,
++            &temp.file,
++            true,
++            Some(&replacement_fingerprint),
++        )
++        .unwrap_err();
++
++        assert_eq!(error.kind, HostKeyProblemKind::Changed);
++    }
++}
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index e4e63bb..e057416 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1,5 +1,6 @@
+ mod config;
+ mod db;
++mod host_key;
+ mod server;
+ mod ssh;
+ mod tunnel;
