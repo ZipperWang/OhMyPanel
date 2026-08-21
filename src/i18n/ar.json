@@ -151,6 +151,85 @@
     "settings": "الإعدادات",
     "discussions": "المناقشات"
   },
+  "terminal": {
+    "status": {
+      "connected": "متصل",
+      "connecting": "جارٍ الاتصال",
+      "reconnecting": "جارٍ إعادة الاتصال",
+      "disconnected": "غير متصل",
+      "authenticationFailed": "فشلت المصادقة",
+      "newOutput": "مخرجات جديدة",
+      "restored": "تمت استعادة الاتصال"
+    },
+    "tabs": {
+      "sessionMenu": "قائمة الجلسات",
+      "terminalMenu": "قائمة الطرفية",
+      "closeNamed": "إغلاق {{name}}",
+      "savedServers": "الخوادم المحفوظة",
+      "recentSessions": "الجلسات الأخيرة",
+      "noRecentSessions": "لا توجد جلسات حديثة"
+    },
+    "connection": {
+      "connectingTo": "جارٍ الاتصال بـ {{target}}…",
+      "establishing": "جارٍ إنشاء جلسة SSH",
+      "reconnectingMessage": "انقطع الاتصال. جارٍ إعادة الاتصال… {{attempt}}/{{max}}",
+      "closedTitle": "تم إغلاق الاتصال",
+      "sessionEnded": "انتهت جلسة SSH.",
+      "authRejected": "رفض الخادم مفتاح SSH المكوّن.",
+      "authHint": "تحقق من اسم المستخدم أو المفتاح أو إعدادات التفويض على الخادم.",
+      "configurationMissing": "لم يتم العثور على إعدادات الاتصال المحفوظة."
+    },
+    "search": {
+      "placeholder": "البحث في مخرجات الطرفية",
+      "matchCount": "{{current}} / {{total}}",
+      "noResults": "لا توجد نتائج",
+      "caseSensitive": "مطابقة حالة الأحرف",
+      "regex": "استخدام تعبير نمطي",
+      "previous": "النتيجة السابقة",
+      "next": "النتيجة التالية",
+      "invalidRegex": "تعبير نمطي غير صالح"
+    },
+    "palette": {
+      "title": "لوحة الأوامر",
+      "placeholder": "اكتب أمرًا",
+      "noResults": "لا توجد أوامر مطابقة"
+    },
+    "actions": {
+      "newSession": "جلسة SSH جديدة",
+      "reconnectCurrent": "إعادة اتصال الجلسة الحالية",
+      "duplicateCurrent": "تكرار الجلسة الحالية",
+      "closeCurrent": "إغلاق الجلسة الحالية",
+      "closeOthers": "إغلاق الجلسات الأخرى",
+      "nextSession": "الجلسة التالية",
+      "previousSession": "الجلسة السابقة",
+      "searchOutput": "البحث في مخرجات الطرفية",
+      "clearScreen": "مسح الشاشة الظاهرة",
+      "clearScrollback": "مسح سجل التمرير",
+      "copySelection": "نسخ النص المحدد",
+      "pasteClipboard": "اللصق من الحافظة",
+      "selectAll": "تحديد الكل",
+      "fontIncrease": "تكبير حجم الخط",
+      "fontDecrease": "تصغير حجم الخط",
+      "fontReset": "إعادة تعيين حجم الخط",
+      "enterFullscreen": "الدخول إلى ملء الشاشة",
+      "exitFullscreen": "الخروج من ملء الشاشة",
+      "connectionSettings": "فتح إعدادات الاتصال",
+      "connectionDetails": "تفاصيل الاتصال"
+    },
+    "paste": {
+      "multilineTitle": "لصق {{count}} أسطر في {{target}}؟",
+      "largeTitle": "لصق كمية كبيرة من النص في {{target}}؟",
+      "warning": "قد يؤدي المحتوى الملصق إلى تنفيذ عدة أوامر."
+    },
+    "details": {
+      "protocol": "البروتوكول",
+      "endpoint": "نقطة الاتصال",
+      "latency": "زمن الاستجابة",
+      "terminalSize": "حجم الطرفية",
+      "encoding": "الترميز",
+      "unavailable": "غير متاح"
+    }
+  },
   "tunnel": {
     "title": "أنفاق SSH (اختراق الشبكة الداخلية) New~",
     "create": "إنشاء نفق",
@@ -223,6 +302,13 @@
     "reconnectRisk": "Security note: forwarded ports will listen on 0.0.0.0 and be publicly reachable. Please configure your firewall and access controls.",
     "reconnectAgree": "Reconnect now",
     "reconnecting": "Reconnecting...",
+    "reconnectLater": "إعادة الاتصال لاحقًا",
+    "reconnectDone": "تمت إعادة الاتصال. GatewayPorts نشط — أعد إنشاء أنفاق إعادة توجيه الخادم.",
+    "reconnectManualHint": "تم تفعيل GatewayPorts — افصل الخادم وأعد الاتصال به يدويًا لتطبيق التغيير.",
+    "reconnectFailed": "فشلت إعادة الاتصال: {{error}}",
+    "reconnectHintDisable": "تم تعطيل GatewayPorts، ولكن يلزم إعادة الاتصال لتطبيق التغيير. ستنقطع الجلسة لفترة وجيزة. هل تريد إعادة الاتصال الآن؟",
+    "reconnectDoneDisable": "تمت إعادة الاتصال. GatewayPorts معطّل — لن تقبل عمليات إعادة توجيه الخادم سوى الاتصالات عبر 127.0.0.1.",
+    "reconnectManualHintDisable": "تم تعطيل GatewayPorts — افصل الخادم وأعد الاتصال به يدويًا لتطبيق التغيير.",
     "running": "Running",
     "stopped": "Stopped",
     "restore": "Start",
@@ -850,7 +936,29 @@
     "disabledHint": "جدار الحماية مُعطَّل. فعّله لإدارة القواعد.",
     "enableFirewall": "تفعيل جدار الحماية",
     "disableFirewall": "تعطيل جدار الحماية",
-    "sshPortAutoOpened": "تم السماح بمنفذ SSH {{port}} تلقائياً لمنع قطع الاتصال."
+    "sshPortAutoOpened": "تم السماح بمنفذ SSH {{port}} تلقائياً لمنع قطع الاتصال.",
+    "statsTotal": "إجمالي القواعد",
+    "quickTitle": "منافذ سريعة",
+    "quickHint": "انقر على بطاقة لفتح منفذ خدمة شائع أو إغلاقه",
+    "searchPlaceholder": "البحث عن منفذ / بروتوكول / مصدر...",
+    "allActions": "جميع الإجراءات",
+    "copied": "تم النسخ إلى الحافظة",
+    "copyAll": "نسخ الكل",
+    "copyRule": "نسخ",
+    "copiedAll": "تم نسخ جميع القواعد إلى الحافظة",
+    "noMatch": "لا توجد قواعد مطابقة",
+    "sourceLabel": "عنوان IP للمصدر",
+    "sourcePlaceholder": "فارغ = أي مصدر، مثال: 1.2.3.4 أو 10.0.0.0/8",
+    "viewRaw": "القاعدة الأصلية",
+    "clearAll": "مسح القواعد",
+    "clearAllTitle": "مسح جميع القواعد",
+    "clearAllMsg": "سيؤدي هذا إلى حذف جميع قواعد جدار الحماية البالغ عددها {{count}}. لا يمكن التراجع عن هذا الإجراء. هل تريد المتابعة؟",
+    "clearAllConfirm": "تأكيد المسح",
+    "cleared": "تم مسح جميع القواعد",
+    "portOpened": "تم فتح المنفذ {{port}}",
+    "portClosed": "تمت إزالة قاعدة المنفذ {{port}}",
+    "portOpenTitle": "المنفذ {{port}} مفتوح، انقر لإزالة القاعدة",
+    "portClosedTitle": "المنفذ {{port}} مغلق، انقر لفتحه"
   },
   "port": {
     "title": "المنافذ",

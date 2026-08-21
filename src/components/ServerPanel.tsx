@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
 import { open } from '@tauri-apps/plugin-shell'
@@ -24,9 +24,12 @@ import DockerPanel from './panels/DockerPanel'
 import TunnelPanel from './panels/TunnelPanel'
 import Terminal from './Terminal'
 import type { TerminalHandle } from './Terminal'
+import TerminalWorkspace from './terminal/TerminalWorkspace'
+import { parseConnectionHost } from './terminal/terminalActions'
+import type { TerminalConnectionState, TerminalDimensions } from './terminal/types'
 import FileBrowser, { type FileBrowserHandle } from './FileBrowser'
 
-type PanelSection = 'dashboard' | 'terminal' | 'files' | 'software' | 'nginx' | 'php' | 'sites' | 'logs' | 'ssl' | 'monitor' | 'firewall' | 'port' | 'tunnel' | 'bbr' | 'docker' | 'database' | 'redis' | 'update' | 'settings' | 'discussions'
+export type PanelSection = 'dashboard' | 'terminal' | 'files' | 'software' | 'nginx' | 'php' | 'sites' | 'logs' | 'ssl' | 'monitor' | 'firewall' | 'port' | 'tunnel' | 'bbr' | 'docker' | 'database' | 'redis' | 'update' | 'settings' | 'discussions'
 
 interface AppSettings {
   auto_reconnect: boolean
@@ -45,7 +48,7 @@ interface ServerPanelProps {
   sessionId: string | null
   connHost?: string
   connUsername?: string
-  initialSection?: string
+  initialSection?: PanelSection
   jumpToPath?: string | null
   setJumpToPath?: (path: string | null) => void
   termRef?: React.RefObject<TerminalHandle | null>
@@ -55,6 +58,20 @@ interface ServerPanelProps {
   onToggleAutoReconnect?: () => void
   onUpdateSettings?: (settings: Partial<AppSettings>) => Promise<void>
   onShowToast?: (msg: string) => void
+  isSessionActive?: boolean
+  terminalTabStrip?: ReactNode
+  connectionState?: TerminalConnectionState
+  onReconnect?: () => void
+  onCancelReconnect?: () => void
+  onCloseSession?: () => void
+  onNewSession?: () => void
+  onCloseOtherSessions?: () => void
+  onNextSession?: () => void
+  onPreviousSession?: () => void
+  onEditConnection?: () => void
+  onSectionChange?: (section: PanelSection) => void
+  onTerminalDimensionsChange?: (dimensions: TerminalDimensions) => void
+  onTerminalBackgroundOutput?: () => void
 }
 
 const NAV_ITEMS: { key: PanelSection; labelKey: string }[] = [
@@ -78,29 +95,46 @@ const NAV_ITEMS: { key: PanelSection; labelKey: string }[] = [
   { key: 'discussions', labelKey: 'nav.discussions' },
 ]
 
-export default function ServerPanel({ sessionId, connHost, connUsername, initialSection = 'dashboard', jumpToPath, setJumpToPath, termRef, onStartUpload, onUploadComplete, appSettings, onToggleAutoReconnect, onUpdateSettings, onShowToast }: ServerPanelProps) {
+const isPanelSection = (section: string): section is PanelSection => NAV_ITEMS.some(item => item.key === section)
+
+export default function ServerPanel({ sessionId, connHost, connUsername, initialSection = 'dashboard', jumpToPath, setJumpToPath, termRef, onStartUpload, onUploadComplete, appSettings, onToggleAutoReconnect, onUpdateSettings, onShowToast, isSessionActive = true, terminalTabStrip, connectionState, onReconnect, onCancelReconnect, onCloseSession, onNewSession, onCloseOtherSessions, onNextSession, onPreviousSession, onEditConnection, onSectionChange, onTerminalDimensionsChange, onTerminalBackgroundOutput }: ServerPanelProps) {
   const { t } = useTranslation()
-  const [activeSection, setActiveSectionRaw] = useState<PanelSection>((initialSection && NAV_ITEMS.some(s => s.key === initialSection) ? initialSection : 'dashboard') as PanelSection)
+  const [activeSection, setActiveSectionRaw] = useState<PanelSection>(() => isPanelSection(initialSection) ? initialSection : 'dashboard')
   const cdHereRef = useRef<string | null>(null)
   const fileBrowserRef = useRef<FileBrowserHandle | null>(null)
+  const onSectionChangeRef = useRef(onSectionChange)
+  const sectionPersistenceRef = useRef<Promise<void>>(Promise.resolve())
+
+  useEffect(() => {
+    onSectionChangeRef.current = onSectionChange
+  }, [onSectionChange])
 
   // ponytail：按服务器保存面板记忆，键为 lastPanel_${user}@${host}
   const panelKey = connHost && connUsername ? `lastPanel_${connUsername}@${connHost}` : ''
 
   // initialSection 变化时同步 activeSection（key 重挂载已能处理，但保留此逻辑作为安全保障）
   useEffect(() => {
-    if (initialSection && NAV_ITEMS.some(s => s.key === initialSection)) {
-      setActiveSectionRaw(initialSection as PanelSection)
+    if (isPanelSection(initialSection)) {
+      setActiveSectionRaw(initialSection)
     }
   }, [initialSection])
 
-  const setActiveSection = (key: PanelSection) => {
+  useEffect(() => {
+    onSectionChangeRef.current?.(activeSection)
+  }, [activeSection])
+
+  const setActiveSection = useCallback((key: PanelSection) => {
     setActiveSectionRaw(key)
-    if (panelKey) invoke('ui_state_set', { key: panelKey, value: key }).catch(() => {})
-  }
+    if (panelKey) {
+      sectionPersistenceRef.current = sectionPersistenceRef.current
+        .catch(() => {})
+        .then(() => invoke('ui_state_set', { key: panelKey, value: key }))
+        .then(() => undefined, () => undefined)
+    }
+  }, [panelKey])
 
   const handleNavigate = (section: string) => {
-    setActiveSection(section as PanelSection)
+    if (isPanelSection(section)) setActiveSection(section)
   }
 
   // ponytail：移除连接后自动切换到终端的逻辑，让用户自行选择目标面板
@@ -141,14 +175,22 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
 
   // ponytail：切换标签页时自动聚焦 FileBrowser，使键盘快捷键立即生效
   useEffect(() => {
-    if (activeSection === 'files' && fileBrowserRef.current) {
+    if (isSessionActive && activeSection === 'files' && fileBrowserRef.current) {
       fileBrowserRef.current.focus()
     }
-  }, [activeSection])
+  }, [activeSection, isSessionActive])
 
   useEffect(() => {
-    if (onUploadComplete) onUploadComplete.current = handleUploadComplete
-  }, [onUploadComplete, handleUploadComplete])
+    if (!onUploadComplete || !isSessionActive) return
+    onUploadComplete.current = handleUploadComplete
+    return () => {
+      if (onUploadComplete.current === handleUploadComplete) onUploadComplete.current = null
+    }
+  }, [onUploadComplete, handleUploadComplete, isSessionActive])
+
+  const endpoint = connHost ? parseConnectionHost(connHost) : null
+  const endpointText = endpoint ? `${endpoint.host}:${endpoint.port}` : ''
+  const connectionLabel = endpoint ? `${connUsername || 'root'}@${endpoint.host}` : ''
 
   const renderContent = () => {
     switch (activeSection) {
@@ -210,10 +252,27 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
           </button>
         ))}
       </nav>
-      <div className="sp-content">
-        {/* 始终挂载终端以保留 SSH 会话 */}
-        <div style={{ display: activeSection === 'terminal' ? 'block' : 'none', height: '100%' }}>
-          <Terminal ref={termRef} sessionId={sessionId} isActive={activeSection === 'terminal'} theme={appSettings?.theme || 'light'} />
+      <TerminalWorkspace terminalMode={activeSection === 'terminal'} tabStrip={terminalTabStrip}>
+      <div className={`sp-content ${activeSection === 'terminal' ? 'terminal-page' : ''}`}>
+        <div className={`terminal-panel-slot ${activeSection === 'terminal' ? 'active' : ''}`}>
+          <Terminal
+            ref={termRef}
+            sessionId={sessionId}
+            isActive={isSessionActive && activeSection === 'terminal'}
+            connectionState={connectionState}
+            connectionLabel={connectionLabel}
+            endpoint={endpointText}
+            onReconnect={onReconnect}
+            onCancelReconnect={onCancelReconnect}
+            onCloseSession={onCloseSession}
+            onNewSession={onNewSession}
+            onCloseOtherSessions={onCloseOtherSessions}
+            onNextSession={onNextSession}
+            onPreviousSession={onPreviousSession}
+            onOpenConnectionSettings={onEditConnection}
+            onDimensionsChange={onTerminalDimensionsChange}
+            onBackgroundOutput={onTerminalBackgroundOutput}
+          />
         </div>
         {/* 始终挂载文件面板以保留状态并避免重新加载闪烁 */}
         <div style={{ display: activeSection === 'files' ? 'block' : 'none', height: '100%' }}>
@@ -233,6 +292,7 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
         </div>
         {activeSection !== 'terminal' && activeSection !== 'files' && activeSection !== 'sites' && activeSection !== 'software' && activeSection !== 'update' && renderContent()}
       </div>
+      </TerminalWorkspace>
     </div>
   )
 }

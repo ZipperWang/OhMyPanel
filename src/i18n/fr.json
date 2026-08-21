@@ -151,6 +151,85 @@
     "settings": "Paramètres",
     "discussions": "Discussions"
   },
+  "terminal": {
+    "status": {
+      "connected": "Connecté",
+      "connecting": "Connexion en cours",
+      "reconnecting": "Reconnexion en cours",
+      "disconnected": "Déconnecté",
+      "authenticationFailed": "Échec de l’authentification",
+      "newOutput": "Nouvelle sortie",
+      "restored": "Connexion rétablie"
+    },
+    "tabs": {
+      "sessionMenu": "Menu des sessions",
+      "terminalMenu": "Menu du terminal",
+      "closeNamed": "Fermer {{name}}",
+      "savedServers": "Serveurs enregistrés",
+      "recentSessions": "Sessions récentes",
+      "noRecentSessions": "Aucune session récente"
+    },
+    "connection": {
+      "connectingTo": "Connexion à {{target}}…",
+      "establishing": "Établissement de la session SSH",
+      "reconnectingMessage": "Connexion interrompue. Reconnexion… {{attempt}}/{{max}}",
+      "closedTitle": "Connexion fermée",
+      "sessionEnded": "La session SSH est terminée.",
+      "authRejected": "Le serveur a refusé la clé SSH configurée.",
+      "authHint": "Vérifiez le nom d’utilisateur, la clé ou les paramètres d’autorisation du serveur.",
+      "configurationMissing": "La configuration de connexion enregistrée est introuvable."
+    },
+    "search": {
+      "placeholder": "Rechercher dans la sortie du terminal",
+      "matchCount": "{{current}} / {{total}}",
+      "noResults": "Aucun résultat",
+      "caseSensitive": "Respecter la casse",
+      "regex": "Utiliser une expression régulière",
+      "previous": "Résultat précédent",
+      "next": "Résultat suivant",
+      "invalidRegex": "Expression régulière non valide"
+    },
+    "palette": {
+      "title": "Palette de commandes",
+      "placeholder": "Saisir une commande",
+      "noResults": "Aucune commande correspondante"
+    },
+    "actions": {
+      "newSession": "Nouvelle session SSH",
+      "reconnectCurrent": "Reconnecter la session actuelle",
+      "duplicateCurrent": "Dupliquer la session actuelle",
+      "closeCurrent": "Fermer la session actuelle",
+      "closeOthers": "Fermer les autres sessions",
+      "nextSession": "Session suivante",
+      "previousSession": "Session précédente",
+      "searchOutput": "Rechercher dans la sortie du terminal",
+      "clearScreen": "Effacer l’écran visible",
+      "clearScrollback": "Effacer l’historique de défilement",
+      "copySelection": "Copier le texte sélectionné",
+      "pasteClipboard": "Coller depuis le presse-papiers",
+      "selectAll": "Tout sélectionner",
+      "fontIncrease": "Augmenter la taille de la police",
+      "fontDecrease": "Réduire la taille de la police",
+      "fontReset": "Réinitialiser la taille de la police",
+      "enterFullscreen": "Passer en plein écran",
+      "exitFullscreen": "Quitter le plein écran",
+      "connectionSettings": "Ouvrir les paramètres de connexion",
+      "connectionDetails": "Détails de la connexion"
+    },
+    "paste": {
+      "multilineTitle": "Coller {{count}} lignes dans {{target}} ?",
+      "largeTitle": "Coller une grande quantité de texte dans {{target}} ?",
+      "warning": "Le contenu collé peut exécuter plusieurs commandes."
+    },
+    "details": {
+      "protocol": "Protocole",
+      "endpoint": "Point de terminaison",
+      "latency": "Latence",
+      "terminalSize": "Taille du terminal",
+      "encoding": "Encodage",
+      "unavailable": "Indisponible"
+    }
+  },
   "tunnel": {
     "title": "Tunnels SSH (pénétration d'intranet) New~",
     "create": "Créer un tunnel",
@@ -223,6 +302,13 @@
     "reconnectRisk": "Security note: forwarded ports will listen on 0.0.0.0 and be publicly reachable. Please configure your firewall and access controls.",
     "reconnectAgree": "Reconnect now",
     "reconnecting": "Reconnecting...",
+    "reconnectLater": "Se reconnecter plus tard",
+    "reconnectDone": "Reconnecté. GatewayPorts est actif — recréez vos tunnels de transfert serveur.",
+    "reconnectManualHint": "GatewayPorts est activé — déconnectez puis reconnectez manuellement le serveur pour appliquer la modification.",
+    "reconnectFailed": "Échec de la reconnexion : {{error}}",
+    "reconnectHintDisable": "GatewayPorts est maintenant désactivé, mais une reconnexion est nécessaire pour appliquer la modification. La session sera brièvement interrompue. Se reconnecter maintenant ?",
+    "reconnectDoneDisable": "Reconnecté. GatewayPorts est désactivé — les transferts serveur n’accepteront que les connexions via 127.0.0.1.",
+    "reconnectManualHintDisable": "GatewayPorts est désactivé — déconnectez puis reconnectez manuellement le serveur pour appliquer la modification.",
     "running": "Running",
     "stopped": "Stopped",
     "restore": "Start",
@@ -850,7 +936,29 @@
     "disabledHint": "Le pare-feu est désactivé. Activez-le pour gérer les règles.",
     "enableFirewall": "Activer le pare-feu",
     "disableFirewall": "Désactiver le pare-feu",
-    "sshPortAutoOpened": "Le port SSH {{port}} a été automatiquement autorisé pour éviter la déconnexion."
+    "sshPortAutoOpened": "Le port SSH {{port}} a été automatiquement autorisé pour éviter la déconnexion.",
+    "statsTotal": "Total des règles",
+    "quickTitle": "Ports rapides",
+    "quickHint": "Cliquez sur une carte pour ouvrir ou fermer un port de service courant",
+    "searchPlaceholder": "Rechercher un port / protocole / une source...",
+    "allActions": "Toutes les actions",
+    "copied": "Copié dans le presse-papiers",
+    "copyAll": "Tout copier",
+    "copyRule": "Copier",
+    "copiedAll": "Toutes les règles ont été copiées dans le presse-papiers",
+    "noMatch": "Aucune règle correspondante",
+    "sourceLabel": "IP source",
+    "sourcePlaceholder": "Vide = toutes, par ex. 1.2.3.4 ou 10.0.0.0/8",
+    "viewRaw": "Règle brute",
+    "clearAll": "Effacer les règles",
+    "clearAllTitle": "Effacer toutes les règles",
+    "clearAllMsg": "Cette action supprimera les {{count}} règles du pare-feu et ne pourra pas être annulée. Continuer ?",
+    "clearAllConfirm": "Confirmer l’effacement",
+    "cleared": "Toutes les règles ont été effacées",
+    "portOpened": "Port {{port}} ouvert",
+    "portClosed": "Règle du port {{port}} supprimée",
+    "portOpenTitle": "Le port {{port}} est ouvert, cliquez pour le fermer",
+    "portClosedTitle": "Le port {{port}} est fermé, cliquez pour l’ouvrir"
   },
   "port": {
     "title": "Ports",

@@ -4,8 +4,11 @@ import { listen } from '@tauri-apps/api/event'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { useTranslation } from 'react-i18next'
 import Sidebar from './components/Sidebar'
-import ServerPanel from './components/ServerPanel'
+import ServerPanel, { type PanelSection } from './components/ServerPanel'
 import type { TerminalHandle } from './components/Terminal'
+import TerminalTabStrip from './components/terminal/TerminalTabStrip'
+import { parseConnectionHost } from './components/terminal/terminalActions'
+import type { TerminalConnectionState, TerminalDimensions, TerminalSavedConnection, TerminalSessionTabModel } from './components/terminal/types'
 import './App.css'
 
 interface UploadItem {
@@ -54,11 +57,11 @@ interface Settings {
 
 interface ActiveSession {
   configId: string
-  sessionId: string
+  sessionId: string | null
   name: string
   hostKey: string
   username: string
-  initialSection: string
+  initialSection: PanelSection
 }
 
 interface HostKeyVerification {
@@ -109,6 +112,12 @@ function App() {
   const activeTermRef = useRef<TerminalHandle | null>(null)
   const [errorDialog, setErrorDialog] = useState<{ visible: boolean; message: string; type: 'auth' | 'network' | 'connection' | 'other' } | null>(null)
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null)
+  const [connectionErrors, setConnectionErrors] = useState<Map<string, { type: 'auth' | 'network' | 'connection' | 'other'; message: string }>>(new Map())
+  const [sessionSections, setSessionSections] = useState<Map<string, PanelSection>>(new Map())
+  const [terminalDimensions, setTerminalDimensions] = useState<Map<string, TerminalDimensions>>(new Map())
+  const [unreadSessions, setUnreadSessions] = useState<Set<string>>(new Set())
+  const [newConnectionRequestId, setNewConnectionRequestId] = useState(0)
+  const [editConnectionRequest, setEditConnectionRequest] = useState<{ id: string; requestId: number } | null>(null)
 
   // 设置
   const [settings, setSettings] = useState<Settings>({
@@ -124,47 +133,99 @@ function App() {
   const [reconnectingSessions, setReconnectingSessions] = useState<Map<string, { name: string; attempt: number }>>(new Map())
   const reconnectingActiveRef = useRef(new Map<string, boolean>())
   const reconnectAttemptRef = useRef(new Map<string, number>())
+  const reconnectTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const reconnectGenerationRef = useRef(new Map<string, number>())
+  const connectingIdsRef = useRef(new Set<string>())
   const autoReconnectRef = useRef(true)
   // ponytail：为 close_tab_on_disconnect 保存 ref，避免 useEffect 处理器使用过期闭包
   const closeTabOnDisconnectRef = useRef(false)
-  const manualDisconnectRef = useRef(false)
+  const manualDisconnectSessionsRef = useRef(new Set<string>())
+  const replacingSessionsRef = useRef(new Set<string>())
   // ponytail：主动发起正常重启的会话，在断开时跳过自动重连
   const normalRebootSessionsRef = useRef(new Set<string>())
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0)
+  const sessionsRef = useRef<ActiveSession[]>([])
+  const settingsRef = useRef(settings)
+
+  sessionsRef.current = sessions
+  settingsRef.current = settings
 
   const activeSession = sessions.find(s => s.configId === activeConfigId) || null
   const activeSessionId = activeSession?.sessionId ?? null
+  const activePanelSection = activeConfigId
+    ? sessionSections.get(activeConfigId) || activeSession?.initialSection || 'dashboard'
+    : 'dashboard'
   // ponytail：活动标签页已断开且未重连，显示持久提示
   const isDisconnected = activeConfigId
-    ? !connectedConfigIds.has(activeConfigId) && !reconnectingSessions.has(activeConfigId)
+    ? !connectedConfigIds.has(activeConfigId) &&
+      !reconnectingSessions.has(activeConfigId) &&
+      !connectingIdsRef.current.has(activeConfigId) &&
+      connectingServerId !== activeConfigId
     : false
 
-  // ponytail：将会话标记为已断开，保留标签页，仅移除 SSH 连接状态
   const markDisconnected = (configId: string) => {
     setConnectedConfigIds(prev => { const s = new Set(prev); s.delete(configId); return s })
   }
 
-  // ponytail：断开操作：根据用户设置移除标签页，或仅标记为已断开
+  const clearReconnectState = (configId: string) => {
+    const timer = reconnectTimersRef.current.get(configId)
+    if (timer) clearTimeout(timer)
+    reconnectTimersRef.current.delete(configId)
+    reconnectingActiveRef.current.delete(configId)
+    reconnectAttemptRef.current.delete(configId)
+    setReconnectingSessions(prev => {
+      if (!prev.has(configId)) return prev
+      const next = new Map(prev)
+      next.delete(configId)
+      return next
+    })
+  }
+
   const handleDisconnectAction = (configId: string) => {
     if (closeTabOnDisconnectRef.current) removeSession(configId)
     else markDisconnected(configId)
   }
 
   const removeSession = (configId: string) => {
+    clearReconnectState(configId)
+    connectingIdsRef.current.delete(configId)
     termRefMap.current.delete(configId)
-    setSessions(prev => prev.filter(s => s.configId !== configId))
-    // ponytail：始终清理 connectedConfigIds，修复移除标签页后侧边栏仍显示“断开”的问题
+    const current = sessionsRef.current
+    const removedIndex = current.findIndex(session => session.configId === configId)
+    const remaining = current.filter(session => session.configId !== configId)
+    sessionsRef.current = remaining
+    setSessions(remaining)
     setConnectedConfigIds(prev => { const s = new Set(prev); s.delete(configId); return s })
     setActiveConfigId(prev => {
       if (prev !== configId) return prev
-      const rest = sessions.filter(s => s.configId !== configId)
-      return rest.length > 0 ? rest[rest.length - 1].configId : null
+      if (remaining.length === 0) return null
+      return remaining[Math.min(Math.max(removedIndex, 0), remaining.length - 1)].configId
     })
+    setConnectionErrors(prev => { const next = new Map(prev); next.delete(configId); return next })
+    setSessionSections(prev => { const next = new Map(prev); next.delete(configId); return next })
+    setTerminalDimensions(prev => { const next = new Map(prev); next.delete(configId); return next })
+    setUnreadSessions(prev => { const next = new Set(prev); next.delete(configId); return next })
   }
 
-  // ponytail：切换标签页时同步 activeTermRef
+  const closeSession = (configId: string) => {
+    const session = sessionsRef.current.find(item => item.configId === configId)
+    if (session?.sessionId) {
+      manualDisconnectSessionsRef.current.add(session.sessionId)
+      invoke('ssh_disconnect', { sessionId: session.sessionId }).catch(() => {})
+    }
+    removeSession(configId)
+  }
+
   useEffect(() => {
     activeTermRef.current = activeConfigId ? (termRefMap.current.get(activeConfigId) ?? null) : null
+    if (activeConfigId) {
+      setUnreadSessions(prev => {
+        if (!prev.has(activeConfigId)) return prev
+        const next = new Set(prev)
+        next.delete(activeConfigId)
+        return next
+      })
+    }
   }, [activeConfigId])
 
   // 可拖动分隔线
@@ -172,18 +233,19 @@ function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const draggingRef = useRef<'sidebar' | null>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
-  // 监听来自侧边栏的断开请求（按会话处理）
   useEffect(() => {
     const handleDisconnectRequest = (e: Event) => {
       const configId = (e as CustomEvent).detail?.configId
-      const sess = sessions.find(s => s.configId === configId)
+      const sess = sessionsRef.current.find(s => s.configId === configId)
       if (!sess) return
-      manualDisconnectRef.current = true
+      if (!sess.sessionId) {
+        handleDisconnectAction(configId)
+        return
+      }
+      manualDisconnectSessionsRef.current.add(sess.sessionId)
       const doRemove = () => {
-        termRefMap.current.get(configId)?.clear()
         handleDisconnectAction(configId)
       }
-      // ponytail：让断开操作与本地 3 秒超时竞争，确保 UI 始终有响应
       Promise.race([
         invoke('ssh_disconnect', { sessionId: sess.sessionId }).catch(() => {}),
         new Promise<void>(resolve => setTimeout(resolve, 3000)),
@@ -191,7 +253,7 @@ function App() {
     }
     window.addEventListener('sidebar-disconnect', handleDisconnectRequest)
     return () => window.removeEventListener('sidebar-disconnect', handleDisconnectRequest)
-  }, [sessions])
+  }, [])
 
   // 上传队列状态
   const [upload, setUpload] = useState<UploadState>({
@@ -559,7 +621,6 @@ function App() {
       setSettings(s)
       autoReconnectRef.current = s.auto_reconnect
       closeTabOnDisconnectRef.current = s.close_tab_on_disconnect ?? false
-      closeTabOnDisconnectRef.current = s.close_tab_on_disconnect ?? false
     }).catch(() => {})
     // ponytail：启动时自动检查更新，下载前先询问用户
     Promise.race([
@@ -597,75 +658,89 @@ function App() {
   }
 
   useEffect(() => {
-  // 保持 refs 同步
     autoReconnectRef.current = settings.auto_reconnect
     closeTabOnDisconnectRef.current = settings.close_tab_on_disconnect
   }, [settings.auto_reconnect, settings.close_tab_on_disconnect])
 
-  // 监听 ssh-disconnected 事件（按会话处理）
+  const startReconnect = (session: ActiveSession, delayMs: number) => {
+    const sid = session.sessionId
+    if (!sid || reconnectingActiveRef.current.get(session.configId)) return
+    const generation = (reconnectGenerationRef.current.get(session.configId) ?? 0) + 1
+    reconnectGenerationRef.current.set(session.configId, generation)
+    reconnectingActiveRef.current.set(session.configId, true)
+    reconnectAttemptRef.current.set(session.configId, 0)
+    markDisconnected(session.configId)
+    setConnectionErrors(prev => { const next = new Map(prev); next.delete(session.configId); return next })
+    setReconnectingSessions(prev => new Map(prev).set(session.configId, { name: session.name, attempt: 0 }))
+
+    const attemptReconnect = async () => {
+      if (!reconnectingActiveRef.current.get(session.configId) || reconnectGenerationRef.current.get(session.configId) !== generation) return
+      const currentSettings = settingsRef.current
+      const attempt = (reconnectAttemptRef.current.get(session.configId) ?? 0) + 1
+      reconnectAttemptRef.current.set(session.configId, attempt)
+      setReconnectingSessions(prev => new Map(prev).set(session.configId, { name: session.name, attempt }))
+      try {
+        await invoke('ssh_reconnect', { sessionId: sid })
+        if (!reconnectingActiveRef.current.get(session.configId) || reconnectGenerationRef.current.get(session.configId) !== generation) {
+          manualDisconnectSessionsRef.current.add(sid)
+          await invoke('ssh_disconnect', { sessionId: sid }).catch(() => {})
+          return
+        }
+        clearReconnectState(session.configId)
+        setConnectedConfigIds(prev => new Set(prev).add(session.configId))
+        showToast(`[${session.name}] ${t('common.reconnectSuccess', { attempt })}`)
+      } catch {
+        if (!reconnectingActiveRef.current.get(session.configId) || reconnectGenerationRef.current.get(session.configId) !== generation) return
+        if (attempt >= currentSettings.max_reconnect_attempts) {
+          clearReconnectState(session.configId)
+          showToast(`[${session.name}] ${t('common.reconnectFailed', { max: currentSettings.max_reconnect_attempts })}`)
+          handleDisconnectAction(session.configId)
+          return
+        }
+        const timer = setTimeout(attemptReconnect, currentSettings.reconnect_interval * 1000)
+        reconnectTimersRef.current.set(session.configId, timer)
+      }
+    }
+
+    const timer = setTimeout(attemptReconnect, delayMs)
+    reconnectTimersRef.current.set(session.configId, timer)
+  }
+
   useEffect(() => {
-    const unlisten = listen<{ sessionId: string; reason: string }>('ssh-disconnected', async (event) => {
+    const unlisten = listen<{ sessionId: string; reason: string }>('ssh-disconnected', event => {
       const sid = event.payload.sessionId
-      const sess = sessions.find(s => s.sessionId === sid)
+      const sess = sessionsRef.current.find(s => s.sessionId === sid)
       if (!sess) return
-      // 如果用户手动断开，则跳过自动重连
-      if (manualDisconnectRef.current) {
+      markDisconnected(sess.configId)
+      if (replacingSessionsRef.current.has(sid)) {
+        replacingSessionsRef.current.delete(sid)
+        return
+      }
+      if (manualDisconnectSessionsRef.current.has(sid)) {
+        manualDisconnectSessionsRef.current.delete(sid)
         handleDisconnectAction(sess.configId)
         return
       }
-      // ponytail：正常（优雅）重启后跳过自动重连
-      if (normalRebootSessionsRef.current.has(sess.sessionId)) {
-        normalRebootSessionsRef.current.delete(sess.sessionId)
+      if (normalRebootSessionsRef.current.has(sid)) {
+        normalRebootSessionsRef.current.delete(sid)
         showToast(`ℹ [${sess.name}] ${t('common.normalRebootHint')}`)
         handleDisconnectAction(sess.configId)
         return
       }
-      if (sid && autoReconnectRef.current && !reconnectingActiveRef.current.get(sess.configId)) {
-        reconnectingActiveRef.current.set(sess.configId, true)
-        reconnectAttemptRef.current.set(sess.configId, 0)
-        setReconnectingSessions(prev => new Map(prev).set(sess.configId, { name: sess.name, attempt: 0 }))
-
-        const attemptReconnect = async () => {
-          if (!reconnectingActiveRef.current.get(sess.configId)) return
-            // ponytail：使用 ref 保存尝试次数，递归异步闭包中的 state 可能已过期
-          const attempt = (reconnectAttemptRef.current.get(sess.configId) ?? 0) + 1
-          reconnectAttemptRef.current.set(sess.configId, attempt)
-          setReconnectingSessions(prev => new Map(prev).set(sess.configId, { name: sess.name, attempt }))
-          if (attempt > settings.max_reconnect_attempts) {
-            showToast(`[${sess.name}] ${t('common.reconnectFailed', { max: settings.max_reconnect_attempts })}`)
-            reconnectingActiveRef.current.delete(sess.configId)
-            reconnectAttemptRef.current.delete(sess.configId)
-            setReconnectingSessions(prev => { const m = new Map(prev); m.delete(sess.configId); return m })
-            handleDisconnectAction(sess.configId)
-            return
-          }
-          try {
-            await invoke('ssh_reconnect', { sessionId: sid })
-            showToast(`[${sess.name}] ${t('common.reconnectSuccess', { attempt })}`)
-            reconnectingActiveRef.current.delete(sess.configId)
-            reconnectAttemptRef.current.delete(sess.configId)
-            setReconnectingSessions(prev => { const m = new Map(prev); m.delete(sess.configId); return m })
-          } catch {
-            // ponytail：这里不调用 showToast，重连提示条由 state 渲染，不会闪烁
-            setTimeout(attemptReconnect, settings.reconnect_interval * 1000)
-          }
-        }
-        setTimeout(attemptReconnect, settings.reconnect_interval * 1000)
+      if (autoReconnectRef.current) {
+        startReconnect(sess, settingsRef.current.reconnect_interval * 1000)
       } else if (!autoReconnectRef.current) {
         showToast(`[${sess.name}] ${t('common.connectionLost')}`)
         handleDisconnectAction(sess.configId)
       }
     })
     return () => { unlisten.then((fn) => fn()) }
-  }, [settings, sessions]) // eslint-disable-line
+  }, [])
 
-  useEffect(() => {
-    const unlisten = listen<string>('ssh-closed', (event) => {
-      const sess = sessions.find(s => s.sessionId === event.payload)
-      if (sess) handleDisconnectAction(sess.configId)
-    })
-    return () => { unlisten.then((fn) => fn()) }
-  }, [sessions])
+  useEffect(() => () => {
+    for (const timer of reconnectTimersRef.current.values()) clearTimeout(timer)
+    reconnectTimersRef.current.clear()
+  }, [])
 
   // ponytail：监听来自 ServerSettingsPanel 的 normal-reboot 事件
   useEffect(() => {
@@ -713,29 +788,55 @@ function App() {
   }
 
   const handleSelectConnection = (conn: SidebarConnection) => {
-    // ponytail：单击时如果已连接则切换到服务器，否则建立连接
     handleDirectConnect(conn)
   }
 
-  const handleDirectConnect = useCallback(async (conn: SidebarConnection) => {
-    // ponytail：多会话模式：如果已经连接，则只切换标签页
-    const existing = sessions.find(s => s.configId === conn.id)
+  const handleDirectConnect = useCallback(async (conn: SidebarConnection, forceReconnect = false) => {
+    const existing = sessionsRef.current.find(s => s.configId === conn.id)
     const isConnected = existing !== undefined && connectedConfigIds.has(conn.id)
-    if (isConnected) {
+    if (isConnected && !forceReconnect) {
       setActiveConfigId(conn.id)
       return
     }
+    if (connectingIdsRef.current.has(conn.id)) {
+      setActiveConfigId(conn.id)
+      return
+    }
+    if (isConnected && existing?.sessionId) {
+      replacingSessionsRef.current.add(existing.sessionId)
+      await invoke('ssh_disconnect', { sessionId: existing.sessionId }).catch(() => {})
+      markDisconnected(conn.id)
+    }
 
     const doConnect = async (username: string, password?: string, keyPath?: string) => {
+      connectingIdsRef.current.add(conn.id)
       setConnectingServerId(conn.id)
       setError('')
       const hostKey = `${conn.host}_${conn.port}`
       const panelKey = `lastPanel_${username}@${hostKey}`
-          // ponytail：根据窗口估算 PTY 大小，使 Shell 提示符在首次绘制时正确显示
       const estCols = Math.max(80, Math.floor((window.innerWidth - (sidebarVisible ? sidebarWidth + 10 : 40) - 20) / 8.4))
       const estRows = Math.max(24, Math.floor((window.innerHeight - 100) / 17))
-      const savedPanelPromise = invoke<string>('ui_state_get', { key: panelKey }).catch(() => '')
       try {
+        const savedPanelValue = await invoke<string>('ui_state_get', { key: panelKey }).catch(() => '')
+        const savedPanel = (savedPanelValue || 'dashboard') as PanelSection
+        const placeholder: ActiveSession = {
+          configId: conn.id,
+          sessionId: existing?.sessionId ?? null,
+          name: conn.name || conn.host,
+          hostKey,
+          username,
+          initialSection: existing?.initialSection ?? savedPanel,
+        }
+        setSessions(prev => {
+          const next = prev.some(session => session.configId === conn.id)
+            ? prev.map(session => session.configId === conn.id ? { ...session, name: placeholder.name, hostKey, username } : session)
+            : [...prev, placeholder]
+          sessionsRef.current = next
+          return next
+        })
+        setSessionSections(prev => prev.has(conn.id) ? prev : new Map(prev).set(conn.id, placeholder.initialSection))
+        setConnectionErrors(prev => { const next = new Map(prev); next.delete(conn.id); return next })
+        setActiveConfigId(conn.id)
         let sid = ''
         let hostKeyUpdates = 0
         while (!sid) {
@@ -774,7 +875,7 @@ function App() {
                 window.alert('Fingerprint did not match. The trusted host key was not changed.')
               }
             }
-            if (!approved) return
+            if (!approved) throw new Error('Host key verification was cancelled.')
             await invoke('ssh_trust_host_key', {
               host: verification.host,
               port: verification.port,
@@ -784,25 +885,20 @@ function App() {
             hostKeyUpdates += 1
           }
         }
-        const savedPanel = await savedPanelPromise
-        if (existing) {
-          // ponytail：重连已有的断开标签页，更新 sessionId 并保留标签页
-          setSessions(prev => prev.map(s => s.configId === conn.id ? { ...s, sessionId: sid } : s))
-        } else {
-          const newSession: ActiveSession = {
-            configId: conn.id,
-            sessionId: sid,
-            name: conn.name || conn.host,
-            hostKey,
-            username,
-            initialSection: savedPanel || 'dashboard',
-          }
-          setSessions(prev => [...prev, newSession])
+        if (!connectingIdsRef.current.has(conn.id) || !sessionsRef.current.some(session => session.configId === conn.id)) {
+          await invoke('ssh_disconnect', { sessionId: sid }).catch(() => {})
+          return
         }
+        setSessions(prev => {
+          const next = prev.map(session => session.configId === conn.id
+            ? { ...session, sessionId: sid, name: conn.name || conn.host, hostKey, username }
+            : session)
+          sessionsRef.current = next
+          return next
+        })
         setConnectedConfigIds(prev => new Set(prev).add(conn.id))
         setActiveConfigId(conn.id)
-        manualDisconnectRef.current = false
-        // 连接成功时显示欢迎弹窗（每 6 小时一次）
+        setConnectionErrors(prev => { const next = new Map(prev); next.delete(conn.id); return next })
         const WELCOME_INTERVAL = 6 * 60 * 60 * 1000
         const lastShown = Number(localStorage.getItem('welcome_last_shown') || 0)
         if (Date.now() - lastShown >= WELCOME_INTERVAL) {
@@ -813,16 +909,19 @@ function App() {
       } catch (e) {
         const msg = String(e)
         const { type, message } = classifyError(msg)
-        setErrorDialog({ visible: true, message, type })
+        if (connectingIdsRef.current.has(conn.id)) {
+          setConnectionErrors(prev => new Map(prev).set(conn.id, { type, message }))
+          setErrorDialog({ visible: true, message, type })
+        }
       } finally {
-        setConnectingServerId(null)
+        connectingIdsRef.current.delete(conn.id)
+        setConnectingServerId(current => current === conn.id ? null : current)
       }
     }
 
     let password: string | undefined
     let keyPath: string | undefined
     
-    // 仅在 remember_me 为 true 时使用保存的凭据
     if (conn.remember_me) {
       if (conn.auth_type === 'password' && !conn.password) {
         setErrorDialog({ visible: true, message: 'No password saved. Please edit the connection to add credentials.', type: 'auth' })
@@ -836,24 +935,164 @@ function App() {
     }
 
     void doConnect(conn.username, password, keyPath)
-  }, [sessions, connectedConfigIds, sidebarVisible, sidebarWidth])
+  }, [connectedConfigIds, sidebarVisible, sidebarWidth])
 
   // 监听来自侧边栏的 reconnect-after-edit 事件（连接按钮）
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail
-      if (detail?.conn) handleDirectConnect(detail.conn)
+      if (detail?.conn) void handleDirectConnect(detail.conn, true)
     }
     window.addEventListener('sidebar-reconnect-after-edit', handler)
     return () => window.removeEventListener('sidebar-reconnect-after-edit', handler)
   }, [handleDirectConnect])
+
+  const requestNewSession = () => {
+    setSidebarVisible(true)
+    setNewConnectionRequestId(value => value + 1)
+  }
+
+  const requestEditConnection = (configId: string) => {
+    setSidebarVisible(true)
+    setEditConnectionRequest({ id: configId, requestId: Date.now() })
+  }
+
+  const cancelReconnect = (configId: string) => {
+    reconnectGenerationRef.current.set(configId, (reconnectGenerationRef.current.get(configId) ?? 0) + 1)
+    clearReconnectState(configId)
+    markDisconnected(configId)
+  }
+
+  const reconnectSession = async (configId: string) => {
+    cancelReconnect(configId)
+    setConnectionErrors(prev => {
+      if (!prev.has(configId)) return prev
+      const next = new Map(prev)
+      next.delete(configId)
+      return next
+    })
+    try {
+      const connections = await invoke<TerminalSavedConnection[]>('config_list')
+      const connection = connections.find(item => item.id === configId)
+      if (!connection) throw new Error(t('terminal.connection.configurationMissing'))
+      handleDirectConnect(connection)
+    } catch (reconnectError) {
+      const message = String(reconnectError)
+      setConnectionErrors(prev => new Map(prev).set(configId, { type: 'connection', message }))
+      setErrorDialog({ visible: true, message, type: 'connection' })
+    }
+  }
+
+  const closeOtherSessions = (configId: string) => {
+    for (const session of [...sessionsRef.current]) {
+      if (session.configId !== configId) closeSession(session.configId)
+    }
+  }
+
+  const activateRelativeSession = (offset: number) => {
+    const current = sessionsRef.current
+    if (current.length < 2) return
+    const index = current.findIndex(session => session.configId === activeConfigId)
+    const nextIndex = (Math.max(index, 0) + offset + current.length) % current.length
+    setActiveConfigId(current[nextIndex].configId)
+  }
+
+  const reorderSessions = (fromId: string, toId: string) => {
+    const current = sessionsRef.current
+    const fromIndex = current.findIndex(session => session.configId === fromId)
+    const toIndex = current.findIndex(session => session.configId === toId)
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
+    const next = [...current]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    sessionsRef.current = next
+    setSessions(next)
+  }
+
+  const updateSessionSection = (configId: string, section: PanelSection) => {
+    setSessionSections(prev => {
+      if (prev.get(configId) === section) return prev
+      return new Map(prev).set(configId, section)
+    })
+  }
+
+  const updateTerminalDimensions = (configId: string, dimensions: TerminalDimensions) => {
+    setTerminalDimensions(prev => {
+      const current = prev.get(configId)
+      if (current?.cols === dimensions.cols && current.rows === dimensions.rows) return prev
+      return new Map(prev).set(configId, dimensions)
+    })
+  }
+
+  const markTerminalBackgroundOutput = (configId: string) => {
+    if (configId === activeConfigId && activePanelSection === 'terminal') return
+    setUnreadSessions(prev => prev.has(configId) ? prev : new Set(prev).add(configId))
+  }
+
+  const getConnectionState = (configId: string): TerminalConnectionState => {
+    const reconnecting = reconnectingSessions.get(configId)
+    if (reconnecting) return { kind: 'reconnecting', attempt: reconnecting.attempt, max: settings.max_reconnect_attempts }
+    if (connectingIdsRef.current.has(configId) || connectingServerId === configId) return { kind: 'connecting' }
+    if (connectedConfigIds.has(configId)) return { kind: 'connected' }
+    const connectionError = connectionErrors.get(configId)
+    if (connectionError?.type === 'auth') return { kind: 'authentication-failed', message: connectionError.message }
+    return { kind: 'disconnected', reason: connectionError?.message }
+  }
+
+  const terminalTabs: TerminalSessionTabModel[] = sessions.map(session => {
+    const endpoint = parseConnectionHost(session.hostKey)
+    return {
+      id: session.configId,
+      name: session.name,
+      username: session.username,
+      host: endpoint.host,
+      port: endpoint.port,
+      state: getConnectionState(session.configId),
+      dimensions: terminalDimensions.get(session.configId),
+      hasUnread: unreadSessions.has(session.configId),
+    }
+  })
+
+  const terminalTabStrip = sessions.length > 0 ? (
+    <TerminalTabStrip
+      sessions={terminalTabs}
+      activeId={activeConfigId}
+      commandAvailable={activePanelSection === 'terminal'}
+      onActivate={setActiveConfigId}
+      onClose={closeSession}
+      onNewSession={requestNewSession}
+      onConnect={handleDirectConnect}
+      onOpenCommandPalette={() => activeTermRef.current?.openCommandPalette()}
+      onReorder={reorderSessions}
+    />
+  ) : undefined
+
+  const terminalOwnsConnectionStatus = activePanelSection === 'terminal' && activeSession !== null
+  const showTopBar = Boolean(
+    error ||
+    pendingUpdate ||
+    (!terminalOwnsConnectionStatus && (reconnectingSessions.has(activeConfigId || '') || toast || isDisconnected))
+  )
 
   return (
     <div className="app">
       {sidebarVisible && (
         <>
           <div style={{ width: sidebarWidth, minWidth: sidebarWidth, flexShrink: 0, display: 'flex', position: 'relative' }}>
-            <Sidebar onSelect={handleSelectConnection} onConnect={handleDirectConnect} onNew={() => {}} onCreateConnection={handleCreateConnection} refreshKey={sidebarRefreshKey} connectedIds={Array.from(connectedConfigIds)} connectingServerId={connectingServerId} activeConfigId={activeConfigId} />
+            <Sidebar
+              onSelect={handleSelectConnection}
+              onConnect={handleDirectConnect}
+              onNew={() => {}}
+              onCreateConnection={handleCreateConnection}
+              refreshKey={sidebarRefreshKey}
+              connectedIds={Array.from(connectedConfigIds)}
+              connectingServerId={connectingServerId}
+              activeConfigId={activeConfigId}
+              newConnectionRequestId={newConnectionRequestId}
+              editConnectionRequest={editConnectionRequest}
+              onNewConnectionRequestHandled={requestId => setNewConnectionRequestId(current => current === requestId ? 0 : current)}
+              onEditConnectionRequestHandled={requestId => setEditConnectionRequest(current => current?.requestId === requestId ? null : current)}
+            />
             {/* 侧边栏切换按钮 */}
             <button 
               className="sidebar-toggle-btn visible"
@@ -879,31 +1118,23 @@ function App() {
         </button>
       )}
       <div className="main-area">
-        <div className="top-bar">
+        {showTopBar && <div className="top-bar">
           {error && <div className="error-bar">{error}</div>}
-          {/* ponytail：持久重连提示条，由 state 驱动而非 Toast（不会出现 4 秒闪烁） */}
-          {activeConfigId && reconnectingSessions.has(activeConfigId) && (() => {
+          {!terminalOwnsConnectionStatus && activeConfigId && reconnectingSessions.has(activeConfigId) && (() => {
             const info = reconnectingSessions.get(activeConfigId)!
             return (
               <div className="toast-bar">
                 <span>↻ [{info.name}] {t('common.reconnectAttempt', { attempt: info.attempt, max: settings.max_reconnect_attempts })}</span>
-                <button className="toast-stop-btn" onClick={() => {
-                  const cid = activeConfigId
-                  reconnectingActiveRef.current.delete(cid)
-                  reconnectAttemptRef.current.delete(cid)
-                  setReconnectingSessions(prev => { const m = new Map(prev); m.delete(cid); return m })
-                  handleDisconnectAction(cid)
-                }}>{t('common.stop')}</button>
+                <button className="toast-stop-btn" onClick={() => cancelReconnect(activeConfigId)}>{t('common.stop')}</button>
               </div>
             )
           })()}
-          {toast && !reconnectingSessions.has(activeConfigId || '') && !isDisconnected && (
+          {!terminalOwnsConnectionStatus && toast && !reconnectingSessions.has(activeConfigId || '') && !isDisconnected && (
             <div className="toast-bar">
               <span>{toast}</span>
             </div>
           )}
-          {/* ponytail：持久断开提示条，重新连接前始终可见 */}
-          {isDisconnected && (
+          {!terminalOwnsConnectionStatus && isDisconnected && (
             <div className="toast-bar disconnected-bar">{t('common.disconnectedBanner')}</div>
           )}
           {pendingUpdate && (
@@ -912,7 +1143,7 @@ function App() {
               <button className="update-restart-btn" onClick={async () => { await pendingUpdate.install() }}>Restart Now</button>
             </div>
           )}
-        </div>
+        </div>}
         
         {/* 错误对话框 */}
         {errorDialog?.visible && (
@@ -926,42 +1157,9 @@ function App() {
           </div>
         )}
         <div className="split-container" ref={splitContainerRef}>
-          {/* ponytail：会话标签栏，快速切换已连接的服务器 */}
-          {sessions.length > 0 && (
-            <div className="session-tabs">
-              {sessions.map(s => {
-                const reconInfo = reconnectingSessions.get(s.configId)
-                const isReconnecting = reconInfo !== undefined
-                const isTabConnected = connectedConfigIds.has(s.configId)
-                return (
-                <div
-                  key={s.configId}
-                  className={`session-tab ${s.configId === activeConfigId ? 'active' : ''} ${isReconnecting ? 'reconnecting' : ''} ${!isTabConnected && !isReconnecting ? 'disconnected' : ''}`}
-                  onClick={() => setActiveConfigId(s.configId)}
-                >
-                  {isReconnecting && <span className="session-tab-recon-icon" title={`Reconnecting... (${reconInfo!.attempt}/${settings.max_reconnect_attempts})`}>↻</span>}
-                  <span className="session-tab-name">{s.name}</span>
-                  <button
-                    className="session-tab-close"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if (isTabConnected) {
-                        manualDisconnectRef.current = true
-                        invoke('ssh_disconnect', { sessionId: s.sessionId }).catch(() => {})
-                        handleDisconnectAction(s.configId)
-                      } else {
-                        removeSession(s.configId)
-                      }
-                    }}
-                  >×</button>
-                </div>
-                )
-              })}
-            </div>
-          )}
           <div className="split-full">
             {sessions.map(s => (
-              <div key={s.configId + s.sessionId} style={{ display: s.configId === activeConfigId ? 'block' : 'none', height: '100%' }}>
+              <div key={s.configId} className={`server-session ${s.configId === activeConfigId ? 'active' : ''}`}>
                 <ServerPanel
                   sessionId={s.sessionId}
                   connHost={s.hostKey}
@@ -978,6 +1176,21 @@ function App() {
                   appSettings={settings}
                   onToggleAutoReconnect={toggleAutoReconnect}
                   onUpdateSettings={handleUpdateSettings}
+                  onShowToast={showToast}
+                  isSessionActive={s.configId === activeConfigId}
+                  terminalTabStrip={s.configId === activeConfigId ? terminalTabStrip : undefined}
+                  connectionState={getConnectionState(s.configId)}
+                  onReconnect={() => void reconnectSession(s.configId)}
+                  onCancelReconnect={() => cancelReconnect(s.configId)}
+                  onCloseSession={() => closeSession(s.configId)}
+                  onNewSession={requestNewSession}
+                  onCloseOtherSessions={() => closeOtherSessions(s.configId)}
+                  onNextSession={() => activateRelativeSession(1)}
+                  onPreviousSession={() => activateRelativeSession(-1)}
+                  onEditConnection={() => requestEditConnection(s.configId)}
+                  onSectionChange={section => updateSessionSection(s.configId, section)}
+                  onTerminalDimensionsChange={dimensions => updateTerminalDimensions(s.configId, dimensions)}
+                  onTerminalBackgroundOutput={() => markTerminalBackgroundOutput(s.configId)}
                 />
               </div>
             ))}

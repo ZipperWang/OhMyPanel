@@ -151,6 +151,85 @@
     "settings": "Settings",
     "discussions": "Discussions"
   },
+  "terminal": {
+    "status": {
+      "connected": "Connected",
+      "connecting": "Connecting",
+      "reconnecting": "Reconnecting",
+      "disconnected": "Disconnected",
+      "authenticationFailed": "Authentication failed",
+      "newOutput": "New output",
+      "restored": "Connection restored"
+    },
+    "tabs": {
+      "sessionMenu": "Session menu",
+      "terminalMenu": "Terminal menu",
+      "closeNamed": "Close {{name}}",
+      "savedServers": "Saved servers",
+      "recentSessions": "Recent sessions",
+      "noRecentSessions": "No recent sessions"
+    },
+    "connection": {
+      "connectingTo": "Connecting to {{target}}…",
+      "establishing": "Establishing SSH session",
+      "reconnectingMessage": "Connection interrupted. Reconnecting… {{attempt}}/{{max}}",
+      "closedTitle": "Connection closed",
+      "sessionEnded": "The SSH session has ended.",
+      "authRejected": "The server rejected the configured SSH key.",
+      "authHint": "Check the username, key, or server authorization settings.",
+      "configurationMissing": "Saved connection configuration was not found."
+    },
+    "search": {
+      "placeholder": "Search terminal output",
+      "matchCount": "{{current}} / {{total}}",
+      "noResults": "No results",
+      "caseSensitive": "Match case",
+      "regex": "Use regular expression",
+      "previous": "Previous match",
+      "next": "Next match",
+      "invalidRegex": "Invalid regular expression"
+    },
+    "palette": {
+      "title": "Command palette",
+      "placeholder": "Type a command",
+      "noResults": "No matching commands"
+    },
+    "actions": {
+      "newSession": "New SSH session",
+      "reconnectCurrent": "Reconnect current session",
+      "duplicateCurrent": "Duplicate current session",
+      "closeCurrent": "Close current session",
+      "closeOthers": "Close other sessions",
+      "nextSession": "Next session",
+      "previousSession": "Previous session",
+      "searchOutput": "Search terminal output",
+      "clearScreen": "Clear visible screen",
+      "clearScrollback": "Clear scrollback",
+      "copySelection": "Copy selected text",
+      "pasteClipboard": "Paste from clipboard",
+      "selectAll": "Select all",
+      "fontIncrease": "Increase font size",
+      "fontDecrease": "Decrease font size",
+      "fontReset": "Reset font size",
+      "enterFullscreen": "Enter fullscreen",
+      "exitFullscreen": "Exit fullscreen",
+      "connectionSettings": "Open connection settings",
+      "connectionDetails": "Connection details"
+    },
+    "paste": {
+      "multilineTitle": "Paste {{count}} lines into {{target}}?",
+      "largeTitle": "Paste a large amount of text into {{target}}?",
+      "warning": "The pasted content may execute multiple commands."
+    },
+    "details": {
+      "protocol": "Protocol",
+      "endpoint": "Endpoint",
+      "latency": "Latency",
+      "terminalSize": "Terminal size",
+      "encoding": "Encoding",
+      "unavailable": "Unavailable"
+    }
+  },
   "tunnel": {
     "title": "SSH Tunnels (Intranet Penetration) New~",
     "create": "Create Tunnel",

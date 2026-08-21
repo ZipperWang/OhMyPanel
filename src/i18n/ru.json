@@ -151,6 +151,85 @@
     "settings": "Настройки",
     "discussions": "Обсуждения"
   },
+  "terminal": {
+    "status": {
+      "connected": "Подключено",
+      "connecting": "Подключение",
+      "reconnecting": "Переподключение",
+      "disconnected": "Отключено",
+      "authenticationFailed": "Ошибка аутентификации",
+      "newOutput": "Новый вывод",
+      "restored": "Соединение восстановлено"
+    },
+    "tabs": {
+      "sessionMenu": "Меню сеансов",
+      "terminalMenu": "Меню терминала",
+      "closeNamed": "Закрыть {{name}}",
+      "savedServers": "Сохранённые серверы",
+      "recentSessions": "Недавние сеансы",
+      "noRecentSessions": "Нет недавних сеансов"
+    },
+    "connection": {
+      "connectingTo": "Подключение к {{target}}…",
+      "establishing": "Установка сеанса SSH",
+      "reconnectingMessage": "Соединение прервано. Переподключение… {{attempt}}/{{max}}",
+      "closedTitle": "Соединение закрыто",
+      "sessionEnded": "Сеанс SSH завершён.",
+      "authRejected": "Сервер отклонил настроенный ключ SSH.",
+      "authHint": "Проверьте имя пользователя, ключ или настройки авторизации на сервере.",
+      "configurationMissing": "Сохранённая конфигурация подключения не найдена."
+    },
+    "search": {
+      "placeholder": "Поиск в выводе терминала",
+      "matchCount": "{{current}} / {{total}}",
+      "noResults": "Нет результатов",
+      "caseSensitive": "Учитывать регистр",
+      "regex": "Использовать регулярное выражение",
+      "previous": "Предыдущее совпадение",
+      "next": "Следующее совпадение",
+      "invalidRegex": "Недопустимое регулярное выражение"
+    },
+    "palette": {
+      "title": "Палитра команд",
+      "placeholder": "Введите команду",
+      "noResults": "Нет подходящих команд"
+    },
+    "actions": {
+      "newSession": "Новый сеанс SSH",
+      "reconnectCurrent": "Переподключить текущий сеанс",
+      "duplicateCurrent": "Дублировать текущий сеанс",
+      "closeCurrent": "Закрыть текущий сеанс",
+      "closeOthers": "Закрыть остальные сеансы",
+      "nextSession": "Следующий сеанс",
+      "previousSession": "Предыдущий сеанс",
+      "searchOutput": "Поиск в выводе терминала",
+      "clearScreen": "Очистить видимую область",
+      "clearScrollback": "Очистить буфер прокрутки",
+      "copySelection": "Копировать выделенный текст",
+      "pasteClipboard": "Вставить из буфера обмена",
+      "selectAll": "Выделить всё",
+      "fontIncrease": "Увеличить размер шрифта",
+      "fontDecrease": "Уменьшить размер шрифта",
+      "fontReset": "Сбросить размер шрифта",
+      "enterFullscreen": "Перейти в полноэкранный режим",
+      "exitFullscreen": "Выйти из полноэкранного режима",
+      "connectionSettings": "Открыть настройки подключения",
+      "connectionDetails": "Сведения о подключении"
+    },
+    "paste": {
+      "multilineTitle": "Вставить {{count}} строк в {{target}}?",
+      "largeTitle": "Вставить большой объём текста в {{target}}?",
+      "warning": "Вставленный текст может выполнить несколько команд."
+    },
+    "details": {
+      "protocol": "Протокол",
+      "endpoint": "Конечная точка",
+      "latency": "Задержка",
+      "terminalSize": "Размер терминала",
+      "encoding": "Кодировка",
+      "unavailable": "Недоступно"
+    }
+  },
   "tunnel": {
     "title": "SSH-туннели (проникновение в интранет) New~",
     "create": "Создать туннель",
@@ -223,6 +302,13 @@
     "reconnectRisk": "Security note: forwarded ports will listen on 0.0.0.0 and be publicly reachable. Please configure your firewall and access controls.",
     "reconnectAgree": "Reconnect now",
     "reconnecting": "Reconnecting...",
+    "reconnectLater": "Переподключиться позже",
+    "reconnectDone": "Соединение восстановлено. GatewayPorts активен — пересоздайте туннели серверной переадресации.",
+    "reconnectManualHint": "GatewayPorts включён — вручную отключитесь от сервера и подключитесь снова, чтобы применить изменение.",
+    "reconnectFailed": "Не удалось переподключиться: {{error}}",
+    "reconnectHintDisable": "GatewayPorts отключён, но для применения изменения требуется переподключение. Сеанс будет ненадолго прерван. Переподключиться сейчас?",
+    "reconnectDoneDisable": "Соединение восстановлено. GatewayPorts отключён — серверная переадресация будет принимать соединения только через 127.0.0.1.",
+    "reconnectManualHintDisable": "GatewayPorts отключён — вручную отключитесь от сервера и подключитесь снова, чтобы применить изменение.",
     "running": "Running",
     "stopped": "Stopped",
     "restore": "Start",
@@ -850,7 +936,29 @@
     "disabledHint": "Фаервол отключён. Включите его для управления правилами.",
     "enableFirewall": "Включить фаервол",
     "disableFirewall": "Отключить фаервол",
-    "sshPortAutoOpened": "Порт SSH {{port}} автоматически разрешён для предотвращения отключения."
+    "sshPortAutoOpened": "Порт SSH {{port}} автоматически разрешён для предотвращения отключения.",
+    "statsTotal": "Всего правил",
+    "quickTitle": "Быстрые порты",
+    "quickHint": "Нажмите карточку, чтобы открыть или закрыть порт популярной службы",
+    "searchPlaceholder": "Поиск порта / протокола / источника...",
+    "allActions": "Все действия",
+    "copied": "Скопировано в буфер обмена",
+    "copyAll": "Копировать всё",
+    "copyRule": "Копировать",
+    "copiedAll": "Все правила скопированы в буфер обмена",
+    "noMatch": "Подходящих правил нет",
+    "sourceLabel": "IP-адрес источника",
+    "sourcePlaceholder": "Пусто = любой, например 1.2.3.4 или 10.0.0.0/8",
+    "viewRaw": "Исходное правило",
+    "clearAll": "Очистить правила",
+    "clearAllTitle": "Очистить все правила",
+    "clearAllMsg": "Будут удалены все правила фаервола ({{count}}). Это действие нельзя отменить. Продолжить?",
+    "clearAllConfirm": "Подтвердить очистку",
+    "cleared": "Все правила удалены",
+    "portOpened": "Порт {{port}} открыт",
+    "portClosed": "Правило для порта {{port}} удалено",
+    "portOpenTitle": "Порт {{port}} открыт, нажмите для удаления",
+    "portClosedTitle": "Порт {{port}} закрыт, нажмите для открытия"
   },
   "port": {
     "title": "Порты",

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useTranslation } from 'react-i18next'
@@ -35,6 +35,10 @@ interface SidebarProps {
   connectedIds?: string[]
   connectingServerId?: string | null
   activeConfigId?: string | null
+  newConnectionRequestId?: number
+  editConnectionRequest?: { id: string; requestId: number } | null
+  onNewConnectionRequestHandled?: (requestId: number) => void
+  onEditConnectionRequestHandled?: (requestId: number) => void
 }
 
 interface ContextMenu {
@@ -43,7 +47,7 @@ interface ContextMenu {
   conn: Connection
 }
 
-export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection, refreshKey, connectedIds, connectingServerId, activeConfigId }: SidebarProps) {
+export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection, refreshKey, connectedIds, connectingServerId, activeConfigId, newConnectionRequestId = 0, editConnectionRequest, onNewConnectionRequestHandled, onEditConnectionRequestHandled }: SidebarProps) {
   const { t, i18n } = useTranslation()
   const [connections, setConnections] = useState<Connection[]>([])
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
@@ -52,21 +56,73 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
   const [showEditPassword, setShowEditPassword] = useState(false)
   const [creating, setCreating] = useState<NewConnectionData | null>(null)
   const [showCreatePassword, setShowCreatePassword] = useState(false)
-  const [hasCheckedEmpty, setHasCheckedEmpty] = useState(false)
   const [langDropdownOpen, setLangDropdownOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const langRef = useRef<HTMLDivElement>(null)
+  const hasCheckedEmptyRef = useRef(false)
+  const loadRequestIdRef = useRef(0)
+  const mountedRef = useRef(true)
+  const lastNewConnectionRequestRef = useRef(0)
+  const lastEditConnectionRequestRef = useRef<number | null>(null)
+  const onNewConnectionRequestHandledRef = useRef(onNewConnectionRequestHandled)
+  const onEditConnectionRequestHandledRef = useRef(onEditConnectionRequestHandled)
 
   useEffect(() => {
-    loadConnections()
+    onNewConnectionRequestHandledRef.current = onNewConnectionRequestHandled
+    onEditConnectionRequestHandledRef.current = onEditConnectionRequestHandled
+  }, [onNewConnectionRequestHandled, onEditConnectionRequestHandled])
+
+  const openNewConnection = useCallback(() => {
+    setShowCreatePassword(false)
+    setEditing(null)
+    setConfirmDelete(null)
+    setContextMenu(null)
+    setCreating({
+      name: '',
+      host: '',
+      port: 22,
+      username: 'root',
+      auth_type: 'password',
+      password: '',
+      remember_me: true
+    })
   }, [])
+
+  const loadConnections = useCallback(async () => {
+    const requestId = ++loadRequestIdRef.current
+    let list: Connection[]
+    try {
+      list = await invoke<Connection[]>('config_list')
+    } catch {
+      return
+    }
+    if (!mountedRef.current || requestId !== loadRequestIdRef.current) return
+    setConnections(list)
+
+    if (!hasCheckedEmptyRef.current) {
+      hasCheckedEmptyRef.current = true
+      if (list.length === 0) openNewConnection()
+    }
+  }, [openNewConnection])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      loadRequestIdRef.current += 1
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadConnections()
+  }, [loadConnections])
 
   // refreshKey 变化时刷新
   useEffect(() => {
     if (refreshKey && refreshKey > 0) {
-      loadConnections()
+      void loadConnections()
     }
-  }, [refreshKey])
+  }, [refreshKey, loadConnections])
 
   // 点击外部时关闭上下文菜单
   useEffect(() => {
@@ -93,29 +149,10 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
     return () => window.removeEventListener('mousedown', handleClick)
   }, [langDropdownOpen])
 
-  const loadConnections = async () => {
-    const list = await invoke<Connection[]>('config_list')
-    setConnections(list)
-    
-    // 仅在首次加载时检查是否为空
-    if (!hasCheckedEmpty && list.length === 0) {
-      setCreating({
-        name: '',
-        host: '',
-        port: 22,
-        username: 'root',
-        auth_type: 'password',
-        password: '',
-        remember_me: true
-      })
-      setHasCheckedEmpty(true)
-    }
-  }
-
   const handleDelete = async (id: string) => {
     await invoke('config_delete', { id })
     setConfirmDelete(null)
-    loadConnections()
+    await loadConnections()
   }
 
   const handleSaveEdit = async () => {
@@ -133,7 +170,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
     }
     await invoke('config_save', { connection: trimmed })
     setEditing(null)
-    loadConnections()
+    await loadConnections()
   }
 
   const handleSaveAndConnect = async () => {
@@ -153,7 +190,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
     await invoke('config_save', { connection: trimmed })
     
     setEditing(null)
-    loadConnections()
+    await loadConnections()
     
     // 通过自定义事件触发重连
     window.dispatchEvent(new CustomEvent('sidebar-reconnect-after-edit', {
@@ -186,21 +223,58 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
     }
     await onCreateConnection(trimmed)
     setCreating(null)
-    loadConnections()
+    await loadConnections()
   }
 
   const handleNewConnection = () => {
-    setCreating({
-      name: '',
-      host: '',
-      port: 22,
-      username: 'root',
-      auth_type: 'password',
-      password: '',
-      remember_me: true
-    })
+    hasCheckedEmptyRef.current = true
+    openNewConnection()
     onNew()
   }
+
+  useEffect(() => {
+    if (newConnectionRequestId <= 0) {
+      lastNewConnectionRequestRef.current = 0
+      return
+    }
+    if (lastNewConnectionRequestRef.current === newConnectionRequestId) return
+    lastNewConnectionRequestRef.current = newConnectionRequestId
+    hasCheckedEmptyRef.current = true
+    openNewConnection()
+    onNewConnectionRequestHandledRef.current?.(newConnectionRequestId)
+  }, [newConnectionRequestId, openNewConnection])
+
+  useEffect(() => {
+    if (!editConnectionRequest) {
+      lastEditConnectionRequestRef.current = null
+      return
+    }
+    if (lastEditConnectionRequestRef.current === editConnectionRequest.requestId) return
+    lastEditConnectionRequestRef.current = editConnectionRequest.requestId
+    let cancelled = false
+    const { id, requestId } = editConnectionRequest
+    const openEditor = async () => {
+      try {
+        const list = await invoke<Connection[]>('config_list')
+        if (cancelled) return
+        const connection = list.find(item => item.id === id)
+        if (connection) {
+          setShowEditPassword(false)
+          setCreating(null)
+          setConfirmDelete(null)
+          setContextMenu(null)
+          setEditing({ ...connection })
+        }
+      } catch {
+      } finally {
+        if (!cancelled) onEditConnectionRequestHandledRef.current?.(requestId)
+      }
+    }
+    void openEditor()
+    return () => {
+      cancelled = true
+    }
+  }, [editConnectionRequest?.id, editConnectionRequest?.requestId])
 
   const handleContextMenu = (e: React.MouseEvent, conn: Connection) => {
     e.preventDefault()
@@ -226,9 +300,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
               key={conn.id}
               className={`connection-item${conn.id === activeConfigId ? ' active' : ''}`}
               onClick={() => onSelect(conn)}
-              onDoubleClick={() => onConnect(conn)}
               onContextMenu={(e) => handleContextMenu(e, conn)}
-              title={t('sidebar.doubleClickHint')}
             >
               <div className="conn-info">
                 <span className="conn-name">{conn.name || conn.host}</span>

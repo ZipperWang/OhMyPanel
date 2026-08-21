@@ -151,6 +151,85 @@
     "settings": "設定",
     "discussions": "討論"
   },
+  "terminal": {
+    "status": {
+      "connected": "已連線",
+      "connecting": "連線中",
+      "reconnecting": "正在重新連線",
+      "disconnected": "已中斷連線",
+      "authenticationFailed": "驗證失敗",
+      "newOutput": "有新輸出",
+      "restored": "連線已恢復"
+    },
+    "tabs": {
+      "sessionMenu": "工作階段選單",
+      "terminalMenu": "終端機選單",
+      "closeNamed": "關閉 {{name}}",
+      "savedServers": "已儲存的伺服器",
+      "recentSessions": "最近的工作階段",
+      "noRecentSessions": "沒有最近的工作階段"
+    },
+    "connection": {
+      "connectingTo": "正在連線至 {{target}}…",
+      "establishing": "正在建立 SSH 工作階段",
+      "reconnectingMessage": "連線中斷，正在重新連線… {{attempt}}/{{max}}",
+      "closedTitle": "連線已關閉",
+      "sessionEnded": "SSH 工作階段已結束。",
+      "authRejected": "伺服器拒絕已設定的 SSH 金鑰。",
+      "authHint": "請檢查使用者名稱、金鑰或伺服器授權設定。",
+      "configurationMissing": "找不到已儲存的連線設定。"
+    },
+    "search": {
+      "placeholder": "搜尋終端機輸出",
+      "matchCount": "{{current}} / {{total}}",
+      "noResults": "找不到結果",
+      "caseSensitive": "符合大小寫",
+      "regex": "使用規則運算式",
+      "previous": "上一個相符項目",
+      "next": "下一個相符項目",
+      "invalidRegex": "無效的規則運算式"
+    },
+    "palette": {
+      "title": "命令面板",
+      "placeholder": "輸入命令",
+      "noResults": "沒有相符的命令"
+    },
+    "actions": {
+      "newSession": "新增 SSH 工作階段",
+      "reconnectCurrent": "重新連線目前的工作階段",
+      "duplicateCurrent": "複製目前的工作階段",
+      "closeCurrent": "關閉目前的工作階段",
+      "closeOthers": "關閉其他工作階段",
+      "nextSession": "下一個工作階段",
+      "previousSession": "上一個工作階段",
+      "searchOutput": "搜尋終端機輸出",
+      "clearScreen": "清除可見畫面",
+      "clearScrollback": "清除捲動緩衝區",
+      "copySelection": "複製所選文字",
+      "pasteClipboard": "貼上剪貼簿內容",
+      "selectAll": "全選",
+      "fontIncrease": "增大字型",
+      "fontDecrease": "縮小字型",
+      "fontReset": "重設字型大小",
+      "enterFullscreen": "進入全螢幕",
+      "exitFullscreen": "結束全螢幕",
+      "connectionSettings": "開啟連線設定",
+      "connectionDetails": "連線詳細資料"
+    },
+    "paste": {
+      "multilineTitle": "將 {{count}} 行內容貼到 {{target}}？",
+      "largeTitle": "將大量文字貼到 {{target}}？",
+      "warning": "貼上的內容可能會執行多個命令。"
+    },
+    "details": {
+      "protocol": "通訊協定",
+      "endpoint": "端點",
+      "latency": "延遲",
+      "terminalSize": "終端機大小",
+      "encoding": "編碼",
+      "unavailable": "無法使用"
+    }
+  },
   "tunnel": {
     "title": "SSH 隧道(內網穿透) New~",
     "create": "建立隧道",

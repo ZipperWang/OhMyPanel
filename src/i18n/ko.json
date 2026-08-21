@@ -151,6 +151,85 @@
     "settings": "설정",
     "discussions": "토론"
   },
+  "terminal": {
+    "status": {
+      "connected": "연결됨",
+      "connecting": "연결 중",
+      "reconnecting": "재연결 중",
+      "disconnected": "연결 끊김",
+      "authenticationFailed": "인증 실패",
+      "newOutput": "새 출력",
+      "restored": "연결 복구됨"
+    },
+    "tabs": {
+      "sessionMenu": "세션 메뉴",
+      "terminalMenu": "터미널 메뉴",
+      "closeNamed": "{{name}} 닫기",
+      "savedServers": "저장된 서버",
+      "recentSessions": "최근 세션",
+      "noRecentSessions": "최근 세션 없음"
+    },
+    "connection": {
+      "connectingTo": "{{target}}에 연결 중…",
+      "establishing": "SSH 세션 설정 중",
+      "reconnectingMessage": "연결이 중단되었습니다. 재연결 중… {{attempt}}/{{max}}",
+      "closedTitle": "연결 종료됨",
+      "sessionEnded": "SSH 세션이 종료되었습니다.",
+      "authRejected": "서버에서 설정된 SSH 키를 거부했습니다.",
+      "authHint": "사용자 이름, 키 또는 서버 인증 설정을 확인하세요.",
+      "configurationMissing": "저장된 연결 설정을 찾을 수 없습니다."
+    },
+    "search": {
+      "placeholder": "터미널 출력 검색",
+      "matchCount": "{{current}} / {{total}}",
+      "noResults": "결과 없음",
+      "caseSensitive": "대소문자 구분",
+      "regex": "정규식 사용",
+      "previous": "이전 일치 항목",
+      "next": "다음 일치 항목",
+      "invalidRegex": "잘못된 정규식"
+    },
+    "palette": {
+      "title": "명령 팔레트",
+      "placeholder": "명령 입력",
+      "noResults": "일치하는 명령 없음"
+    },
+    "actions": {
+      "newSession": "새 SSH 세션",
+      "reconnectCurrent": "현재 세션 다시 연결",
+      "duplicateCurrent": "현재 세션 복제",
+      "closeCurrent": "현재 세션 닫기",
+      "closeOthers": "다른 세션 닫기",
+      "nextSession": "다음 세션",
+      "previousSession": "이전 세션",
+      "searchOutput": "터미널 출력 검색",
+      "clearScreen": "보이는 화면 지우기",
+      "clearScrollback": "스크롤 기록 지우기",
+      "copySelection": "선택한 텍스트 복사",
+      "pasteClipboard": "클립보드에서 붙여넣기",
+      "selectAll": "모두 선택",
+      "fontIncrease": "글꼴 크기 늘리기",
+      "fontDecrease": "글꼴 크기 줄이기",
+      "fontReset": "글꼴 크기 초기화",
+      "enterFullscreen": "전체 화면 시작",
+      "exitFullscreen": "전체 화면 종료",
+      "connectionSettings": "연결 설정 열기",
+      "connectionDetails": "연결 세부 정보"
+    },
+    "paste": {
+      "multilineTitle": "{{count}}줄을 {{target}}에 붙여넣으시겠습니까?",
+      "largeTitle": "많은 양의 텍스트를 {{target}}에 붙여넣으시겠습니까?",
+      "warning": "붙여넣은 내용이 여러 명령을 실행할 수 있습니다."
+    },
+    "details": {
+      "protocol": "프로토콜",
+      "endpoint": "엔드포인트",
+      "latency": "지연 시간",
+      "terminalSize": "터미널 크기",
+      "encoding": "인코딩",
+      "unavailable": "사용할 수 없음"
+    }
+  },
   "tunnel": {
     "title": "SSH 터널 (인트라넷 침투) New~",
     "create": "터널 만들기",
@@ -223,6 +302,13 @@
     "reconnectRisk": "Security note: forwarded ports will listen on 0.0.0.0 and be publicly reachable. Please configure your firewall and access controls.",
     "reconnectAgree": "Reconnect now",
     "reconnecting": "Reconnecting...",
+    "reconnectLater": "나중에 다시 연결",
+    "reconnectDone": "다시 연결되었습니다. GatewayPorts가 활성화되었습니다. 서버 포워딩 터널을 다시 생성하세요.",
+    "reconnectManualHint": "GatewayPorts가 활성화되었습니다. 적용하려면 서버 연결을 수동으로 끊었다가 다시 연결하세요.",
+    "reconnectFailed": "재연결 실패: {{error}}",
+    "reconnectHintDisable": "GatewayPorts가 비활성화되었지만 적용하려면 다시 연결해야 합니다. 세션이 잠시 중단됩니다. 지금 다시 연결하시겠습니까?",
+    "reconnectDoneDisable": "다시 연결되었습니다. GatewayPorts가 비활성화되어 서버 포워딩은 127.0.0.1 연결만 허용합니다.",
+    "reconnectManualHintDisable": "GatewayPorts가 비활성화되었습니다. 적용하려면 서버 연결을 수동으로 끊었다가 다시 연결하세요.",
     "running": "Running",
     "stopped": "Stopped",
     "restore": "Start",
@@ -850,7 +936,29 @@
     "disabledHint": "방화벽이 비활성화되었습니다. 규칙을 관리하려면 활성화하세요.",
     "enableFirewall": "방화벽 활성화",
     "disableFirewall": "방화벽 비활성화",
-    "sshPortAutoOpened": "연결 끊김을 방지하기 위해 SSH 포트 {{port}} 이(가) 자동으로 허용되었습니다."
+    "sshPortAutoOpened": "연결 끊김을 방지하기 위해 SSH 포트 {{port}} 이(가) 자동으로 허용되었습니다.",
+    "statsTotal": "전체 규칙",
+    "quickTitle": "빠른 포트",
+    "quickHint": "카드를 클릭하여 자주 사용하는 서비스 포트를 열거나 닫습니다",
+    "searchPlaceholder": "포트 / 프로토콜 / 소스 검색...",
+    "allActions": "모든 작업",
+    "copied": "클립보드에 복사됨",
+    "copyAll": "모두 복사",
+    "copyRule": "복사",
+    "copiedAll": "모든 규칙이 클립보드에 복사됨",
+    "noMatch": "일치하는 규칙 없음",
+    "sourceLabel": "소스 IP",
+    "sourcePlaceholder": "비워 두면 전체, 예: 1.2.3.4 또는 10.0.0.0/8",
+    "viewRaw": "원본 규칙",
+    "clearAll": "규칙 모두 지우기",
+    "clearAllTitle": "모든 규칙 지우기",
+    "clearAllMsg": "방화벽 규칙 {{count}}개를 모두 삭제합니다. 이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?",
+    "clearAllConfirm": "지우기 확인",
+    "cleared": "모든 규칙을 지웠습니다",
+    "portOpened": "포트 {{port}} 열림",
+    "portClosed": "포트 {{port}} 규칙 제거됨",
+    "portOpenTitle": "포트 {{port}}가 열려 있습니다. 클릭하여 제거",
+    "portClosedTitle": "포트 {{port}}가 닫혀 있습니다. 클릭하여 열기"
   },
   "port": {
     "title": "포트",

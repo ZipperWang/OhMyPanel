@@ -151,6 +151,85 @@
     "settings": "設定",
     "discussions": "ディスカッション"
   },
+  "terminal": {
+    "status": {
+      "connected": "接続済み",
+      "connecting": "接続中",
+      "reconnecting": "再接続中",
+      "disconnected": "切断済み",
+      "authenticationFailed": "認証に失敗しました",
+      "newOutput": "新しい出力",
+      "restored": "接続が復旧しました"
+    },
+    "tabs": {
+      "sessionMenu": "セッションメニュー",
+      "terminalMenu": "ターミナルメニュー",
+      "closeNamed": "{{name}} を閉じる",
+      "savedServers": "保存済みサーバー",
+      "recentSessions": "最近のセッション",
+      "noRecentSessions": "最近のセッションはありません"
+    },
+    "connection": {
+      "connectingTo": "{{target}} に接続中…",
+      "establishing": "SSH セッションを確立中",
+      "reconnectingMessage": "接続が中断されました。再接続中… {{attempt}}/{{max}}",
+      "closedTitle": "接続が閉じられました",
+      "sessionEnded": "SSH セッションは終了しました。",
+      "authRejected": "サーバーが設定済みの SSH キーを拒否しました。",
+      "authHint": "ユーザー名、キー、またはサーバーの認証設定を確認してください。",
+      "configurationMissing": "保存済みの接続設定が見つかりません。"
+    },
+    "search": {
+      "placeholder": "ターミナル出力を検索",
+      "matchCount": "{{current}} / {{total}}",
+      "noResults": "結果がありません",
+      "caseSensitive": "大文字と小文字を区別",
+      "regex": "正規表現を使用",
+      "previous": "前の一致項目",
+      "next": "次の一致項目",
+      "invalidRegex": "無効な正規表現"
+    },
+    "palette": {
+      "title": "コマンドパレット",
+      "placeholder": "コマンドを入力",
+      "noResults": "一致するコマンドはありません"
+    },
+    "actions": {
+      "newSession": "新しい SSH セッション",
+      "reconnectCurrent": "現在のセッションを再接続",
+      "duplicateCurrent": "現在のセッションを複製",
+      "closeCurrent": "現在のセッションを閉じる",
+      "closeOthers": "他のセッションを閉じる",
+      "nextSession": "次のセッション",
+      "previousSession": "前のセッション",
+      "searchOutput": "ターミナル出力を検索",
+      "clearScreen": "表示画面をクリア",
+      "clearScrollback": "スクロールバックをクリア",
+      "copySelection": "選択したテキストをコピー",
+      "pasteClipboard": "クリップボードから貼り付け",
+      "selectAll": "すべて選択",
+      "fontIncrease": "フォントサイズを大きくする",
+      "fontDecrease": "フォントサイズを小さくする",
+      "fontReset": "フォントサイズをリセット",
+      "enterFullscreen": "全画面表示にする",
+      "exitFullscreen": "全画面表示を終了",
+      "connectionSettings": "接続設定を開く",
+      "connectionDetails": "接続の詳細"
+    },
+    "paste": {
+      "multilineTitle": "{{count}} 行を {{target}} に貼り付けますか？",
+      "largeTitle": "大量のテキストを {{target}} に貼り付けますか？",
+      "warning": "貼り付けた内容によって複数のコマンドが実行される場合があります。"
+    },
+    "details": {
+      "protocol": "プロトコル",
+      "endpoint": "エンドポイント",
+      "latency": "遅延",
+      "terminalSize": "ターミナルサイズ",
+      "encoding": "エンコーディング",
+      "unavailable": "利用不可"
+    }
+  },
   "tunnel": {
     "title": "SSH トンネル (イントラネット越え) New~",
     "create": "トンネルを作成",
@@ -223,6 +302,13 @@
     "reconnectRisk": "Security note: forwarded ports will listen on 0.0.0.0 and be publicly reachable. Please configure your firewall and access controls.",
     "reconnectAgree": "Reconnect now",
     "reconnecting": "Reconnecting...",
+    "reconnectLater": "後で再接続",
+    "reconnectDone": "再接続しました。GatewayPorts が有効になりました。サーバー転送トンネルを再作成してください。",
+    "reconnectManualHint": "GatewayPorts が有効になりました。反映するにはサーバーを手動で切断して再接続してください。",
+    "reconnectFailed": "再接続に失敗しました: {{error}}",
+    "reconnectHintDisable": "GatewayPorts は無効になりましたが、反映するには再接続が必要です。セッションは一時的に中断されます。今すぐ再接続しますか？",
+    "reconnectDoneDisable": "再接続しました。GatewayPorts は無効です。サーバー転送は 127.0.0.1 からの接続のみ受け付けます。",
+    "reconnectManualHintDisable": "GatewayPorts が無効になりました。反映するにはサーバーを手動で切断して再接続してください。",
     "running": "Running",
     "stopped": "Stopped",
     "restore": "Start",
@@ -850,7 +936,29 @@
     "disabledHint": "ファイアウォールが無効です。ルールを管理するには有効にしてください。",
     "enableFirewall": "ファイアウォールを有効化",
     "disableFirewall": "ファイアウォールを無効化",
-    "sshPortAutoOpened": "SSH ポート {{port}} を自動的に許可しました。接続切断を防止するためです。"
+    "sshPortAutoOpened": "SSH ポート {{port}} を自動的に許可しました。接続切断を防止するためです。",
+    "statsTotal": "ルール総数",
+    "quickTitle": "よく使うポート",
+    "quickHint": "カードをクリックして一般的なサービスポートを開閉します",
+    "searchPlaceholder": "ポート / プロトコル / 送信元を検索...",
+    "allActions": "すべてのアクション",
+    "copied": "クリップボードにコピーしました",
+    "copyAll": "すべてコピー",
+    "copyRule": "コピー",
+    "copiedAll": "すべてのルールをクリップボードにコピーしました",
+    "noMatch": "一致するルールはありません",
+    "sourceLabel": "送信元 IP",
+    "sourcePlaceholder": "空欄 = すべて、例: 1.2.3.4 または 10.0.0.0/8",
+    "viewRaw": "元のルール",
+    "clearAll": "ルールをすべて削除",
+    "clearAllTitle": "すべてのルールを削除",
+    "clearAllMsg": "ファイアウォールルール {{count}} 件をすべて削除します。この操作は元に戻せません。続行しますか？",
+    "clearAllConfirm": "削除を確認",
+    "cleared": "すべてのルールを削除しました",
+    "portOpened": "ポート {{port}} を開きました",
+    "portClosed": "ポート {{port}} のルールを削除しました",
+    "portOpenTitle": "ポート {{port}} は開いています。クリックして閉じます",
+    "portClosedTitle": "ポート {{port}} は閉じています。クリックして開きます"
   },
   "port": {
     "title": "ポート",

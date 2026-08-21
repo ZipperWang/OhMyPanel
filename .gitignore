@@ -26,6 +26,7 @@ dist-ssr
 # Tauri
 target/
 src-tauri/target/
+/.signing/
 
 # Local cargo config (target-dir points to local D: drive, breaks CI on mac/linux)
 src-tauri/.cargo/config.toml
