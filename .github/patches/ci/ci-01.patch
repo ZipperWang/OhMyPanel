@@ -1,0 +1,56 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..321749b
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1,50 @@
++name: CI
++
++on:
++  pull_request:
++    branches: [main]
++  push:
++    branches: [main]
++
++permissions:
++  contents: read
++
++jobs:
++  test:
++    runs-on: ubuntu-latest
++    timeout-minutes: 30
++    steps:
++      - uses: actions/checkout@v4
++
++      - name: Set up Node.js
++        uses: actions/setup-node@v4
++        with:
++          node-version: '24'
++          cache: npm
++
++      - name: Set up Rust
++        uses: dtolnay/rust-toolchain@stable
++
++      - name: Cache Rust dependencies
++        uses: Swatinem/rust-cache@v2
++        with:
++          workspaces: src-tauri
++
++      - name: Install Linux dependencies
++        run: |
++          sudo apt-get update
++          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
++
++      - name: Install frontend dependencies
++        run: npm ci
++
++      - name: Check frontend
++        run: |
++          npm test
++          npm run build
++
++      - name: Test Rust
++        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
++
++      - name: Check Rust
++        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
