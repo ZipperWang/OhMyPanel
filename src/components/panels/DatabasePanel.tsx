@@ -1159,7 +1159,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         </div>
       )}
       
-      {/* 清空数据库对话框 */
+      {/* 清空数据库对话框 */}
       {clearTarget && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>

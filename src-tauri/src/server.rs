@@ -9720,7 +9720,7 @@ fn normalize_proto(raw: &str) -> String {
     else { r }
 }
 
-/// 将 "0.0.0.0:22" / "*:80" / "[::]:443" 拆分为（地址，端口）。
+/// 将 "0.0.0.0:22" / "*:80" / "ipv6:443" 拆分为（地址，端口）。
 fn split_addr_port(s: &str) -> (String, Option<u16>) {
     let s = s.trim();
     // IPv6 方括号形式：[::]:443
