@@ -1,0 +1,235 @@
+diff --git a/src-tauri/src/db.rs b/src-tauri/src/db.rs
+index 3aedf9e..50bcc55 100644
+--- a/src-tauri/src/db.rs
++++ b/src-tauri/src/db.rs
+@@ -2,15 +2,25 @@ use rusqlite::Connection as SqliteConn;
+ use std::path::PathBuf;
+ use std::sync::Mutex;
+ 
+-/// Get the SQLite data directory: <config_dir>/leepanel
++/// Get the application data directory.
++///
++/// New installations use `<config_dir>/ohmypanel`. Existing installations
++/// continue using the legacy `<config_dir>/leepanel` directory so saved
++/// connections and credentials are not silently lost during the rename.
+ pub fn db_dir() -> PathBuf {
+-    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+-    path.push("leepanel");
++    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
++    let current = base.join("ohmypanel");
++    let legacy = base.join("leepanel");
++    let path = if current.exists() || !legacy.exists() {
++        current
++    } else {
++        legacy
++    };
+     std::fs::create_dir_all(&path).ok();
+     path
+ }
+ 
+-/// Get the SQLite database path: <config_dir>/leepanel/data.db
++/// Get the SQLite database path inside the selected application data directory.
+ pub fn db_path() -> PathBuf {
+     let mut path = db_dir();
+     path.push("data.db");
+diff --git a/src-tauri/src/server.rs b/src-tauri/src/server.rs
+index 6c415d7..5d1981e 100644
+--- a/src-tauri/src/server.rs
++++ b/src-tauri/src/server.rs
+@@ -1914,13 +1914,13 @@ $domain = $_SERVER['HTTP_HOST'] ?? 'your site';
+     <div class="container">
+         <h1 class="success-title">Congratulations!</h1>
+         <h1>Your website has been created successfully.</h1>
+-        <p class="subtitle">LeePanel, Your powerful SSH server management companion.</p>
++        <p class="subtitle">OhMyPanel, your SSH server management companion.</p>
+         <div class="features">
+             <span>&#10003; Secure Connections</span>
+             <span>&#10003; File Management</span>
+             <span>&#10003; Server Control</span>
+         </div>
+-        <p class="footer">Powered by LeePanel</p>
++        <p class="footer">Powered by OhMyPanel</p>
+     </div>
+ </body>
+ </html>
+@@ -1991,13 +1991,13 @@ $domain = $_SERVER['HTTP_HOST'] ?? 'your site';
+     <div class="container">
+         <h1 class="success-title">Congratulations!</h1>
+         <h1>Your website has been created successfully.</h1>
+-        <p class="subtitle">LeePanel, Your powerful SSH server management companion.</p>
++        <p class="subtitle">OhMyPanel, your SSH server management companion.</p>
+         <div class="features">
+             <span>&#10003; Secure Connections</span>
+             <span>&#10003; File Management</span>
+             <span>&#10003; Server Control</span>
+         </div>
+-        <p class="footer">Powered by LeePanel</p>
++        <p class="footer">Powered by OhMyPanel</p>
+     </div>
+ </body>
+ </html>
+@@ -4769,12 +4769,12 @@ echo "ACTION_SUCCESS"
+     let mut channel = crate::ssh::session_open_channel(session).await?;
+     // ponytail: redirect output to log file (not SSH channel) so install survives disconnect
+     // write action info for recovery: "action:display_name"
+-    let info_cmd: String = format!("echo $$ > /tmp/leepanel-install.pid; echo '{}:{}' > /tmp/leepanel-install.info; > /tmp/leepanel-install.log; bash /tmp/software-action.sh >> /tmp/leepanel-install.log 2>&1; rm -f /tmp/leepanel-install.pid /tmp/leepanel-install.info", action, display_name);
++    let info_cmd: String = format!("echo $$ > /tmp/ohmypanel-install.pid; echo '{}:{}' > /tmp/ohmypanel-install.info; > /tmp/ohmypanel-install.log; bash /tmp/software-action.sh >> /tmp/ohmypanel-install.log 2>&1; rm -f /tmp/ohmypanel-install.pid /tmp/ohmypanel-install.info", action, display_name);
+     channel.exec(true, info_cmd).await
+         .map_err(|e| format!("Failed to start script: {}", e))?;
+     // ponytail: tail the log file for real-time output display
+     let mut tail_channel = crate::ssh::session_open_channel(session).await?;
+-    let _ = tail_channel.exec(true, "tail -f /tmp/leepanel-install.log").await;
++    let _ = tail_channel.exec(true, "tail -f /tmp/ohmypanel-install.log").await;
+     let mut full_output = String::new();
+     let mut exit_code: i32 = -1;
+     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+@@ -4834,12 +4834,12 @@ echo "ACTION_SUCCESS"
+     tail_channel.close().await.ok();
+     channel.close().await.ok();
+     // ponytail: read complete log file for final output
+-    if let Ok((final_log, _, _)) = crate::ssh::session_exec_with_output(session, "cat /tmp/leepanel-install.log 2>/dev/null || true", 10).await {
++    if let Ok((final_log, _, _)) = crate::ssh::session_exec_with_output(session, "cat /tmp/ohmypanel-install.log 2>/dev/null || true", 10).await {
+         if !final_log.is_empty() {
+             full_output = final_log;
+         }
+     }
+-    crate::ssh::session_exec_with_output(session, "rm -f /tmp/leepanel-install.pid /tmp/leepanel-install.info", 5).await.ok();
++    crate::ssh::session_exec_with_output(session, "rm -f /tmp/ohmypanel-install.pid /tmp/ohmypanel-install.info", 5).await.ok();
+ 
+     cache.invalidate(session_id, &["software_list", "service_statuses"]);
+ 
+@@ -5256,14 +5256,14 @@ pub async fn software_action(
+     let mut channel = crate::ssh::session_open_channel(session).await?;
+     // ponytail: redirect output to log file (not SSH channel) so install survives disconnect
+     // write action info for recovery: "action:display_name"
+-    let info_cmd: String = format!("echo $$ > /tmp/leepanel-install.pid; echo '{}:{}' > /tmp/leepanel-install.info; > /tmp/leepanel-install.log; bash /tmp/software-action.sh >> /tmp/leepanel-install.log 2>&1; rm -f /tmp/leepanel-install.pid /tmp/leepanel-install.info", action, display_name);
++    let info_cmd: String = format!("echo $$ > /tmp/ohmypanel-install.pid; echo '{}:{}' > /tmp/ohmypanel-install.info; > /tmp/ohmypanel-install.log; bash /tmp/software-action.sh >> /tmp/ohmypanel-install.log 2>&1; rm -f /tmp/ohmypanel-install.pid /tmp/ohmypanel-install.info", action, display_name);
+     channel
+         .exec(true, info_cmd)
+         .await
+         .map_err(|e| format!("Failed to start script: {}", e))?;
+     // ponytail: tail the log file for real-time output display
+     let mut tail_channel = crate::ssh::session_open_channel(session).await?;
+-    let _ = tail_channel.exec(true, "tail -f /tmp/leepanel-install.log").await;
++    let _ = tail_channel.exec(true, "tail -f /tmp/ohmypanel-install.log").await;
+ 
+     let mut full_output = String::new();
+     let mut exit_code: i32 = -1;
+@@ -5324,12 +5324,12 @@ pub async fn software_action(
+     tail_channel.close().await.ok();
+     channel.close().await.ok();
+     // ponytail: read complete log file for final output
+-    if let Ok((final_log, _, _)) = crate::ssh::session_exec_with_output(session, "cat /tmp/leepanel-install.log 2>/dev/null || true", 10).await {
++    if let Ok((final_log, _, _)) = crate::ssh::session_exec_with_output(session, "cat /tmp/ohmypanel-install.log 2>/dev/null || true", 10).await {
+         if !final_log.is_empty() {
+             full_output = final_log;
+         }
+     }
+-    crate::ssh::session_exec_with_output(session, "rm -f /tmp/leepanel-install.pid /tmp/leepanel-install.info", 5).await.ok();
++    crate::ssh::session_exec_with_output(session, "rm -f /tmp/ohmypanel-install.pid /tmp/ohmypanel-install.info", 5).await.ok();
+ 
+     // ponytail: russh exit code unreliable, use output marker as fallback
+     let success = full_output.contains("ACTION_SUCCESS");
+diff --git a/src-tauri/src/ssh.rs b/src-tauri/src/ssh.rs
+index 7898988..95a0dce 100644
+--- a/src-tauri/src/ssh.rs
++++ b/src-tauri/src/ssh.rs
+@@ -1498,7 +1498,7 @@ pub async fn session_stream_file_to_local(session: &SshSession, remote_path: &st
+ }
+ 
+ pub async fn session_download_to_local(session: &SshSession, remote_path: &str, file_name: &str, app_handle: &AppHandle, session_id: &str) -> Result<String, String> {
+-    let temp_dir = std::env::temp_dir().join("leepanel-preview");
++    let temp_dir = std::env::temp_dir().join("ohmypanel-preview");
+     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+     let local_path = temp_dir.join(file_name);
+     let local_str = local_path.to_string_lossy().to_string();
+diff --git a/src-tauri/tauri.conf.json b/src-tauri/tauri.conf.json
+index 9975081..a35ecd6 100644
+--- a/src-tauri/tauri.conf.json
++++ b/src-tauri/tauri.conf.json
+@@ -1,8 +1,8 @@
+ {
+   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+-  "productName": "LeePanel",
++  "productName": "OhMyPanel",
+   "version": "1.0.21",
+-  "identifier": "com.leepanel.desktop",
++  "identifier": "io.github.zipperwang.ohmypanel",
+   "build": {
+     "frontendDist": "../dist",
+     "devUrl": "http://localhost:5173",
+@@ -12,7 +12,7 @@
+   "app": {
+     "windows": [
+       {
+-        "title": "LeePanel",
++        "title": "OhMyPanel",
+         "width": 1200,
+         "height": 800,
+         "resizable": true,
+@@ -42,7 +42,7 @@
+   "plugins": {
+     "updater": {
+       "endpoints": [
+-        "https://raw.githubusercontent.com/gna1280072/LeePanel/gh-pages/update.json"
++        "https://raw.githubusercontent.com/ZipperWang/OhMyPanel/gh-pages/update.json"
+       ],
+       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI1Qjk0MDFCQUFEMDJGNkQKUldSdEw5Q3FHMEM1SmVSNlQ3eEwrNnE0b2RhQ2c4SVdBWFJkMTlaYzdtaWMwdHBNM2xNYXg5cEwK",
+       "dialog": true,
+diff --git a/src/components/ServerPanel.tsx b/src/components/ServerPanel.tsx
+index 7fa5b37..13b9c2b 100644
+--- a/src/components/ServerPanel.tsx
++++ b/src/components/ServerPanel.tsx
+@@ -203,7 +203,7 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
+             key={item.key}
+             className={`sp-nav-item ${activeSection === item.key ? 'active' : ''}`}
+             onClick={() => {
+-              if (item.key === 'discussions') { open('https://github.com/gna1280072/LeePanel/discussions'); return }
++              if (item.key === 'discussions') { open('https://github.com/ZipperWang/OhMyPanel/discussions'); return }
+               // ponytail: no session → toast hint instead of disabling nav items
+               if (!sessionId) { onShowToast?.(`⚠ ${t('common.connectFirst')}`); return }
+               setActiveSection(item.key)
+diff --git a/src/components/panels/Dashboard.tsx b/src/components/panels/Dashboard.tsx
+index aaf014d..4a29562 100644
+--- a/src/components/panels/Dashboard.tsx
++++ b/src/components/panels/Dashboard.tsx
+@@ -171,7 +171,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
+         </button>
+       </div>
+ 
+-      {/* About LeePanel Card */}
++      {/* About OhMyPanel Card */}
+       <div className="sp-card">
+         <div className="sp-card-title">{t('about.title')}</div>
+         <div className="sp-about-content">
+@@ -182,7 +182,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
+             <p>{t('about.line4')}</p>
+             <p>{t('about.line5')}</p>
+             <p>{t('about.line6')}</p>
+-            <p>{t('about.line7')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://github.com/gna1280072/LeePanel/discussions') }}>{t('about.github')}</a></p>
++            <p>{t('about.line7')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://github.com/ZipperWang/OhMyPanel/discussions') }}>{t('about.github')}</a></p>
+             <p>{t('about.line8')}</p>
+           </div>
+         </div>
+diff --git a/src/components/panels/UpdatePanel.tsx b/src/components/panels/UpdatePanel.tsx
+index a285cd0..ba21662 100644
+--- a/src/components/panels/UpdatePanel.tsx
++++ b/src/components/panels/UpdatePanel.tsx
+@@ -116,7 +116,7 @@ export default function UpdatePanel() {
+               {message}
+               {timedOut && (() => {
+                 const text = t('settings.updateManualDownload')
+-                const url = 'https://www.LeePanel.com'
++                const url = 'https://github.com/ZipperWang/OhMyPanel/releases'
+                 const idx = text.indexOf(url)
+                 return (
+                   <div style={{ marginTop: 4 }}>
+@@ -132,7 +132,7 @@ export default function UpdatePanel() {
+       <div style={{ marginTop: 16, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.8 }}>
+         <div style={{ fontWeight: 600, color: 'var(--text-strong)', marginBottom: 4 }}>{t('settings.updateFailedHint')}</div>
+         <div>1、{t('settings.updateFailedProxyHint')}</div>
+-        <div>2、{t('settings.updateFailedManualHint')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://www.LeePanel.com') }} style={{ color: 'var(--accent)' }}>https://www.LeePanel.com</a></div>
++        <div>2、{t('settings.updateFailedManualHint')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://github.com/ZipperWang/OhMyPanel/releases') }} style={{ color: 'var(--accent)' }}>https://github.com/ZipperWang/OhMyPanel/releases</a></div>
+       </div>
+     </div>
+   )
