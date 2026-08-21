@@ -1,0 +1,340 @@
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index e7ddcd2..46a6e54 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -18,16 +18,16 @@ jobs:
+         include:
+           - platform: windows-latest
+             target: x86_64-pc-windows-msvc
+-            artifact_name: leepanel-windows
++            artifact_name: ohmypanel-windows
+           - platform: macos-latest
+             target: x86_64-apple-darwin
+-            artifact_name: leepanel-macos-intel
++            artifact_name: ohmypanel-macos-intel
+           - platform: macos-latest
+             target: aarch64-apple-darwin
+-            artifact_name: leepanel-macos-arm
++            artifact_name: ohmypanel-macos-arm
+           - platform: ubuntu-latest
+             target: x86_64-unknown-linux-gnu
+-            artifact_name: leepanel-linux
++            artifact_name: ohmypanel-linux
+     runs-on: ${{ matrix.platform }}
+     outputs:
+       version: ${{ steps.get_version.outputs.version }}
+@@ -77,7 +77,7 @@ jobs:
+           SCCACHE_GHA_ENABLED: 'true'
+         with:
+           tagName: ${{ github.ref_name }}
+-          releaseName: "LeePanel ${{ github.ref_name }}"
++          releaseName: "OhMyPanel ${{ github.ref_name }}"
+           releaseBody: "See the assets to download this version and install."
+           releaseDraft: false
+           prerelease: false
+@@ -160,7 +160,7 @@ jobs:
+           cat > update.json << EOF
+           {
+             "version": "$VERSION",
+-            "notes": "LeePanel $TAG",
++            "notes": "OhMyPanel $TAG",
+             "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+             "platforms": {
+               "windows-x86_64": {
+diff --git a/LICENSE b/LICENSE
+index 268cc17..a2c0c69 100644
+--- a/LICENSE
++++ b/LICENSE
+@@ -1,6 +1,7 @@
+ MIT License
+ 
+ Copyright (c) 2026 LeePanel
++Copyright (c) 2026 ZipperWang and OhMyPanel contributors
+ 
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+diff --git a/README.md b/README.md
+index f56bcdf..a7fa405 100644
+--- a/README.md
++++ b/README.md
+@@ -1,12 +1,12 @@
+-# LeePanel
++# OhMyPanel
+ 
+-<p align="center"><img src="public/app-icon.png" alt="LeePanel Logo" width="128" height="128"></p>
++<p align="center"><img src="public/app-icon.png" alt="OhMyPanel Logo" width="128" height="128"></p>
+ 
+ <p align="center">
+-  <a href="https://github.com/gna1280072/LeePanel/stargazers"><img src="https://img.shields.io/github/stars/gna1280072/LeePanel?style=flat-square" alt="Stars"></a>
+-  <a href="https://github.com/gna1280072/LeePanel/releases"><img src="https://img.shields.io/github/v/release/gna1280072/LeePanel?style=flat-square" alt="Release"></a>
+-  <a href="https://github.com/gna1280072/LeePanel/releases"><img src="https://img.shields.io/github/downloads/gna1280072/LeePanel/total?style=flat-square" alt="Downloads"></a>
+-  <a href="https://github.com/gna1280072/LeePanel/blob/main/LICENSE"><img src="https://img.shields.io/github/license/gna1280072/LeePanel?style=flat-square" alt="License"></a>
++  <a href="https://github.com/ZipperWang/OhMyPanel/stargazers"><img src="https://img.shields.io/github/stars/ZipperWang/OhMyPanel?style=flat-square" alt="Stars"></a>
++  <a href="https://github.com/ZipperWang/OhMyPanel/releases"><img src="https://img.shields.io/github/v/release/ZipperWang/OhMyPanel?style=flat-square" alt="Release"></a>
++  <a href="https://github.com/ZipperWang/OhMyPanel/releases"><img src="https://img.shields.io/github/downloads/ZipperWang/OhMyPanel/total?style=flat-square" alt="Downloads"></a>
++  <a href="https://github.com/ZipperWang/OhMyPanel/blob/main/LICENSE"><img src="https://img.shields.io/github/license/ZipperWang/OhMyPanel?style=flat-square" alt="License"></a>
+   <a href="https://linux.do"><img src="https://img.shields.io/badge/Linux%20DO-Community-30363D?style=flat-square&logo=linux" alt="Linux DO"></a>
+ </p>
+ 
+@@ -19,15 +19,17 @@
+   <img src="https://img.shields.io/badge/Server-Ubuntu%20%7C%20Debian-E95420?style=flat-square&logo=ubuntu" alt="Server">
+ </p>
+ 
+-[中文文档](README.zh-CN.md) | [ Download](https://github.com/gna1280072/LeePanel/releases)
++[中文文档](README.zh-CN.md) | [ Download](https://github.com/ZipperWang/OhMyPanel/releases)
+ 
+-LeePanel — Free and open-source, the next-generation Linux server management panel.
++OhMyPanel — Free and open-source, the next-generation Linux server management panel.
+ 
+-LeePanel 是一款开源的Linux服务器管理面板桌面端软件，所有操作通过本地 SSH 完成、服务器上零安装零残留，从根本上消除了传统web面板的安全风险。
++> **Fork notice:** OhMyPanel is an independent fork of [LeePanel](https://github.com/gna1280072/LeePanel). The original MIT copyright and license notice are retained.
++
++OhMyPanel 是一款开源的Linux服务器管理面板桌面端软件，所有操作通过本地 SSH 完成、服务器上零安装零残留，从根本上消除了传统web面板的安全风险。
+ 
+ Traditional Linux/VPS control panels frequently suffer from security vulnerabilities, causing endless headaches for server administrators.
+ 
+-**LeePanel was built to solve this once and for all.**
++**OhMyPanel was built to solve this once and for all.**
+ 
+ > 🛡️ **Zero server-side code** — All operations are performed via SSH commands from your local machine. **No** panel code installed on the server, **no** extra ports exposed, eliminating the panel's own security risks at the root.
+ 
+@@ -39,14 +41,14 @@ A lightweight cross-platform desktop app built with Tauri 2 + React, providing a
+ 
+ Installer as small as **6 MB** — lightweight and flexible! Completely replacing traditional browser-based panels.
+ 
+-If you have any suggestions or feedback, feel free to share them in [GitHub Discussions](https://github.com/gna1280072/LeePanel/discussions).
++If you have any suggestions or feedback, feel free to share them in [GitHub Discussions](https://github.com/ZipperWang/OhMyPanel/discussions).
+ 
+-🌐 Website: https://www.LeePanel.com
++🌐 Project: https://github.com/ZipperWang/OhMyPanel
+ 
+  
+-## 💡 Why LeePanel?
++## 💡 Why OhMyPanel?
+ 
+-| Dimension | Traditional Web Panel ❌ | LeePanel ✅ |
++| Dimension | Traditional Web Panel ❌ | OhMyPanel ✅ |
+ |-----------|--------------------------|-------------|
+ | Deployment | Installs and runs panel code on the server, consuming resources | Runs entirely on your desktop, nothing installed on the server |
+ | Port Exposure | Opens ports 8888/8080 to the internet | Only your existing SSH port is used |
+@@ -75,12 +77,12 @@ If you have any suggestions or feedback, feel free to share them in [GitHub Disc
+ 
+ | Platform | Download |
+ |----------|----------|
+-| Windows  | [Download for Windows](https://github.com/gna1280072/LeePanel/releases) |
+-| macOS    | [Download for macOS](https://github.com/gna1280072/LeePanel/releases) |
+-| Linux    | [Download for Linux](https://github.com/gna1280072/LeePanel/releases) |
++| Windows  | [Download for Windows](https://github.com/ZipperWang/OhMyPanel/releases) |
++| macOS    | [Download for macOS](https://github.com/ZipperWang/OhMyPanel/releases) |
++| Linux    | [Download for Linux](https://github.com/ZipperWang/OhMyPanel/releases) |
+ 
+ <p align="center">
+-  <a href="https://github.com/gna1280072/LeePanel/releases">
++  <a href="https://github.com/ZipperWang/OhMyPanel/releases">
+     <img src="https://img.shields.io/badge/Download-Latest%20Version-2da44e?style=for-the-badge&logo=github" alt="Download Latest">
+   </a>
+ </p>
+@@ -215,6 +217,10 @@ npm run tauri dev
+ npm run tauri build
+ ```
+ 
++### 🔏 Release signing
++
++Before publishing releases from this fork, generate your own Tauri updater signing key, replace the inherited `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`, and configure the `TAURI_SIGNING_PRIVATE_KEY` repository secret. Never commit the private key.
++
+ ##  License
+ 
+ MIT License. See [LICENSE](LICENSE) for details.
+\ No newline at end of file
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+index 4b1bce4..b50ff28 100644
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -1,12 +1,12 @@
+-# LeePanel
++# OhMyPanel
+ 
+-<p align="center"><img src="public/app-icon.png" alt="LeePanel Logo" width="128" height="128"></p>
++<p align="center"><img src="public/app-icon.png" alt="OhMyPanel Logo" width="128" height="128"></p>
+ 
+ <p align="center">
+-  <a href="https://github.com/gna1280072/LeePanel/stargazers"><img src="https://img.shields.io/github/stars/gna1280072/LeePanel?style=flat-square" alt="Stars"></a>
+-  <a href="https://github.com/gna1280072/LeePanel/releases"><img src="https://img.shields.io/github/v/release/gna1280072/LeePanel?style=flat-square" alt="Release"></a>
+-  <a href="https://github.com/gna1280072/LeePanel/releases"><img src="https://img.shields.io/github/downloads/gna1280072/LeePanel/total?style=flat-square" alt="Downloads"></a>
+-  <a href="https://github.com/gna1280072/LeePanel/blob/main/LICENSE"><img src="https://img.shields.io/github/license/gna1280072/LeePanel?style=flat-square" alt="License"></a>
++  <a href="https://github.com/ZipperWang/OhMyPanel/stargazers"><img src="https://img.shields.io/github/stars/ZipperWang/OhMyPanel?style=flat-square" alt="Stars"></a>
++  <a href="https://github.com/ZipperWang/OhMyPanel/releases"><img src="https://img.shields.io/github/v/release/ZipperWang/OhMyPanel?style=flat-square" alt="Release"></a>
++  <a href="https://github.com/ZipperWang/OhMyPanel/releases"><img src="https://img.shields.io/github/downloads/ZipperWang/OhMyPanel/total?style=flat-square" alt="Downloads"></a>
++  <a href="https://github.com/ZipperWang/OhMyPanel/blob/main/LICENSE"><img src="https://img.shields.io/github/license/ZipperWang/OhMyPanel?style=flat-square" alt="License"></a>
+   <a href="https://linux.do"><img src="https://img.shields.io/badge/Linux%20DO-%E7%A4%BE%E5%8C%BA-30363D?style=flat-square&logo=linux" alt="Linux DO"></a>
+ </p>
+ 
+@@ -19,13 +19,15 @@
+   <img src="https://img.shields.io/badge/Server-Ubuntu%20%7C%20Debian-E95420?style=flat-square&logo=ubuntu" alt="Server">
+ </p>
+ 
+-[English](README.md) | [📥 下载软件](https://github.com/gna1280072/LeePanel/releases)
++[English](README.md) | [📥 下载软件](https://github.com/ZipperWang/OhMyPanel/releases)
+ 
+-LeePanel — 免费开源，下一代 Linux 服务器管理面板软件。
++OhMyPanel — 免费开源，下一代 Linux 服务器管理面板软件。
++
++> **Fork 说明：** OhMyPanel 是 [LeePanel](https://github.com/gna1280072/LeePanel) 的独立分支，保留原项目的 MIT 版权与许可证声明。
+ 
+ 传统 Linux/VPS 管理面板频繁曝出安全漏洞，令服务器管理员苦不堪言。
+ 
+-**LeePanel 为此而生。**
++**OhMyPanel 为此而生。**
+ 
+ > 🛡️ **零服务端代码** — 所有操作均通过本地 SSH 命令完成，服务器上**不安装**任何面板代码，**不暴露**多余端口，从根源消除面板自身的安全风险。
+ 
+@@ -37,14 +39,14 @@ LeePanel — 免费开源，下一代 Linux 服务器管理面板软件。
+ 
+ 安装包最小仅 **6 MB** 起，灵活小巧！彻底取代传统浏览器面板。
+ 
+-使用过程中如有任何建议或意见，欢迎前往 [GitHub Discussions](https://github.com/gna1280072/LeePanel/discussions) 交流反馈。
++使用过程中如有任何建议或意见，欢迎前往 [GitHub Discussions](https://github.com/ZipperWang/OhMyPanel/discussions) 交流反馈。
+ 
+-🌐 官网: https://www.LeePanel.com
++🌐 项目地址: https://github.com/ZipperWang/OhMyPanel
+ 
+ 
+-## 💡 为什么选择 LeePanel？
++## 💡 为什么选择 OhMyPanel？
+ 
+-| 维度 | 传统 Web 面板 ❌ | LeePanel ✅ |
++| 维度 | 传统 Web 面板 ❌ | OhMyPanel ✅ |
+ |------|------------------|-------------|
+ | 部署方式 | 在服务器上安装运行面板代码，占用资源 | 完全在您的桌面端运行，不在服务器上安装 |
+ | 端口暴露 | 向互联网开放 8888/8080 端口 | 仅使用您已有的 SSH 端口 |
+@@ -73,12 +75,12 @@ LeePanel — 免费开源，下一代 Linux 服务器管理面板软件。
+ 
+ | 平台 | 下载 |
+ |------|------|
+-| Windows | [下载 Windows 版](https://github.com/gna1280072/LeePanel/releases) |
+-| macOS | [下载 macOS 版](https://github.com/gna1280072/LeePanel/releases) |
+-| Linux | [下载 Linux 版](https://github.com/gna1280072/LeePanel/releases) |
++| Windows | [下载 Windows 版](https://github.com/ZipperWang/OhMyPanel/releases) |
++| macOS | [下载 macOS 版](https://github.com/ZipperWang/OhMyPanel/releases) |
++| Linux | [下载 Linux 版](https://github.com/ZipperWang/OhMyPanel/releases) |
+ 
+ <p align="center">
+-  <a href="https://github.com/gna1280072/LeePanel/releases">
++  <a href="https://github.com/ZipperWang/OhMyPanel/releases">
+     <img src="https://img.shields.io/badge/下载-最新版本-2da44e?style=for-the-badge&logo=github" alt="下载最新版">
+   </a>
+ </p>
+@@ -213,6 +215,10 @@ npm run tauri dev
+ npm run tauri build
+ ```
+ 
++### 🔏 发布签名
++
++正式发布此分支前，应生成独立的 Tauri 更新签名密钥，替换 `src-tauri/tauri.conf.json` 中继承自上游的 `plugins.updater.pubkey`，并在仓库中配置 `TAURI_SIGNING_PRIVATE_KEY` Secret。不要将私钥提交到仓库。
++
+ ##  许可证
+ 
+ MIT 许可证。详见 [LICENSE](LICENSE) 文件。
+diff --git a/index.html b/index.html
+index f5de346..cd59d15 100644
+--- a/index.html
++++ b/index.html
+@@ -3,7 +3,7 @@
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+-  <title>LeePanel - SSH Server Manager</title>
++  <title>OhMyPanel - SSH Server Manager</title>
+ </head>
+ <body>
+   <div id="root"></div>
+diff --git a/leepanel_page.png b/ohmypanel_page.png
+similarity index 100%
+rename from leepanel_page.png
+rename to ohmypanel_page.png
+diff --git a/package-lock.json b/package-lock.json
+index 9cf0071..7f879f2 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+-  "name": "leepanel",
+-  "version": "1.0.3",
++  "name": "ohmypanel",
++  "version": "1.0.21",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+-      "name": "leepanel",
+-      "version": "1.0.3",
++      "name": "ohmypanel",
++      "version": "1.0.21",
+       "dependencies": {
+         "@tauri-apps/api": "^2.11.0",
+         "@tauri-apps/cli": "^2.11.2",
+diff --git a/package.json b/package.json
+index 0a0b4cb..eb7f21e 100644
+--- a/package.json
++++ b/package.json
+@@ -1,5 +1,5 @@
+ {
+-  "name": "leepanel",
++  "name": "ohmypanel",
+   "private": true,
+   "version": "1.0.21",
+   "type": "module",
+diff --git a/src-tauri/Cargo.lock b/src-tauri/Cargo.lock
+index cee1cdc..91685a0 100644
+--- a/src-tauri/Cargo.lock
++++ b/src-tauri/Cargo.lock
+@@ -2329,7 +2329,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
+ 
+ [[package]]
+-name = "leepanel"
++name = "ohmypanel"
+ version = "1.0.21"
+ dependencies = [
+  "async-trait",
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 82a897d..96b56fe 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -1,10 +1,10 @@
+ [package]
+-name = "leepanel"
++name = "ohmypanel"
+ version = "1.0.21"
+-description = "LeePanel - SSH Server Management Tool"
+-authors = ["you"]
+-license = ""
+-repository = ""
++description = "OhMyPanel - SSH Server Management Tool"
++authors = ["ZipperWang"]
++license = "MIT"
++repository = "https://github.com/ZipperWang/OhMyPanel"
+ edition = "2021"
+ rust-version = "1.77.2"
+ 
+diff --git a/src-tauri/src/commands/server_ops.rs b/src-tauri/src/commands/server_ops.rs
+index 5222913..2b40dd1 100644
+--- a/src-tauri/src/commands/server_ops.rs
++++ b/src-tauri/src/commands/server_ops.rs
+@@ -931,13 +931,13 @@ pub async fn server_check_installation(
+     // ponytail: check if login shell has active child processes (install script/tee)
+     let (pid_out, _, _) = ssh::session_exec_with_output(
+         &session,
+-        "test -f /tmp/leepanel-install.pid && pgrep -P $(cat /tmp/leepanel-install.pid) >/dev/null 2>&1 && test -f /tmp/leepanel-install.log && test \"$(find /tmp/leepanel-install.log -mmin -5 2>/dev/null)\" && echo RUNNING || (rm -f /tmp/leepanel-install.pid /tmp/leepanel-install.info; echo IDLE)",
++        "test -f /tmp/ohmypanel-install.pid && pgrep -P $(cat /tmp/ohmypanel-install.pid) >/dev/null 2>&1 && test -f /tmp/ohmypanel-install.log && test \"$(find /tmp/ohmypanel-install.log -mmin -5 2>/dev/null)\" && echo RUNNING || (rm -f /tmp/ohmypanel-install.pid /tmp/ohmypanel-install.info; echo IDLE)",
+         8,
+     ).await?;
+     let running = pid_out.trim().contains("RUNNING");
+-    let log = ssh::session_exec_with_output(&session, "cat /tmp/leepanel-install.log 2>/dev/null || true", 10)
++    let log = ssh::session_exec_with_output(&session, "cat /tmp/ohmypanel-install.log 2>/dev/null || true", 10)
+         .await.map(|(out, _, _)| out).unwrap_or_default();
+-    let info = ssh::session_exec_with_output(&session, "cat /tmp/leepanel-install.info 2>/dev/null || true", 5)
++    let info = ssh::session_exec_with_output(&session, "cat /tmp/ohmypanel-install.info 2>/dev/null || true", 5)
+         .await.map(|(out, _, _)| out.trim().to_string()).unwrap_or_default();
+     let (action, display_name) = if let Some((a, s)) = info.split_once(':') {
+         (a.to_string(), s.to_string())
