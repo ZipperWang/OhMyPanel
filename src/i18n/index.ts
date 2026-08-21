@@ -30,7 +30,7 @@ i18n.use(initReactI18next).init({
   interpolation: { escapeValue: false },
 })
 
-// ponytail: prefer saved language from SQLite; use Simplified Chinese on first run
+// ponytail：优先使用 SQLite 中保存的语言，首次运行时使用简体中文
 invoke<string>('ui_state_get', { key: 'language' })
   .catch(() => '')
   .then(saved => {

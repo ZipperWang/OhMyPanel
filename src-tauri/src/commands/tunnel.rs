@@ -8,7 +8,7 @@ use crate::ssh::{SshManager, SshSession};
 use crate::tunnel::{TunnelConfig, TunnelInfo, TunnelManager, TunnelType};
 use crate::DbPool;
 
-/// Stable identity for a server across sessions: username@host:port.
+/// 跨会话保持稳定的服务器标识：username@host:port。
 fn server_key_of(session: &SshSession) -> String {
     let ci = &session.connect_info;
     format!("{}@{}:{}", ci.username, ci.host, ci.port)
@@ -44,7 +44,7 @@ pub async fn tunnel_create(
     remote_port: u16,
     note: String,
 ) -> Result<String, String> {
-    // Get the SSH session
+    // 获取 SSH 会话
     let mgr = ssh_mgr.lock().await;
     let session = mgr.get_session(&session_id)?;
     let server_key = server_key_of(&session);
@@ -69,7 +69,7 @@ pub async fn tunnel_create(
             .await?;
     }
 
-    // Persist the configuration so it survives disconnects / app restarts.
+    // 持久化配置，使其在断开连接或应用重启后仍然保留。
     let conn = db.lock().map_err(|e| format!("DB lock failed: {}", e))?;
     TunnelStore::save(&conn, &SavedTunnel {
         id: tunnel_id.clone(),
@@ -92,7 +92,7 @@ pub async fn tunnel_close(
     tunnel_mgr: State<'_, Arc<AsyncMutex<TunnelManager>>>,
     tunnel_id: String,
 ) -> Result<(), String> {
-    // Stop the running tunnel only; the persisted config stays (user can restore).
+    // 仅停止正在运行的隧道；持久化配置保留不变（用户之后可以恢复）。
     let tunnel_mgr = tunnel_mgr.lock().await;
     tunnel_mgr.close_tunnel(&tunnel_id).await
 }
@@ -102,8 +102,8 @@ pub async fn tunnel_close_batch(
     tunnel_mgr: State<'_, Arc<AsyncMutex<TunnelManager>>>,
     ids: Vec<String>,
 ) -> Result<(), String> {
-    // Stop each running tunnel only; persisted configs stay (user can restore).
-    // Block scopes keep the non-Send MutexGuard out of any await point.
+    // 仅停止每个正在运行的隧道；持久化配置保留不变（用户之后可以恢复）。
+    // 使用代码块作用域，避免非 Send 的 MutexGuard 进入任何 await 点。
     for id in &ids {
         {
             let tunnel_mgr = tunnel_mgr.lock().await;
@@ -119,7 +119,7 @@ pub async fn tunnel_delete(
     db: State<'_, DbPool>,
     tunnel_id: String,
 ) -> Result<(), String> {
-    // Stop the running tunnel (if any) and remove the persisted config for good.
+    // 停止正在运行的隧道（如果存在），并永久删除持久化配置。
     {
         let tunnel_mgr = tunnel_mgr.lock().await;
         tunnel_mgr.close_tunnel(&tunnel_id).await?;
@@ -136,8 +136,8 @@ pub async fn tunnel_delete_batch(
     db: State<'_, DbPool>,
     ids: Vec<String>,
 ) -> Result<(), String> {
-    // Stop each running tunnel (if any) and remove its persisted config.
-    // Block scopes keep the non-Send MutexGuard out of any await point.
+    // 停止每个正在运行的隧道（如果存在），并删除对应的持久化配置。
+    // 使用代码块作用域，避免非 Send 的 MutexGuard 进入任何 await 点。
     for id in &ids {
         {
             let tunnel_mgr = tunnel_mgr.lock().await;
@@ -196,9 +196,8 @@ pub async fn tunnel_restore_batch(
     session_id: String,
     ids: Vec<String>,
 ) -> Result<(), String> {
-    // Restore each persisted tunnel; a failure stops the batch (already
-    // restored ones keep running). Block scopes keep non-Send guards out of
-    // await points.
+    // 恢复每个持久化隧道；某个隧道失败会停止批量操作（已恢复的隧道继续运行）。
+    // 使用代码块作用域，避免非 Send 的锁守卫进入 await 点。
     for tunnel_id in ids {
         let session = {
             let mgr = ssh_mgr.lock().await;
@@ -235,14 +234,14 @@ pub async fn tunnel_list(
     db: State<'_, DbPool>,
     session_id: String,
 ) -> Result<String, String> {
-    // Active tunnels for this session
+    // 当前会话的活跃隧道
     let tunnels = tunnel_mgr.lock().await.list_tunnels().await;
     let mut result: Vec<TunnelInfo> = tunnels
         .into_iter()
         .filter(|t| t.session_id == session_id)
         .collect();
 
-    // Persisted configs for the same server (status "stopped" unless active)
+    // 同一服务器的持久化配置（除非处于活跃状态，否则状态为 "stopped"）
     let server_key = {
         let mgr = ssh_mgr.lock().await;
         let session = mgr.get_session(&session_id)?;
@@ -271,8 +270,8 @@ pub async fn tunnel_list(
         });
     }
 
-    // Stable order by creation time so starting/stopping a tunnel does not
-    // move it around the list (its status changes, its position does not).
+    // 按创建时间保持稳定排序，使启动或停止隧道不会改变其在列表中的位置
+    // （状态会变化，但位置不变）。
     result.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
 
     serde_json::to_string(&result).map_err(|e| format!("JSON error: {}", e))
@@ -299,8 +298,8 @@ pub async fn tunnel_update_note(
     tunnel_id: String,
     note: String,
 ) -> Result<(), String> {
-    // Persist first, then mirror into the in-memory tunnel (if active) so the
-    // list stays consistent regardless of the tunnel's current status.
+    // 先持久化，再同步到内存中的隧道（如果处于活跃状态），
+    // 确保无论隧道当前状态如何，列表都保持一致。
     {
         let conn = db.lock().map_err(|e| format!("DB lock failed: {}", e))?;
         TunnelStore::update_note(&conn, &tunnel_id, &note)?;

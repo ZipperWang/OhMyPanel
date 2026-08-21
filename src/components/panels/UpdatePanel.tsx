@@ -76,13 +76,13 @@ export default function UpdatePanel() {
 
       <div className="settings-card">
         <div className="settings-card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Version info */}
+          {/* 版本信息 */}
           <div className="settings-row">
             <span className="settings-label">{t('settings.currentVersion')}</span>
             <span className="settings-value" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: 'var(--text-muted)' }}>{appVersion || '—'}</span>
           </div>
 
-          {/* Check button */}
+          {/* 检查按钮 */}
           <button
             className="svc-cfg-btn primary"
             style={{ width: '100%' }}
@@ -92,25 +92,25 @@ export default function UpdatePanel() {
             {checking ? t('settings.checking') : t('settings.checkUpdates')}
           </button>
 
-          {/* Step log */}
+          {/* 步骤日志 */}
           {steps.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 12px', background: 'var(--bg-panel)', borderRadius: 6, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
               {steps.map((s, i) => (
                 <div key={i} style={{ color: s.status === 'ok' ? 'var(--green)' : s.status === 'fail' ? 'var(--red)' : 'var(--text-muted)', wordBreak: 'break-all' }}>
-                  {s.status === 'ok' ? '✓' : s.status === 'fail' ? '✗' : '⏳'} {s.text}
+                  {s.status === 'ok' ? '✓' : s.status === 'fail' ? '✗' : '…'} {s.text}
                 </div>
               ))}
             </div>
           )}
 
-          {/* Progress bar */}
+          {/* 进度条 */}
           {progress && (
             <div style={{ width: '100%', height: 6, background: 'var(--bg-subtle)', borderRadius: 3, overflow: 'hidden' }}>
               <div style={{ width: `${progress.pct}%`, height: '100%', background: 'var(--green-strong)', borderRadius: 3, transition: 'width 0.3s' }} />
             </div>
           )}
 
-          {/* Status message */}
+          {/* 状态消息 */}
           {message && (
             <div style={{ padding: '8px 12px', background: message.includes('latest') || message.includes('最新') ? 'var(--accent-strong)22' : 'var(--green-strong)22', borderRadius: 6, fontSize: 13, color: message.includes('latest') || message.includes('最新') ? 'var(--accent)' : 'var(--green)', whiteSpace: 'pre-line', wordBreak: 'break-all' }}>
               {message}

@@ -7,7 +7,7 @@ use crate::server::{PortInfo, list_listening_ports, query_port, kill_pid};
 
 // ===== Port Management Commands =====
 
-/// List all listening ports on the remote server.
+/// 列出远程服务器上所有监听端口。
 #[tauri::command]
 pub async fn port_list(
     ssh_mgr: State<'_, Arc<AsyncMutex<SshManager>>>,
@@ -20,7 +20,7 @@ pub async fn port_list(
     list_listening_ports(&session, &cache, session_id).await
 }
 
-/// Query a specific port's usage on the remote server.
+/// 查询远程服务器上特定端口的使用情况。
 #[tauri::command]
 pub async fn port_query(
     ssh_mgr: State<'_, Arc<AsyncMutex<SshManager>>>,
@@ -34,7 +34,7 @@ pub async fn port_query(
     query_port(&session, &cache, session_id, port).await
 }
 
-/// Kill a process by PID on the remote server.
+/// 按 PID 杀死远程服务器上的进程。
 #[tauri::command]
 pub async fn port_kill(
     ssh_mgr: State<'_, Arc<AsyncMutex<SshManager>>>,
@@ -47,7 +47,7 @@ pub async fn port_kill(
     let cache = mgr.cache.clone();
     drop(mgr);
     let result = kill_pid(&session, pid, force).await;
-    // Port usage may have changed — invalidate the cache
+    // 端口使用情况可能已变化，需使缓存失效
     cache.invalidate(session_id, &["ports"]);
     result
 }

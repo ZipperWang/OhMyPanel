@@ -50,14 +50,14 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
   const [success, setSuccess] = useState('')
   const [activeTab, setActiveTab] = useState<DockerTab>('containers')
 
-  // Docker install — ponytail: install moved to Software Repository
+  // Docker 安装，ponytail：安装功能已移至软件仓库
 
-  // Streaming log for pull
+  // 拉取操作的流式日志
   const [streamLogs, setStreamLogs] = useState<string[]>([])
   const [streamActive, setStreamActive] = useState(false)
   const streamEndRef = useRef<HTMLDivElement>(null)
 
-  // Containers
+  // 容器
   const [containers, setContainers] = useState<DockerContainer[]>([])
   const [containersLoading, setContainersLoading] = useState(false)
   const [containerAction, setContainerAction] = useState('')
@@ -74,14 +74,14 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
   const [commitExportExpose, setCommitExportExpose] = useState('')
   const [committing, setCommitting] = useState(false)
 
-  // Batch operations on containers
+  // 容器批量操作
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [batchRunning, setBatchRunning] = useState(false)
   const [batchResult, setBatchResult] = useState<{ action: string; results: DockerBatchResult[] } | null>(null)
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false)
   const [batchDeleteConfirmInput, setBatchDeleteConfirmInput] = useState('')
 
-  // Images
+  // 镜像
   const [images, setImages] = useState<DockerImage[]>([])
   const [imagesLoading, setImagesLoading] = useState(false)
   const [pullImageName, setPullImageName] = useState('')
@@ -95,7 +95,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
   const [runCommand, setRunCommand] = useState('')
   const [runningContainer, setRunningContainer] = useState(false)
 
-  // Mirror config
+  // 镜像源配置
   const [mirrors, setMirrors] = useState<string[]>([])
   const [mirrorInput, setMirrorInput] = useState('')
   const [mirrorLoading, setMirrorLoading] = useState(false)
@@ -142,7 +142,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
 
   useEffect(() => { fetchStatus() }, [fetchStatus])
 
-  // Listen for docker-action-progress events
+  // 监听 docker-action-progress 事件
   useEffect(() => {
     const unlisten = listen<{ sessionId: string; line: string; status: string }>('docker-action-progress', (event) => {
       if (event.payload.sessionId !== sessionId) return
@@ -154,7 +154,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
     return () => { unlisten.then(fn => fn()) }
   }, [sessionId])
 
-  // Auto-scroll stream log
+  // 自动滚动流式日志
   useEffect(() => {
     streamEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [streamLogs])
@@ -266,14 +266,14 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
 
   const clearSelection = () => setSelectedIds(new Set())
 
-  // ponytail: stop/restart only make sense on running containers — filter eligible ones
+  // ponytail：停止或重启仅对运行中的容器有意义，过滤出符合条件的容器
   const eligibleIds = (action: string): string[] => {
     if (action === 'delete') return Array.from(selectedIds)
     if (action === 'stop' || action === 'restart') {
       return Array.from(selectedIds).filter(id => containers.find(c => c.id === id)?.state === 'running')
     }
     if (action === 'start') {
-      // start only applies to non-running, non-paused containers (paused must be unpaused first)
+      // start 仅适用于未运行且未暂停的容器（暂停的容器必须先取消暂停）
       return Array.from(selectedIds).filter(id => {
         const state = containers.find(c => c.id === id)?.state
         return state !== 'running' && state !== 'paused'
@@ -435,7 +435,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
 
   const handleRunFromImage = (image: DockerImage) => {
     setRunImageModal(image)
-    // ponytail: provide sensible defaults based on common patterns
+    // ponytail：根据常见模式提供合理的默认值
     setRunCommand(`-p 80:80 -d`)
   }
 
@@ -485,13 +485,13 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
       {error && <div className="docker-message docker-error">{error}</div>}
       {success && <div className="docker-message docker-success">{success}</div>}
 
-      {/* Docker Status Card */}
+      {/* Docker 状态卡片 */}
       <div className="docker-status-card">
         {statusLoading && !status ? (
           <div className="docker-status-loading">{t('dockerPanel.checking')}</div>
         ) : status ? (
           <>
-            {/* ponytail: only show status badge when running — ServiceUnavailable covers the rest */}
+            {/* ponytail：仅在运行时显示状态徽章，其余情况由 ServiceUnavailable 处理 */}
             {status.installed && status.running && (
               <div className="docker-status-info">
                 <span className="docker-status-badge active">
@@ -508,7 +508,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
         ) : null}
       </div>
 
-      {/* Streaming Log Panel */}
+      {/* 流式日志面板 */}
       {(streamActive || streamLogs.length > 0) && (
         <div className="docker-stream-panel">
           <div className="docker-stream-header">
@@ -528,7 +528,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
         </div>
       )}
 
-      {/* Tabs - only show if Docker is installed */}
+      {/* 标签页，仅在 Docker 已安装时显示 */}
       {status?.installed && (
         <>
           <div className="docker-tabs">
@@ -543,7 +543,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
             </button>
           </div>
 
-          {/* Containers Tab */}
+          {/* 容器标签页 */}
           {activeTab === 'containers' && (
             <div className="docker-tab-content">
               {containersLoading && containers.length === 0 ? (
@@ -606,7 +606,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
                 </div>
               )}
 
-              {/* Batch bar — always visible, bottom-left of the containers tab */}
+              {/* 批量操作栏，始终可见，位于容器标签页左下角 */}
               <div className="docker-batch-bar">
                 {selectedIds.size > 0 && (
                   <span className="docker-batch-count">
@@ -649,7 +649,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
             </div>
           )}
 
-          {/* Images Tab */}
+          {/* 镜像标签页 */}
           {activeTab === 'images' && (
             <div className="docker-tab-content">
               <div className="docker-pull-section">
@@ -665,7 +665,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
                   {pulling ? t('dockerPanel.pulling') : t('dockerPanel.pullImage')}
                 </button>
                 <button className="docker-btn" onClick={() => setLoadImageModal(true)} disabled={loadingImage} title={t('dockerPanel.loadImage')}>
-                  📂 {t('dockerPanel.loadImage')}
+                  {t('dockerPanel.loadImage')}
                 </button>
               </div>
 
@@ -699,7 +699,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
             </div>
           )}
 
-          {/* Mirror Tab */}
+          {/* 镜像源标签页 */}
           {activeTab === 'mirror' && (
             <div className="docker-tab-content">
               <div className="docker-mirror-section">
@@ -776,7 +776,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
         </>
       )}
 
-      {/* Container Logs Modal */}
+      {/* 容器日志弹窗 */}
       {logContainer && (
         <div className="docker-modal-overlay">
           <div className="docker-modal" onClick={(e) => e.stopPropagation()}>
@@ -795,7 +795,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
         </div>
       )}
 
-      {/* Confirm Delete Container Dialog */}
+      {/* 确认删除容器对话框 */}
       {confirmDeleteContainer && (
         <div className="docker-modal-overlay">
           <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -842,7 +842,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
         </div>
       )}
 
-      {/* Confirm Delete Image Dialog */}
+      {/* 确认删除镜像对话框 */}
       {confirmDeleteImage && (
         <div className="docker-modal-overlay">
           <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -881,7 +881,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
         </div>
       )}
 
-      {/* Batch Delete Containers Confirm Dialog */}
+      {/* 批量删除容器确认对话框 */}
       {batchDeleteConfirm && (
         <div className="docker-modal-overlay">
           <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -928,7 +928,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
         </div>
       )}
 
-      {/* Batch Operation Result Dialog */}
+      {/* 批量操作结果对话框 */}
       {batchResult && (
         <div className="docker-modal-overlay">
           <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -954,7 +954,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
         </div>
       )}
 
-      {/* Commit Container Modal */}
+      {/* 提交容器弹窗 */}
       {commitContainer && (
         <div className="docker-modal-overlay">
           <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -1035,7 +1035,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
         </div>
       )}
 
-      {/* Load Image Modal */}
+      {/* 加载镜像弹窗 */}
       {loadImageModal && (
         <div className="docker-modal-overlay">
           <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -1067,7 +1067,7 @@ export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerP
         </div>
       )}
 
-      {/* Run Container Modal */}
+      {/* 运行容器弹窗 */}
       {runImageModal && (
         <div className="docker-modal-overlay">
           <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>

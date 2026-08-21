@@ -34,17 +34,17 @@ interface ServerSettingsPanelProps {
 
 export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAutoReconnect, onUpdateSettings }: ServerSettingsPanelProps) {
   const { t } = useTranslation()
-  // Reboot state
+  // 重启状态
   const [rebootLoading, setRebootLoading] = useState(false)
   const [rebootConfirm, setRebootConfirm] = useState<{ show: boolean; force: boolean }>({ show: false, force: false })
   const [rebootExecPanel, setRebootExecPanel] = useState<{ show: boolean; logs: string[]; status: 'running' | 'done' | 'error' }>({ show: false, logs: [], status: 'running' })
 
-  // SSH Auth mode state
+  // SSH 身份验证模式状态
   const [authMode, setAuthMode] = useState<SshAuthMode | null>(null)
   const [authModeLoading, setAuthModeLoading] = useState(false)
   const [authModeSaving, setAuthModeSaving] = useState(false)
 
-  // SSH Key generation state
+  // SSH 密钥生成状态
   const [keyAlgorithm, setKeyAlgorithm] = useState('ed25519')
   const [keyPair, setKeyPair] = useState<SshKeyPair | null>(null)
   const [keyGenLoading, setKeyGenLoading] = useState(false)
@@ -52,7 +52,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
   const [keyMessage, setKeyMessage] = useState('')
   const [keyError, setKeyError] = useState('')
 
-  // App settings editing state
+  // 应用设置编辑状态
   const [reconnectIntervalInput, setReconnectIntervalInput] = useState<string>('')
   const [maxAttemptsInput, setMaxAttemptsInput] = useState<string>('')
   const [cacheLimitInput, setCacheLimitInput] = useState<string>('')
@@ -61,20 +61,20 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
   const [uploadWorkersInput, setUploadWorkersInput] = useState<string>('')
   const [settingsSaving, setSettingsSaving] = useState(false)
 
-  // Cache management state
+  // 缓存管理状态
   const [cacheCount, setCacheCount] = useState<number>(0)
   const [cacheClearing, setCacheClearing] = useState(false)
 
-  // Data directory state
+  // 数据目录状态
   const [dataDir, setDataDir] = useState('')
   const [openingDir, setOpeningDir] = useState(false)
   const [dirError, setDirError] = useState('')
 
-  // Uptime state
+  // 运行时长状态
   const [bootTime, setBootTime] = useState('')
   const [uptimeDuration, setUptimeDuration] = useState('')
 
-  // Fetch uptime
+  // 获取运行时长
   const fetchUptime = useCallback(async () => {
     if (!sessionId) return
     try {
@@ -82,11 +82,11 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
       setBootTime(boot)
       setUptimeDuration(duration)
     } catch {
-      // ignore
+      // 忽略
     }
   }, [sessionId])
 
-  // Fetch SSH auth mode
+  // 获取 SSH 身份验证模式
   const fetchAuthMode = useCallback(async () => {
     if (!sessionId) return
     setAuthModeLoading(true)
@@ -94,40 +94,40 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
       const mode = await invoke<SshAuthMode>('server_get_ssh_auth_mode', { sessionId })
       setAuthMode(mode)
     } catch {
-      // ignore
+      // 忽略
     } finally {
       setAuthModeLoading(false)
     }
   }, [sessionId])
 
-  // ponytail: fetch cache count
+  // ponytail：获取缓存数量
   const fetchCacheCount = useCallback(async () => {
     try {
       const count = await invoke<number>('fb_cache_count')
       setCacheCount(count)
-    } catch { /* ignore */ }
+    } catch { /* 忽略 */ }
   }, [])
 
-  // ponytail: clear all directory cache
+  // ponytail：清除所有目录缓存
   const handleClearCache = useCallback(async () => {
     setCacheClearing(true)
     try {
       await invoke('fb_cache_clear_all')
       setCacheCount(0)
-    } catch { /* ignore */ } finally {
+    } catch { /* 忽略 */ } finally {
       setCacheClearing(false)
     }
   }, [])
 
-  // ponytail: fetch local SQLite data directory path
+  // ponytail：获取本地 SQLite 数据目录路径
   const fetchDataDir = useCallback(async () => {
     try {
       const dir = await invoke<string>('get_data_dir')
       setDataDir(dir)
-    } catch { /* ignore */ }
+    } catch { /* 忽略 */ }
   }, [])
 
-  // Open the local SQLite data directory in the system file explorer
+  // 在系统文件管理器中打开本地 SQLite 数据目录
   const handleOpenDataDir = useCallback(async () => {
     setDirError('')
     setOpeningDir(true)
@@ -147,7 +147,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
     fetchDataDir()
   }, [fetchAuthMode, fetchUptime, fetchCacheCount, fetchDataDir])
 
-  // Sync input values when appSettings changes
+  // appSettings 变化时同步输入值
   useEffect(() => {
     if (appSettings) {
       setReconnectIntervalInput(String(appSettings.reconnect_interval))
@@ -159,7 +159,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
     }
   }, [appSettings])
 
-  // Save settings
+  // 保存设置
   const handleSaveSettings = async () => {
     if (!onUpdateSettings || !appSettings) return
     const interval = parseInt(reconnectIntervalInput, 10)
@@ -184,27 +184,27 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
     }
   }
 
-  // Reboot handler - open confirm dialog
+  // 重启处理器：打开确认对话框
   const handleReboot = (force: boolean) => {
     if (!sessionId) return
     setRebootConfirm({ show: true, force })
   }
 
-  // Actually execute reboot after user confirms
+  // 用户确认后实际执行重启
   const execReboot = async () => {
     if (!sessionId) return
     const force = rebootConfirm.force
     setRebootConfirm({ show: false, force: false })
     setRebootLoading(true)
 
-    // Show execution panel
+    // 显示执行面板
     setRebootExecPanel({
       show: true,
       logs: ['Executing reboot command...'],
       status: 'running',
     })
 
-    // ponytail: normal reboot → suppress auto-reconnect, let user reconnect manually
+    // ponytail：正常重启时抑制自动重连，让用户手动重新连接
     if (!force) {
       window.dispatchEvent(new CustomEvent('normal-reboot', { detail: { sessionId } }))
     }
@@ -218,7 +218,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
       }))
     } catch (e) {
       const errMsg = String(e)
-      // reboot kills SSH — timeout/connection errors are expected success
+      // 重启会断开 SSH，超时或连接错误属于预期的成功结果
       const el = errMsg.toLowerCase()
       if (el.includes('connection') || el.includes('closed') || el.includes('disconnected') || el.includes('timed out') || el.includes('timeout') || el.includes('broken pipe') || el.includes('eof')) {
         setRebootExecPanel(prev => ({
@@ -237,11 +237,11 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
     setRebootLoading(false)
   }
 
-  // Toggle auth mode
+  // 切换身份验证模式
   const handleToggleAuthMode = async (field: 'password' | 'pubkey', value: boolean) => {
     if (!sessionId || !authMode) return
     const newMode = { ...authMode, [field]: value }
-    // Prevent disabling both
+    // 防止同时禁用两种模式
     if (!newMode.password && !newMode.pubkey) return
     setAuthModeSaving(true)
     try {
@@ -252,14 +252,14 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
       })
       setAuthMode(newMode)
     } catch {
-      // revert
+      // 恢复原值
       await fetchAuthMode()
     } finally {
       setAuthModeSaving(false)
     }
   }
 
-  // Generate key pair
+  // 生成密钥对
   const handleGenerateKey = async () => {
     setKeyGenLoading(true)
     setKeyError('')
@@ -275,7 +275,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
     }
   }
 
-  // Deploy public key to server
+  // 将公钥部署到服务器
   const handleDeployKey = async () => {
     if (!sessionId || !keyPair) return
     setKeyDeployLoading(true)
@@ -300,9 +300,9 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
     <div className="settings-panel">
       <h2 className="settings-panel-title">{t('settings.title')}</h2>
 
-      {/* Grid layout for settings cards */}
+      {/* 设置卡片的网格布局 */}
       <div className="settings-grid">
-        {/* App Settings - Auto Reconnect */}
+        {/* 应用设置 - 自动重连 */}
         {appSettings && (
           <div className="settings-card">
             <div className="settings-card-header">{t('settings.appSettings')}</div>
@@ -338,7 +338,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
                       onClick={() => onUpdateSettings?.({ theme: mode })}
                       disabled={!onUpdateSettings}
                     >
-                      {mode === 'dark' ? `🌙 ${t('settings.dark')}` : `☀️ ${t('settings.light')}`}
+                      {mode === 'dark' ? t('settings.dark') : t('settings.light')}
                     </button>
                   ))}
                 </div>
@@ -401,7 +401,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
           </div>
         )}
 
-        {/* File Cache Settings */}
+        {/* 文件缓存设置 */}
         {appSettings && (
           <div className="settings-card">
             <div className="settings-card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -461,7 +461,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
           </div>
         )}
 
-        {/* Data Directory */}
+        {/* 数据目录 */}
         <div className="settings-card">
           <div className="settings-card-header">{t('settings.dataDirectory')}</div>
           <div className="settings-card-body">
@@ -487,7 +487,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
           </div>
         </div>
 
-        {/* System Info */}
+        {/* 系统信息 */}
         <div className="settings-card">
           <div className="settings-card-header">{t('settings.systemInfo')}</div>
           <div className="settings-card-body">
@@ -502,7 +502,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
           </div>
         </div>
 
-        {/* Server Reboot */}
+        {/* 服务器重启 */}
         <div className="settings-card">
           <div className="settings-card-header">{t('settings.serverReboot')}</div>
           <div className="settings-card-body">
@@ -528,11 +528,11 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
           </div>
         </div>
 
-        {/* SSH Authentication */}
+        {/* SSH 身份验证 */}
         <div className="settings-card" style={{ gridColumn: 'span 2' }}>
           <div className="settings-card-header">{t('settings.sshAuth')}</div>
           <div className="settings-card-body">
-            {/* Auth mode toggles */}
+            {/* 身份验证模式切换 */}
             <div className="settings-auth-toggles">
               <div className="settings-row">
                 <span className="settings-label">{t('settings.passwordLogin')}</span>
@@ -561,7 +561,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
             </div>
             {authModeLoading && <div className="settings-muted">{t('settings.loadingAuth')}</div>}
 
-            {/* Key generation */}
+            {/* 密钥生成 */}
             <div className="settings-key-section">
               <div className="settings-section-sub-header">{t('settings.sshKeyManagement')}</div>
               <div className="settings-form-row">
@@ -618,7 +618,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
         </div>
       </div>
 
-      {/* Reboot Confirm Dialog */}
+      {/* 重启确认对话框 */}
       {rebootConfirm.show && (
         <div className="fb-dialog-overlay">
           <div className="fb-dialog reboot-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -659,7 +659,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
         </div>
       )}
 
-      {/* Command Execution Floating Panel */}
+      {/* 命令执行浮动面板 */}
       {rebootExecPanel.show && (
         <div className="reboot-exec-panel">
           <div className="reboot-exec-header">

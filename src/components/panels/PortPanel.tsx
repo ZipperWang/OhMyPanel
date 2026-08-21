@@ -123,12 +123,12 @@ export default function PortPanel({ sessionId }: PortPanelProps) {
 
       {notice && (
         <div className={`firewall-notice ${notice.type}`}>
-          <span>{notice.type === 'success' ? '✅ ' : 'ℹ️ '}{notice.text}</span>
+          <span>{notice.text}</span>
           <button className="firewall-notice-close" onClick={() => setNotice(null)}>✕</button>
         </div>
       )}
 
-      {/* Query bar */}
+      {/* 查询栏 */}
       <div className="fw-toolbar" style={{ marginBottom: 12 }}>
         <input
           className="fw-search"
@@ -206,11 +206,11 @@ export default function PortPanel({ sessionId }: PortPanelProps) {
         </div>
       )}
 
-      {/* Confirm Kill Dialog */}
+      {/* 确认终止对话框 */}
       {confirmKill && (
         <div className="firewall-confirm-overlay" onClick={() => !killBusy && setConfirmKill(null)}>
           <div className="firewall-confirm-dialog port-kill-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="firewall-confirm-title">⚠️ {t('port.killTitle2', { pid: confirmKill.pid ?? '' })}</div>
+            <div className="firewall-confirm-title">{t('port.killTitle2', { pid: confirmKill.pid ?? '' })}</div>
             <div className="firewall-confirm-msg">
               <div style={{ fontSize: 16 }}>
                 <b style={{ fontSize: 17 }}>{confirmKill.process || '—'}</b> (PID {confirmKill.pid}) —{' '}
@@ -223,7 +223,7 @@ export default function PortPanel({ sessionId }: PortPanelProps) {
                 </div>
               )}
 
-              {/* Method explainer */}
+              {/* 方法说明 */}
               <div className="port-kill-methods">
                 <div className="port-kill-method term">
                   <b>{t('port.sigterm')}</b>

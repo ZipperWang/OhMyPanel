@@ -5,7 +5,7 @@ interface ServiceUnavailableProps {
   onNavigate?: () => void
 }
 
-// ponytail: single shared component — message generated from serviceName via i18n template
+// ponytail：统一复用的组件，消息通过 i18n 模板根据 serviceName 生成
 export default function ServiceUnavailable({ serviceName, onNavigate }: ServiceUnavailableProps) {
   const { t } = useTranslation()
   return (

@@ -96,10 +96,10 @@ const parseHostKeyVerification = (error: unknown): HostKeyVerification | null =>
 
 function App() {
   const { t } = useTranslation()
-  // ponytail: multi-session — sessions array + active tab, backend already supports N concurrent SSH
+  // ponytail：多会话模式：sessions 数组加活动标签页，后端已支持 N 个并发 SSH 连接
   const [sessions, setSessions] = useState<ActiveSession[]>([])
   const [activeConfigId, setActiveConfigId] = useState<string | null>(null)
-  // ponytail: track which sessions have an active SSH connection (decoupled from tab existence)
+  // ponytail：跟踪哪些会话拥有活动 SSH 连接（与标签页是否存在解耦）
   const [connectedConfigIds, setConnectedConfigIds] = useState<Set<string>>(new Set())
   const [connectingServerId, setConnectingServerId] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -110,41 +110,41 @@ function App() {
   const [errorDialog, setErrorDialog] = useState<{ visible: boolean; message: string; type: 'auth' | 'network' | 'connection' | 'other' } | null>(null)
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null)
 
-  // Settings
+  // 设置
   const [settings, setSettings] = useState<Settings>({
     auto_reconnect: true, reconnect_interval: 5, max_reconnect_attempts: 10, close_tab_on_disconnect: false, cache_ttl_hours: 24, cache_max_files: 500, cache_enabled: true, command_timeout_minutes: 30, upload_workers: 3, theme: 'light'
   })
 
-  // Apply theme to <html data-theme> whenever it changes (also covers initial load)
+  // 主题变化时应用到 <html data-theme>（同时覆盖初始加载）
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', settings.theme || 'light')
   }, [settings.theme])
-  // ponytail: per-session reconnect state — each server reconnects independently
-  // ponytail: Map value stores { name, attempt } so the reconnect bar renders without toast flicker
+  // ponytail：每个会话独立维护重连状态，每台服务器分别重连
+  // ponytail：Map 的值存储 { name, attempt }，使重连提示条渲染时不会出现 Toast 闪烁
   const [reconnectingSessions, setReconnectingSessions] = useState<Map<string, { name: string; attempt: number }>>(new Map())
   const reconnectingActiveRef = useRef(new Map<string, boolean>())
   const reconnectAttemptRef = useRef(new Map<string, number>())
   const autoReconnectRef = useRef(true)
-  // ponytail: ref for close_tab_on_disconnect to avoid stale closures in useEffect handlers
+  // ponytail：为 close_tab_on_disconnect 保存 ref，避免 useEffect 处理器使用过期闭包
   const closeTabOnDisconnectRef = useRef(false)
   const manualDisconnectRef = useRef(false)
-  // ponytail: sessions that initiated normal reboot — skip auto-reconnect on disconnect
+  // ponytail：主动发起正常重启的会话，在断开时跳过自动重连
   const normalRebootSessionsRef = useRef(new Set<string>())
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0)
 
   const activeSession = sessions.find(s => s.configId === activeConfigId) || null
   const activeSessionId = activeSession?.sessionId ?? null
-  // ponytail: active tab disconnected and not reconnecting → show persistent toast
+  // ponytail：活动标签页已断开且未重连，显示持久提示
   const isDisconnected = activeConfigId
     ? !connectedConfigIds.has(activeConfigId) && !reconnectingSessions.has(activeConfigId)
     : false
 
-  // ponytail: mark session as disconnected — keeps tab alive, only removes SSH connection state
+  // ponytail：将会话标记为已断开，保留标签页，仅移除 SSH 连接状态
   const markDisconnected = (configId: string) => {
     setConnectedConfigIds(prev => { const s = new Set(prev); s.delete(configId); return s })
   }
 
-  // ponytail: disconnect action — remove tab or just mark disconnected based on user setting
+  // ponytail：断开操作：根据用户设置移除标签页，或仅标记为已断开
   const handleDisconnectAction = (configId: string) => {
     if (closeTabOnDisconnectRef.current) removeSession(configId)
     else markDisconnected(configId)
@@ -153,7 +153,7 @@ function App() {
   const removeSession = (configId: string) => {
     termRefMap.current.delete(configId)
     setSessions(prev => prev.filter(s => s.configId !== configId))
-    // ponytail: always clean connectedConfigIds — fixes sidebar showing Disconnect after tab removal
+    // ponytail：始终清理 connectedConfigIds，修复移除标签页后侧边栏仍显示“断开”的问题
     setConnectedConfigIds(prev => { const s = new Set(prev); s.delete(configId); return s })
     setActiveConfigId(prev => {
       if (prev !== configId) return prev
@@ -162,17 +162,17 @@ function App() {
     })
   }
 
-  // ponytail: sync activeTermRef when switching tabs
+  // ponytail：切换标签页时同步 activeTermRef
   useEffect(() => {
     activeTermRef.current = activeConfigId ? (termRefMap.current.get(activeConfigId) ?? null) : null
   }, [activeConfigId])
 
-  // Draggable dividers
+  // 可拖动分隔线
   const [sidebarWidth, setSidebarWidth] = useState(240)
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const draggingRef = useRef<'sidebar' | null>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
-  // Listen for disconnect request from Sidebar (per-session)
+  // 监听来自侧边栏的断开请求（按会话处理）
   useEffect(() => {
     const handleDisconnectRequest = (e: Event) => {
       const configId = (e as CustomEvent).detail?.configId
@@ -183,7 +183,7 @@ function App() {
         termRefMap.current.get(configId)?.clear()
         handleDisconnectAction(configId)
       }
-      // ponytail: race disconnect against 3s local timeout — ensures UI always responds
+      // ponytail：让断开操作与本地 3 秒超时竞争，确保 UI 始终有响应
       Promise.race([
         invoke('ssh_disconnect', { sessionId: sess.sessionId }).catch(() => {}),
         new Promise<void>(resolve => setTimeout(resolve, 3000)),
@@ -193,7 +193,7 @@ function App() {
     return () => window.removeEventListener('sidebar-disconnect', handleDisconnectRequest)
   }, [sessions])
 
-  // Upload queue state
+  // 上传队列状态
   const [upload, setUpload] = useState<UploadState>({
     queue: [], totalBytes: 0, uploadedBytes: 0, speed: 0, active: false, paused: false, workers: 0
   })
@@ -201,7 +201,7 @@ function App() {
   const uploadStopRef = useRef(false)
   const uploadCompleteRef = useRef<(() => void) | null>(null)
 
-  // ponytail: build a POSIX tar archive in the browser — no dependencies
+    // ponytail：在浏览器中构建 POSIX tar 归档，无需依赖
   const createTar = async (entries: { name: string; file: File }[]): Promise<Uint8Array> => {
     const chunks: Uint8Array[] = []
     for (const { name, file } of entries) {
@@ -209,16 +209,16 @@ function App() {
       const header = new Uint8Array(512)
       const enc = new TextEncoder()
       header.set(enc.encode(name), 0)
-      header.set(enc.encode('0000644\0'), 100)  // mode
+      header.set(enc.encode('0000644\0'), 100)  // 模式
       header.set(enc.encode('0001000\0'), 108)  // uid
       header.set(enc.encode('0001000\0'), 116)  // gid
       header.set(enc.encode(file.size.toString(8).padStart(11, '0') + '\0'), 124)
       header.set(enc.encode(Math.floor(Date.now() / 1000).toString(8).padStart(11, '0') + '\0'), 136)
-      header.set(enc.encode('        '), 148) // checksum placeholder (spaces)
-      header[156] = 0x30 // type '0' = regular file
+      header.set(enc.encode('        '), 148) // 校验和占位符（空格）
+      header[156] = 0x30 // 类型 '0' = 普通文件
       header.set(enc.encode('ustar\0'), 257)
       header.set(enc.encode('00'), 263)
-      // compute checksum
+      // 计算校验和
       let cksum = 0
       for (let i = 0; i < 512; i++) cksum += header[i]
       header.set(enc.encode(cksum.toString(8).padStart(6, '0') + '\0 '), 148)
@@ -227,7 +227,7 @@ function App() {
       const padLen = (512 - (data.length % 512)) % 512
       if (padLen > 0) chunks.push(new Uint8Array(padLen))
     }
-    chunks.push(new Uint8Array(1024)) // terminator
+    chunks.push(new Uint8Array(1024)) // 终止符
     const total = chunks.reduce((s, c) => s + c.length, 0)
     const result = new Uint8Array(total)
     let off = 0
@@ -249,7 +249,7 @@ function App() {
     let activeWorkers = 0
     const startTime = Date.now()
     const CHUNK_SIZE = 1024 * 1024
-    // ponytail: files < 1MB go to tar batch; large files use chunked workers
+    // ponytail：小于 1 MB 的文件进入 tar 批处理；大文件使用分块工作器
     const SMALL_THRESHOLD = CHUNK_SIZE
 
     const updateSpeed = () => {
@@ -258,8 +258,8 @@ function App() {
       setUpload(prev => ({ ...prev, uploadedBytes, speed, workers: activeWorkers }))
     }
 
-    // ponytail: batch small files by parent directory into tar archives — N SFTP ops → 1 per dir
-    // ponytail: single file always uses chunked upload; tar batch only for 2+ small files
+    // ponytail：按父目录将小文件批量打包为 tar 归档，N 次 SFTP 操作减少为每个目录 1 次
+    // ponytail：单个文件始终使用分块上传，tar 批处理仅用于 2 个及以上的小文件
     const smallFiles: typeof files = []
     const largeFiles: typeof files = []
     for (const f of files) {
@@ -272,7 +272,7 @@ function App() {
     }
 
     if (smallFiles.length > 1) {
-      // group by parent directory
+      // 按父目录分组
       const byDir = new Map<string, typeof files>()
       for (const f of smallFiles) {
         const parent = f.remotePath.substring(0, f.remotePath.lastIndexOf('/'))
@@ -280,7 +280,7 @@ function App() {
         byDir.get(parent)!.push(f)
       }
 
-      // process directories with concurrency of 3
+      // 以并发数 3 处理目录
       const dirEntries = [...byDir.entries()]
       let dirIdx = 0
       const batchWorker = async () => {
@@ -292,7 +292,7 @@ function App() {
           const i = dirIdx++
           const [parentDir, dirFiles] = dirEntries[i]
 
-          // mark batch as uploading
+          // 将批次标记为上传中
           const indices = dirFiles.map(df => queue.indexOf(queue.find(q => q.remotePath === df.remotePath)!))
           setUpload(prev => ({
             ...prev,
@@ -301,13 +301,13 @@ function App() {
 
           try {
             const tarEntries = dirFiles.map(f => ({
-              name: f.fileName.split('/').pop()!, // just filename, extract in target dir
+              name: f.fileName.split('/').pop()!, // 仅使用文件名，在目标目录中解压
               file: f.file,
             }))
             const tarData = await createTar(tarEntries)
             const tarPath = `${parentDir}/.__tb_${Date.now()}_${i}.tar`
 
-            // upload tar in chunks
+            // 分块上传 tar
             let offset = 0
             while (offset < tarData.length) {
               if (uploadStopRef.current) return
@@ -321,7 +321,7 @@ function App() {
               updateSpeed()
             }
 
-            // extract + cleanup
+            // 解压并清理
             const escaped = (s: string) => s.replace(/'/g, "'\\''")
             const cmd = `cd '${escaped(parentDir)}' && tar xf '${escaped(tarPath.split('/').pop()!)}' && rm -f '${escaped(tarPath.split('/').pop()!)}'`
             const result = await invoke<[string, string, number]>('ssh_exec', { sessionId: sid, command: cmd })
@@ -333,7 +333,7 @@ function App() {
             }))
           } catch (err) {
             if (uploadStopRef.current) return
-            // ponytail: auto-retry up to 3 times per file before marking error
+            // ponytail：标记错误前，每个文件最多自动重试 3 次
             const canRetry = dirFiles.every(f => (retryCounts.get(f.remotePath) || 0) < 3)
             if (canRetry) {
               dirFiles.forEach(f => retryCounts.set(f.remotePath, (retryCounts.get(f.remotePath) || 0) + 1))
@@ -361,10 +361,10 @@ function App() {
 
     if (uploadStopRef.current) return
 
-    // ponytail: large files + zero-byte files via chunked workers
+    // ponytail：大文件和零字节文件通过分块工作器处理
     const largeQueue: UploadItem[] = largeFiles.map(f => ({ ...f, status: 'pending' as const }))
     if (largeQueue.length > 0) {
-      // update main queue to reflect only large files remaining
+      // 更新主队列，仅保留剩余的大文件
       setUpload(prev => ({
         ...prev,
         queue: prev.queue.map(q => {
@@ -433,7 +433,7 @@ function App() {
             }))
           } catch (err) {
             if (uploadStopRef.current) return
-            // ponytail: auto-retry up to 3 times before marking error
+            // ponytail：标记错误前最多自动重试 3 次
             const count = (retryCounts.get(item.remotePath) || 0) + 1
             retryCounts.set(item.remotePath, count)
             if (count < 3) {
@@ -476,7 +476,7 @@ function App() {
     setUpload(prev => ({ ...prev, paused: false }))
   }, [])
 
-  // ponytail: stop = immediately clear UI + signal workers to exit silently
+  // ponytail：停止操作会立即清空 UI，并通知工作器静默退出
   const handleStopUpload = useCallback(() => {
     uploadStopRef.current = true
     uploadPauseRef.current = false
@@ -488,18 +488,18 @@ function App() {
     setUpload({ queue: [], totalBytes: 0, uploadedBytes: 0, speed: 0, active: false, paused: false, workers: 0 })
   }, [upload.active])
 
-  // ponytail: retry only failed files — re-queues them through the same upload pipeline
+  // ponytail：只重试失败文件，通过相同的上传流程将它们重新加入队列
   const handleRetryFailed = useCallback(() => {
     const failed = upload.queue.filter(q => q.status === 'error')
     if (failed.length === 0) return
     handleStartUpload(failed.map(f => ({ file: f.file, fileName: f.fileName, remotePath: f.remotePath })))
-    // handleStartUpload creates a fresh retryCounts map, so retries reset to 0
+    // handleStartUpload 会创建新的 retryCounts 映射，因此重试次数会重置为 0
   }, [upload.queue, handleStartUpload])
 
   const [jumpToPath, setJumpToPath] = useState<string | null>(null)
 
   const handleCreateConnection = async (data: { name: string; host: string; port: number; username: string; auth_type: string; key_path?: string; password?: string; remember_me?: boolean }) => {
-    // Save the new connection
+  // 保存新连接
     await invoke('config_save', {
       connection: {
         id: Date.now().toString(),
@@ -553,7 +553,7 @@ function App() {
     document.body.style.userSelect = 'none'
   }
 
-  // Load settings on mount
+  // 挂载时加载设置
   useEffect(() => {
     invoke<Settings>('settings_load').then(s => {
       setSettings(s)
@@ -561,7 +561,7 @@ function App() {
       closeTabOnDisconnectRef.current = s.close_tab_on_disconnect ?? false
       closeTabOnDisconnectRef.current = s.close_tab_on_disconnect ?? false
     }).catch(() => {})
-    // ponytail: auto-check for updates on startup, ask user before downloading
+    // ponytail：启动时自动检查更新，下载前先询问用户
     Promise.race([
       check(),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 15000)),
@@ -597,23 +597,23 @@ function App() {
   }
 
   useEffect(() => {
-    // Keep refs in sync
+  // 保持 refs 同步
     autoReconnectRef.current = settings.auto_reconnect
     closeTabOnDisconnectRef.current = settings.close_tab_on_disconnect
   }, [settings.auto_reconnect, settings.close_tab_on_disconnect])
 
-  // Listen for ssh-disconnected event (per-session)
+  // 监听 ssh-disconnected 事件（按会话处理）
   useEffect(() => {
     const unlisten = listen<{ sessionId: string; reason: string }>('ssh-disconnected', async (event) => {
       const sid = event.payload.sessionId
       const sess = sessions.find(s => s.sessionId === sid)
       if (!sess) return
-      // Skip auto-reconnect if user manually disconnected
+      // 如果用户手动断开，则跳过自动重连
       if (manualDisconnectRef.current) {
         handleDisconnectAction(sess.configId)
         return
       }
-      // ponytail: skip auto-reconnect after normal (graceful) reboot
+      // ponytail：正常（优雅）重启后跳过自动重连
       if (normalRebootSessionsRef.current.has(sess.sessionId)) {
         normalRebootSessionsRef.current.delete(sess.sessionId)
         showToast(`ℹ [${sess.name}] ${t('common.normalRebootHint')}`)
@@ -627,12 +627,12 @@ function App() {
 
         const attemptReconnect = async () => {
           if (!reconnectingActiveRef.current.get(sess.configId)) return
-          // ponytail: use ref for attempt count — state is stale in recursive async closures
+            // ponytail：使用 ref 保存尝试次数，递归异步闭包中的 state 可能已过期
           const attempt = (reconnectAttemptRef.current.get(sess.configId) ?? 0) + 1
           reconnectAttemptRef.current.set(sess.configId, attempt)
           setReconnectingSessions(prev => new Map(prev).set(sess.configId, { name: sess.name, attempt }))
           if (attempt > settings.max_reconnect_attempts) {
-            showToast(`✗ [${sess.name}] ${t('common.reconnectFailed', { max: settings.max_reconnect_attempts })}`)
+            showToast(`[${sess.name}] ${t('common.reconnectFailed', { max: settings.max_reconnect_attempts })}`)
             reconnectingActiveRef.current.delete(sess.configId)
             reconnectAttemptRef.current.delete(sess.configId)
             setReconnectingSessions(prev => { const m = new Map(prev); m.delete(sess.configId); return m })
@@ -641,18 +641,18 @@ function App() {
           }
           try {
             await invoke('ssh_reconnect', { sessionId: sid })
-            showToast(`✓ [${sess.name}] ${t('common.reconnectSuccess', { attempt })}`)
+            showToast(`[${sess.name}] ${t('common.reconnectSuccess', { attempt })}`)
             reconnectingActiveRef.current.delete(sess.configId)
             reconnectAttemptRef.current.delete(sess.configId)
             setReconnectingSessions(prev => { const m = new Map(prev); m.delete(sess.configId); return m })
           } catch {
-            // ponytail: no showToast here — reconnect bar renders from state, no flicker
+            // ponytail：这里不调用 showToast，重连提示条由 state 渲染，不会闪烁
             setTimeout(attemptReconnect, settings.reconnect_interval * 1000)
           }
         }
         setTimeout(attemptReconnect, settings.reconnect_interval * 1000)
       } else if (!autoReconnectRef.current) {
-        showToast(`⚠ [${sess.name}] ${t('common.connectionLost')}`)
+        showToast(`[${sess.name}] ${t('common.connectionLost')}`)
         handleDisconnectAction(sess.configId)
       }
     })
@@ -667,7 +667,7 @@ function App() {
     return () => { unlisten.then((fn) => fn()) }
   }, [sessions])
 
-  // ponytail: listen for normal-reboot event from ServerSettingsPanel
+  // ponytail：监听来自 ServerSettingsPanel 的 normal-reboot 事件
   useEffect(() => {
     const handler = (e: Event) => {
       const sid = (e as CustomEvent<{ sessionId: string }>).detail?.sessionId
@@ -682,43 +682,43 @@ function App() {
     setTimeout(() => setToast(''), 4000)
   }
 
-  // Disconnect SSH session after LNMP installation (environment changes require fresh session)
+  // LNMP 安装后断开 SSH 会话（环境发生变化，需要新建会话）
 
   const classifyError = (errorMsg: string): { type: 'auth' | 'network' | 'connection' | 'other'; message: string } => {
     const s = errorMsg.toLowerCase()
     
-    // Authentication errors
+    // 身份验证错误
     if (s.includes('auth failed') || s.includes('auth error') || s.includes('authentication') || 
         s.includes('no authentication') || s.includes('permission denied') || s.includes('invalid password')) {
       return { type: 'auth', message: 'Authentication failed. Please check your username and password.' }
     }
     
-    // Network errors
+    // 网络错误
     if (s.includes('timeout') || s.includes('timed out') || s.includes('network unreachable')) {
       return { type: 'network', message: 'Connection timed out. Please check network connectivity.' }
     }
     
-    // Connection refused
+    // 连接被拒绝
     if (s.includes('connection refused') || s.includes('host unreachable')) {
       return { type: 'connection', message: 'Connection refused. Server may be offline or port is incorrect.' }
     }
     
-    // Key file errors
+    // 密钥文件错误
     if (s.includes('key') && (s.includes('not found') || s.includes('invalid'))) {
       return { type: 'auth', message: 'SSH key file not found or invalid.' }
     }
     
-    // Default
+    // 默认情况
     return { type: 'other', message: errorMsg }
   }
 
   const handleSelectConnection = (conn: SidebarConnection) => {
-    // ponytail: single-click switches to server if connected, otherwise connects
+    // ponytail：单击时如果已连接则切换到服务器，否则建立连接
     handleDirectConnect(conn)
   }
 
   const handleDirectConnect = useCallback(async (conn: SidebarConnection) => {
-    // ponytail: multi-session — if already connected, just switch tab
+    // ponytail：多会话模式：如果已经连接，则只切换标签页
     const existing = sessions.find(s => s.configId === conn.id)
     const isConnected = existing !== undefined && connectedConfigIds.has(conn.id)
     if (isConnected) {
@@ -731,7 +731,7 @@ function App() {
       setError('')
       const hostKey = `${conn.host}_${conn.port}`
       const panelKey = `lastPanel_${username}@${hostKey}`
-      // ponytail: estimate PTY size from window so shell prompt renders correctly on first draw
+          // ponytail：根据窗口估算 PTY 大小，使 Shell 提示符在首次绘制时正确显示
       const estCols = Math.max(80, Math.floor((window.innerWidth - (sidebarVisible ? sidebarWidth + 10 : 40) - 20) / 8.4))
       const estRows = Math.max(24, Math.floor((window.innerHeight - 100) / 17))
       const savedPanelPromise = invoke<string>('ui_state_get', { key: panelKey }).catch(() => '')
@@ -786,7 +786,7 @@ function App() {
         }
         const savedPanel = await savedPanelPromise
         if (existing) {
-          // ponytail: reconnect to existing disconnected tab — update sessionId, keep tab
+          // ponytail：重连已有的断开标签页，更新 sessionId 并保留标签页
           setSessions(prev => prev.map(s => s.configId === conn.id ? { ...s, sessionId: sid } : s))
         } else {
           const newSession: ActiveSession = {
@@ -802,7 +802,7 @@ function App() {
         setConnectedConfigIds(prev => new Set(prev).add(conn.id))
         setActiveConfigId(conn.id)
         manualDisconnectRef.current = false
-        // Show welcome modal on successful connection (once per 6 hours)
+        // 连接成功时显示欢迎弹窗（每 6 小时一次）
         const WELCOME_INTERVAL = 6 * 60 * 60 * 1000
         const lastShown = Number(localStorage.getItem('welcome_last_shown') || 0)
         if (Date.now() - lastShown >= WELCOME_INTERVAL) {
@@ -822,7 +822,7 @@ function App() {
     let password: string | undefined
     let keyPath: string | undefined
     
-    // Only use stored credentials if remember_me is true
+    // 仅在 remember_me 为 true 时使用保存的凭据
     if (conn.remember_me) {
       if (conn.auth_type === 'password' && !conn.password) {
         setErrorDialog({ visible: true, message: 'No password saved. Please edit the connection to add credentials.', type: 'auth' })
@@ -838,7 +838,7 @@ function App() {
     void doConnect(conn.username, password, keyPath)
   }, [sessions, connectedConfigIds, sidebarVisible, sidebarWidth])
 
-  // Listen for reconnect-after-edit from Sidebar (Connect button)
+  // 监听来自侧边栏的 reconnect-after-edit 事件（连接按钮）
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail
@@ -854,7 +854,7 @@ function App() {
         <>
           <div style={{ width: sidebarWidth, minWidth: sidebarWidth, flexShrink: 0, display: 'flex', position: 'relative' }}>
             <Sidebar onSelect={handleSelectConnection} onConnect={handleDirectConnect} onNew={() => {}} onCreateConnection={handleCreateConnection} refreshKey={sidebarRefreshKey} connectedIds={Array.from(connectedConfigIds)} connectingServerId={connectingServerId} activeConfigId={activeConfigId} />
-            {/* Sidebar Toggle Button */}
+            {/* 侧边栏切换按钮 */}
             <button 
               className="sidebar-toggle-btn visible"
               onClick={() => setSidebarVisible(false)}
@@ -881,7 +881,7 @@ function App() {
       <div className="main-area">
         <div className="top-bar">
           {error && <div className="error-bar">{error}</div>}
-          {/* ponytail: persistent reconnect bar — driven by state, not toast (no 4s flicker) */}
+          {/* ponytail：持久重连提示条，由 state 驱动而非 Toast（不会出现 4 秒闪烁） */}
           {activeConfigId && reconnectingSessions.has(activeConfigId) && (() => {
             const info = reconnectingSessions.get(activeConfigId)!
             return (
@@ -902,29 +902,23 @@ function App() {
               <span>{toast}</span>
             </div>
           )}
-          {/* ponytail: persistent disconnected toast-bar — always visible until reconnected */}
+          {/* ponytail：持久断开提示条，重新连接前始终可见 */}
           {isDisconnected && (
-            <div className="toast-bar disconnected-bar">⚠ {t('common.disconnectedBanner')}</div>
+            <div className="toast-bar disconnected-bar">{t('common.disconnectedBanner')}</div>
           )}
           {pendingUpdate && (
             <div className="update-ready-bar">
-              <span>🔄 Update v{pendingUpdate.version} ready</span>
+              <span>Update v{pendingUpdate.version} ready</span>
               <button className="update-restart-btn" onClick={async () => { await pendingUpdate.install() }}>Restart Now</button>
             </div>
           )}
         </div>
         
-        {/* Error Dialog */}
+        {/* 错误对话框 */}
         {errorDialog?.visible && (
           <div className="error-dialog-overlay" onClick={() => setErrorDialog(null)}>
             <div className="error-dialog" onClick={(e) => e.stopPropagation()}>
               <button className="error-dialog-close" onClick={() => setErrorDialog(null)}>×</button>
-              <div className="error-dialog-icon">
-                {errorDialog.type === 'auth' && '🔐'}
-                {errorDialog.type === 'network' && '🌐'}
-                {errorDialog.type === 'connection' && '⚠️'}
-                {errorDialog.type === 'other' && '❗'}
-              </div>
               <div className="error-dialog-title">{t('errorDialog.connectionFailed')}</div>
               <div className="error-dialog-message">{errorDialog.message}</div>
               <button className="error-dialog-btn" onClick={() => setErrorDialog(null)}>{t('common.close')}</button>
@@ -932,7 +926,7 @@ function App() {
           </div>
         )}
         <div className="split-container" ref={splitContainerRef}>
-          {/* ponytail: session tab bar — quick switch between connected servers */}
+          {/* ponytail：会话标签栏，快速切换已连接的服务器 */}
           {sessions.length > 0 && (
             <div className="session-tabs">
               {sessions.map(s => {
@@ -946,7 +940,6 @@ function App() {
                   onClick={() => setActiveConfigId(s.configId)}
                 >
                   {isReconnecting && <span className="session-tab-recon-icon" title={`Reconnecting... (${reconInfo!.attempt}/${settings.max_reconnect_attempts})`}>↻</span>}
-                  {!isTabConnected && !isReconnecting && <span className="session-tab-discon-icon" title="Disconnected">⚠</span>}
                   <span className="session-tab-name">{s.name}</span>
                   <button
                     className="session-tab-close"
@@ -988,14 +981,14 @@ function App() {
                 />
               </div>
             ))}
-            {/* ponytail: show nav when no sessions — dashboard/discussions remain clickable, others disabled */}
+            {/* ponytail：没有会话时仍显示导航，仪表盘和讨论区可点击，其他项禁用 */}
             {sessions.length === 0 && <ServerPanel sessionId={null} onShowToast={showToast} />}
           </div>
         </div>
       </div>
 
 
-      {/* Floating Upload Panel */}
+      {/* 浮动上传面板 */}
       {upload.queue.length > 0 && (
         <UploadPanel
           upload={upload}
@@ -1007,7 +1000,7 @@ function App() {
         />
       )}
 
-      {/* Welcome Modal */}
+      {/* 欢迎弹窗 */}
       {showWelcome && (
         <div className="welcome-overlay">
           <div className="welcome-modal">
@@ -1016,9 +1009,9 @@ function App() {
             <h2 className="welcome-title">{t('welcome.title')}</h2>
             <p className="welcome-subtitle">{t('welcome.subtitle')}</p>
             <div className="welcome-features">
-              <span>✓ {t('welcome.secureConnections')}</span>
-              <span>✓ {t('welcome.fileManagement')}</span>
-              <span>✓ {t('welcome.serverControl')}</span>
+              <span>{t('welcome.secureConnections')}</span>
+              <span>{t('welcome.fileManagement')}</span>
+              <span>{t('welcome.serverControl')}</span>
             </div>
           </div>
         </div>
@@ -1058,11 +1051,11 @@ function UploadPanel({ upload, onPause, onResume, onStop, onDismiss, onRetry }: 
     <div className={`upload-panel ${collapsed ? 'collapsed' : ''}`}>
       <div className="upload-panel-header" onClick={() => setCollapsed(!collapsed)}>
         <span className="upload-panel-title">
-          📤 {upload.active ? (upload.paused ? t('upload.paused') : t('upload.uploading')) : allDone ? t('upload.complete') : t('upload.stopped')}
+          {upload.active ? (upload.paused ? t('upload.paused') : t('upload.uploading')) : allDone ? t('upload.complete') : t('upload.stopped')}
           {' '}{doneCount}/{upload.queue.length}
-          {upload.active && !upload.paused && ` — ${pct}% — 👷 ${upload.workers}`}
+          {upload.active && !upload.paused && ` — ${pct}% — ${upload.workers}`}
         </span>
-        <span className="upload-panel-toggle">{collapsed ? '▲' : '▼'}</span>
+        <span className="upload-panel-toggle">{collapsed ? '^' : 'v'}</span>
       </div>
       {!collapsed && (
         <>
@@ -1079,12 +1072,9 @@ function UploadPanel({ upload, onPause, onResume, onStop, onDismiss, onRetry }: 
           <div className="upload-panel-queue">
             {upload.queue.map((item, i) => (
               <div key={i} className={`upload-queue-item ${item.status}`}>
-                <span className="upload-item-icon">
-                  {item.status === 'done' ? '✅' : item.status === 'error' ? '❌' : item.status === 'stopped' ? '⏹' : item.status === 'uploading' ? '⬆️' : '⏳'}
-                </span>
                 <span className="upload-item-name" title={item.fileName}>{item.fileName}</span>
                 <span className="upload-item-size">{(item.file.size / 1048576).toFixed(1)}M</span>
-                {item.retryCount && item.retryCount > 0 && item.status === 'pending' && <span className="upload-item-retry">🔄 {item.retryCount}/3</span>}
+                {item.retryCount && item.retryCount > 0 && item.status === 'pending' && <span className="upload-item-retry">{item.retryCount}/3</span>}
                 {item.error && <span className="upload-item-error" title={item.error}>!</span>}
               </div>
             ))}
@@ -1092,29 +1082,29 @@ function UploadPanel({ upload, onPause, onResume, onStop, onDismiss, onRetry }: 
           <div className="upload-panel-actions">
             {upload.active && !upload.paused && (
               <>
-                <button className="upload-btn" onClick={onPause} title={t('upload.pause')}>⏸ {t('upload.pause')}</button>
-                <button className="upload-btn" onClick={() => { setShowStopConfirm(true); setStopInput('') }} title={t('upload.stop')}>⏹ {t('upload.stop')}</button>
+                <button className="upload-btn" onClick={onPause} title={t('upload.pause')}>{t('upload.pause')}</button>
+                <button className="upload-btn" onClick={() => { setShowStopConfirm(true); setStopInput('') }} title={t('upload.stop')}>{t('upload.stop')}</button>
               </>
             )}
             {upload.active && upload.paused && (
               <>
-                <button className="upload-btn" onClick={onResume} title={t('upload.resume')}>▶ {t('upload.resume')}</button>
-                <button className="upload-btn" onClick={() => { setShowStopConfirm(true); setStopInput('') }} title={t('upload.stop')}>⏹ {t('upload.stop')}</button>
+                <button className="upload-btn" onClick={onResume} title={t('upload.resume')}>{t('upload.resume')}</button>
+                <button className="upload-btn" onClick={() => { setShowStopConfirm(true); setStopInput('') }} title={t('upload.stop')}>{t('upload.stop')}</button>
               </>
             )}
             {!upload.active && (
               <>
                 {failedCount > 0 && (
-                  <button className="upload-btn" onClick={onRetry} title={t('upload.retryFailed')}>🔄 {t('upload.retryFailed')} ({failedCount})</button>
+                  <button className="upload-btn" onClick={onRetry} title={t('upload.retryFailed')}>{t('upload.retryFailed')} ({failedCount})</button>
                 )}
-                <button className="upload-btn" onClick={onDismiss} title={t('common.close')}>✕ {t('common.close')}</button>
+                <button className="upload-btn" onClick={onDismiss} title={t('common.close')}>{t('common.close')}</button>
               </>
             )}
           </div>
         </>
       )}
 
-      {/* Stop confirmation modal */}
+      {/* 停止确认弹窗 */}
       {showStopConfirm && (
         <div className="fb-dialog-overlay" onClick={() => setShowStopConfirm(false)}>
           <div className="fb-dialog" onClick={(e) => e.stopPropagation()} style={{ minWidth: 380 }}>

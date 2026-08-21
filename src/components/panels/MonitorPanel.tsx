@@ -48,7 +48,7 @@ export default function MonitorPanel({ sessionId }: MonitorPanelProps) {
     try {
       const result = await invoke<MonitorData>('server_get_monitor_data', { sessionId })
       setData(result)
-      // Add to history (keep last 60 points)
+    // 添加到历史记录（保留最近 60 个点）
       setHistory((prev) => {
         const next = [...prev, {
           cpu: result.cpu_percent,
@@ -112,7 +112,7 @@ export default function MonitorPanel({ sessionId }: MonitorPanelProps) {
 
       {data && (
         <>
-          {/* Resource Gauges */}
+          {/* 资源仪表 */}
           <div className="monitor-gauges">
             <GaugeCard label={t('monitor.cpu')} percent={data.cpu_percent} color={gaugeColor(data.cpu_percent)} />
             <GaugeCard label={t('monitor.memory')} percent={memPercent} detail={`${formatMb(data.mem_used_mb)} / ${formatMb(data.mem_total_mb)}`} color={gaugeColor(memPercent)} />
@@ -124,7 +124,7 @@ export default function MonitorPanel({ sessionId }: MonitorPanelProps) {
             <InfoCard label={t('monitor.diskIO')} value={`R ${data.disk_read} / W ${data.disk_write}`} />
           </div>
 
-          {/* Mini History Chart */}
+          {/* 小型历史图表 */}
           {history.length > 2 && (
             <div className="monitor-chart-card">
               <div className="monitor-chart-title">{t('monitor.cpuMemHistory', { count: history.length })}</div>
@@ -132,7 +132,7 @@ export default function MonitorPanel({ sessionId }: MonitorPanelProps) {
             </div>
           )}
 
-          {/* Top Processes */}
+          {/* 进程排行 */}
           <div className="monitor-processes-card">
             <div className="monitor-card-title">{t('monitor.topProcesses')}</div>
             <table className="monitor-proc-table">
@@ -216,12 +216,12 @@ function MiniChart({ data }: { data: { cpu: number; mem: number; ts: number }[] 
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="monitor-chart-svg">
-      {/* Grid lines */}
+      {/* 网格线 */}
       <line x1={padding} y1={height / 2} x2={width - padding} y2={height / 2} stroke="var(--bg-subtle)" strokeWidth="0.5" />
       <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="var(--bg-subtle)" strokeWidth="0.5" />
-      {/* CPU line */}
+      {/* CPU 曲线 */}
       <path d={cpuPath} fill="none" stroke="var(--accent)" strokeWidth="1.5" />
-      {/* Memory line */}
+      {/* 内存曲线 */}
       <path d={memPath} fill="none" stroke="var(--green)" strokeWidth="1.5" />
     </svg>
   )

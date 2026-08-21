@@ -5,11 +5,11 @@ import ServiceUnavailable from './ServiceUnavailable'
 
 interface DbInfo {
   name: string
-  user?: string // Actual MySQL user name (may differ from db name)
+  user?: string // 实际 MySQL 用户名（可能不同于数据库名称）
   size_mb: number
-  password?: string // Optional: loaded from localStorage
-  access_type?: 'local' | 'any' | 'ip' // Access permission type
-  allowed_ip?: string // Allowed IP when access_type is 'ip'
+  password?: string // 可选：从 localStorage 加载
+  access_type?: 'local' | 'any' | 'ip' // 访问权限类型
+  allowed_ip?: string // access_type 为 'ip' 时允许的 IP
 }
 
 interface BackupInfo {
@@ -38,73 +38,73 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   
-  // Search
+  // 搜索
   const [searchQuery, setSearchQuery] = useState('')
   
-  // Pagination
+  // 分页
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   
-  // Create dialog
+  // 创建对话框
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newDbName, setNewDbName] = useState('')
   const [newDbUser, setNewDbUser] = useState('')
   const [newDbPass, setNewDbPass] = useState('')
-  const [savePasswordLocally, setSavePasswordLocally] = useState(true) // Default: save password
-  const [dbCharset, setDbCharset] = useState('utf8mb4') // Default charset
-  const [accessType, setAccessType] = useState<'local' | 'any' | 'ip'>('local') // Default: local server
-  const [allowedIp, setAllowedIp] = useState('') // For custom IP access
+  const [savePasswordLocally, setSavePasswordLocally] = useState(true) // 默认：保存密码
+  const [dbCharset, setDbCharset] = useState('utf8mb4') // 默认字符集
+  const [accessType, setAccessType] = useState<'local' | 'any' | 'ip'>('local') // 默认：本地服务器
+  const [allowedIp, setAllowedIp] = useState('') // 用于自定义 IP 访问
   const [creating, setCreating] = useState(false)
   
-  // Delete dialog
+  // 删除对话框
   const [deleteTarget, setDeleteTarget] = useState<DbInfo | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteConfirmName, setDeleteConfirmName] = useState('')
   
-  // Clear database dialog
+  // 清空数据库对话框
   const [clearTarget, setClearTarget] = useState<DbInfo | null>(null)
   const [clearing, setClearing] = useState(false)
   const [clearConfirmText, setClearConfirmText] = useState('')
   
-  // Password visibility
+  // 密码可见性
   const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(new Set())
   
-  // Selected databases for batch operations
+  // 批量操作选中的数据库
   const [selectedDbs, setSelectedDbs] = useState<Set<string>>(new Set())
   
-  // Database remarks (key: dbName, value: remark)
+  // 数据库备注（键：dbName，值：remark）
   const [dbRemarks, setDbRemarks] = useState<Record<string, string>>({})
   const [editingRemark, setEditingRemark] = useState<string | null>(null)
   const [remarkInput, setRemarkInput] = useState('')
   
-  // Change root password dialog
+  // 修改 root 密码对话框
   const [showChangePwDialog, setShowChangePwDialog] = useState(false)
   const [newRootPassword, setNewRootPassword] = useState('')
   const [showRootPassword, setShowRootPassword] = useState(false)
   const [changingPw, setChangingPw] = useState(false)
   
-  // Change access permission dialog
+  // 修改访问权限对话框
   const [showAccessDialog, setShowAccessDialog] = useState(false)
   const [accessTarget, setAccessTarget] = useState<{ name: string; user: string } | null>(null)
   const [newAccessType, setNewAccessType] = useState<'local' | 'any' | 'ip'>('local')
   const [newAllowedIp, setNewAllowedIp] = useState('')
   const [changingAccess, setChangingAccess] = useState(false)
   
-  // Change db user password dialog
+  // 修改数据库用户密码对话框
   const [showChangePwDbDialog, setShowChangePwDbDialog] = useState(false)
   const [changePwTarget, setChangePwTarget] = useState<{ name: string; user: string } | null>(null)
   const [newDbPassword, setNewDbPassword] = useState('')
   const [changingDbPw, setChangingDbPw] = useState(false)
   const [updateLocalPassword, setUpdateLocalPassword] = useState(true)
   
-  // Backup dialog
+  // 备份对话框
   const [showBackupDialog, setShowBackupDialog] = useState(false)
   const [backupTarget, setBackupTarget] = useState<string | null>(null)
   const [backups, setBackups] = useState<BackupInfo[]>([])
   const [backingUp, setBackingUp] = useState(false)
   const [loadingBackups, setLoadingBackups] = useState(false)
   
-  // Import dialog
+  // 导入对话框
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [importTarget, setImportTarget] = useState<string | null>(null)
   const [importMode, setImportMode] = useState<'upload' | 'backup'>('upload')
@@ -115,7 +115,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
   const [loadingImportBackups, setLoadingImportBackups] = useState(false)
   const [missingToolModal, setMissingToolModal] = useState(false)
   
-  // Database credentials from SQLite (key: dbName)
+  // 来自 SQLite 的数据库凭据（键：dbName）
   const [dbCredentials, setDbCredentials] = useState<Record<string, DbCredential>>({})
   
   const fetchDatabases = useCallback(async () => {
@@ -124,7 +124,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
     try {
       const list = await invoke<DbInfo[]>('server_list_databases', { sessionId })
       
-      // Load credentials from SQLite
+      // 从 SQLite 加载凭据
       try {
         const credsList = await invoke<DbCredential[]>('server_get_db_credentials', { sessionId })
         const credsMap: Record<string, DbCredential> = {}
@@ -133,16 +133,16 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         }
         setDbCredentials(credsMap)
         
-        // Merge credentials into database list
+        // 将凭据合并到数据库列表
         const withCredentials = list.map(db => {
           const cred = credsMap[db.name]
           return cred ? {
             ...db,
-            user: cred.db_user || db.name, // Use saved db_user, fallback to db name
+            user: cred.db_user || db.name, // 使用保存的 db_user，回退到数据库名称
             password: cred.password || undefined,
             access_type: (cred.access_type as 'local' | 'any' | 'ip') || 'local',
             allowed_ip: cred.allowed_ip || undefined,
-          } : { ...db, user: db.name } // Default: user = db name
+          } : { ...db, user: db.name } // 默认：user = 数据库名称
         })
         setDatabases(withCredentials)
       } catch (e) {
@@ -150,7 +150,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         setDatabases(list)
       }
       
-      // Load remarks from SQLite
+      // 从 SQLite 加载备注
       try {
         const remarksList = await invoke<[string, string][]>('server_get_db_remarks', { sessionId })
         const remarksMap: Record<string, string> = {}
@@ -162,7 +162,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         console.error('Failed to load db remarks:', e)
       }
       
-      setError('') // Clear error on success
+      setError('') // 成功时清除错误
     } catch (e) {
       setError(String(e))
     } finally {
@@ -172,19 +172,19 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
   
   useEffect(() => { fetchDatabases() }, [fetchDatabases])
   
-  // ponytail: passwords now loaded inline in fetchDatabases, no separate effect needed
+  // ponytail：密码现在在 fetchDatabases 中内联加载，无需单独的 effect
 
-  // Filter databases based on search query
+  // 根据搜索查询过滤数据库
   const filteredDatabases = databases.filter(db => 
     db.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
   
-  // Calculate pagination
+  // 计算分页
   const totalPages = Math.ceil(filteredDatabases.length / pageSize)
   const startIndex = (currentPage - 1) * pageSize
   const paginatedDatabases = filteredDatabases.slice(startIndex, startIndex + pageSize)
   
-  // Reset to page 1 when search changes
+  // 搜索条件变化时重置到第 1 页
   useEffect(() => {
     setCurrentPage(1)
   }, [searchQuery])
@@ -195,14 +195,14 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
       return
     }
     
-    // Validate IP if access type is 'ip'
+    // access type 为 'ip' 时验证 IP
     if (accessType === 'ip') {
       const ips = allowedIp.split('\n').map(line => line.trim()).filter(line => line.length > 0)
       if (ips.length === 0) {
         setMsg(t('database.enterAllowedIp'))
         return
       }
-      // Basic validation: check for empty lines or invalid characters
+      // 基本验证：检查空行或无效字符
       const invalidLines = ips.filter(ip => !/^([0-9]{1,3}\.){3}[0-9]{1,3}(\/[0-9]{1,2})?$/.test(ip) && ip !== '%')
       if (invalidLines.length > 0) {
         setMsg(t('database.invalidIpFormat', { lines: invalidLines.join(', ') }))
@@ -224,7 +224,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
       })
       setMsg(result)
       
-      // Save credentials to SQLite
+      // 将凭据保存到 SQLite
       try {
         await invoke<string>('server_save_db_credentials', {
           sessionId,
@@ -245,9 +245,9 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
       setNewDbName('')
       setNewDbUser('')
       setNewDbPass('')
-      setSavePasswordLocally(true) // Reset to default
-      setDbCharset('utf8mb4') // Reset to default
-      setAccessType('local') // Reset to default
+      setSavePasswordLocally(true) // 重置为默认值
+      setDbCharset('utf8mb4') // 重置为默认值
+      setAccessType('local') // 重置为默认值
       setAllowedIp('')
       await fetchDatabases()
     } catch (e) {
@@ -266,7 +266,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
       const result = await invoke<string>('server_mysql_delete_database', {
         sessionId,
         dbName: deleteTarget.name,
-        dbUser: deleteTarget.user || deleteTarget.name // Use actual user, fallback to db name
+        dbUser: deleteTarget.user || deleteTarget.name // 使用实际用户，回退到数据库名称
       })
       setMsg(result)
       setDeleteTarget(null)
@@ -302,14 +302,14 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
   const handleChangeAccess = async () => {
     if (!accessTarget) return
     
-    // Validate IP if access type is 'ip'
+    // access type 为 'ip' 时验证 IP
     if (newAccessType === 'ip') {
       const ips = newAllowedIp.split('\n').map(line => line.trim()).filter(line => line.length > 0)
       if (ips.length === 0) {
         setMsg(t('database.enterAllowedIp'))
         return
       }
-      // Basic validation: check for empty lines or invalid characters
+      // 基本验证：检查空行或无效字符
       const invalidLines = ips.filter(ip => !/^([0-9]{1,3}\.){3}[0-9]{1,3}(\/[0-9]{1,2})?$/.test(ip) && ip !== '%')
       if (invalidLines.length > 0) {
         setMsg(t('database.invalidIpFormat', { lines: invalidLines.join(', ') }))
@@ -331,7 +331,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
       })
       setMsg(result)
       
-      // Save access permission to SQLite
+      // 将访问权限保存到 SQLite
       try {
         await invoke<string>('server_save_db_credentials', {
           sessionId,
@@ -369,7 +369,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
   
   const openAccessDialog = (db: DbInfo) => {
     setAccessTarget({ name: db.name, user: db.user || db.name })
-    // Get current access type from SQLite credentials
+    // 从 SQLite 凭据中获取当前访问类型
     const cred = dbCredentials[db.name]
     setNewAccessType((cred?.access_type as any) || 'local')
     setNewAllowedIp(cred?.allowed_ip || '')
@@ -449,7 +449,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
     setEditingRemark(null)
     setRemarkInput('')
     
-    // Save to SQLite via backend
+    // 通过后端保存到 SQLite
     try {
       await invoke<string>('server_save_db_remark', {
         sessionId,
@@ -508,7 +508,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         sessionId, dbName: backupTarget, dbUser: dbCredentials[backupTarget]?.db_user || backupTarget, dbPassword 
       })
       setMsg(result)
-      // Refresh backup list
+      // 刷新备份列表
       const list = await invoke<BackupInfo[]>('server_list_db_backups', { sessionId, dbName: backupTarget })
       setBackups(list)
     } catch (e) {
@@ -523,7 +523,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
     try {
       await invoke<string>('server_delete_db_backup', { sessionId, backupFilename: filename })
       setMsg(t('database.backupDeleted', { name: filename }))
-      // Refresh backup list
+      // 刷新备份列表
       const list = await invoke<BackupInfo[]>('server_list_db_backups', { sessionId, dbName: backupTarget })
       setBackups(list)
     } catch (e) {
@@ -534,7 +534,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
   const handleDownloadBackup = async (filename: string) => {
     if (!sessionId) return
     try {
-      // Call backend to save backup file locally with dialog
+      // 调用后端并通过对话框将备份文件保存到本地
       const localPath = await invoke<string>('server_save_db_backup_to_local', { 
         sessionId, 
         backupFilename: filename 
@@ -554,7 +554,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
     setSelectedFile(null)
     setSelectedBackup(null)
     setShowImportDialog(true)
-    // Load backups for the backup mode
+    // 为备份模式加载备份文件
     setLoadingImportBackups(true)
     try {
       const list = await invoke<BackupInfo[]>('server_list_db_backups', { sessionId, dbName })
@@ -590,7 +590,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
     setImporting(true)
     try {
       if (importMode === 'upload' && selectedFile) {
-        // Check unzip availability for zip files
+        // 检查 zip 文件所需的 unzip 是否可用
         if (selectedFile.name.endsWith('.zip')) {
           const hasUnzip = await checkUnzipAvailable()
           if (!hasUnzip) {
@@ -599,8 +599,8 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
             return
           }
         }
-        // Read file as raw bytes (supports .sql, .tar.gz, .zip)
-        // Pass ArrayBuffer directly for efficient binary transfer via Tauri IPC
+        // 以原始字节读取文件（支持 .sql、.tar.gz、.zip）
+        // 直接传递 ArrayBuffer，以便通过 Tauri IPC 高效传输二进制数据
         const buffer = await selectedFile.arrayBuffer()
         const result = await invoke<string>('server_import_database_from_file_bytes', {
           sessionId,
@@ -648,7 +648,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
       setMsg(t('database.dbNameNotSaved'))
       return
     }
-    // Close backup dialog and import directly
+    // 关闭备份对话框并直接导入
     setShowBackupDialog(false)
     if (filename.endsWith('.zip')) {
       const hasUnzip = await checkUnzipAvailable()
@@ -710,7 +710,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         )
       )}
       
-      {/* Search and filters */}
+      {/* 搜索和过滤器 */}
       <div className="toolbar">
         <input
           type="text"
@@ -721,14 +721,14 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         />
       </div>
       
-      {/* ponytail: search results hint */}
+      {/* ponytail：搜索结果提示 */}
       {searchQuery && (
         <div style={{ color: 'var(--red)', marginBottom: '12px', fontSize: '14px' }}>
           {t('database.searchResultsHint')}
         </div>
       )}
       
-      {/* Database table */}
+      {/* 数据库表格 */}
       <div className="table-wrapper">
         <table className="data-table">
           <thead>
@@ -787,9 +787,9 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                       onClick={() => togglePasswordVisibility(db.name)}
                       title={db.password ? (visiblePasswords.has(db.name) ? t('database.hidePassword') : t('database.showPassword')) : t('database.passwordNotSaved')}
                       disabled={!db.password}
-                      style={{ opacity: db.password ? 1 : 0.3, cursor: db.password ? 'pointer' : 'not-allowed', fontSize: '14px', lineHeight: 1, padding: '2px 4px' }}
+                      style={{ opacity: db.password ? 1 : 0.3, cursor: db.password ? 'pointer' : 'not-allowed', fontSize: '12px', lineHeight: 1, padding: '2px 4px' }}
                     >
-                      <span style={visiblePasswords.has(db.name) ? {} : { textDecoration: 'line-through', textDecorationColor: 'var(--red)', textDecorationThickness: '2px' }}>👁️</span>
+                      {visiblePasswords.has(db.name) ? t('database.hidePassword') : t('database.showPassword')}
                     </button>
                     <button
                       className="icon-btn"
@@ -805,7 +805,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                       disabled={!db.password}
                       style={{ opacity: db.password ? 1 : 0.3, cursor: db.password ? 'pointer' : 'not-allowed' }}
                     >
-                      📋
+                      {t('common.copy')}
                     </button>
                   </td>
                  <td>
@@ -886,7 +886,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         </table>
       </div>
       
-      {/* Bottom toolbar with batch operations and pagination */}
+      {/* 包含批量操作和分页的底部工具栏 */}
       <div className="bottom-toolbar">
         <div className="batch-ops">
           <select className="select-box">
@@ -949,7 +949,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         </div>
       </div>
       
-      {/* Create Database Dialog */}
+      {/* 创建数据库对话框 */}
       {showCreateDialog && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -973,7 +973,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                   onChange={(e) => {
                     const dbName = e.target.value
                     setNewDbName(dbName)
-                    // Auto-sync username with database name (always sync)
+                    // 自动将用户名与数据库名称同步（始终同步）
                     setNewDbUser(dbName)
                   }}
                   placeholder={t('database.dbNamePlaceholder')}
@@ -1019,9 +1019,9 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                       setNewDbPass(pass)
                     }}
                     title={t('database.generatePassword')}
-                    style={{ padding: '6px 8px', fontSize: '14px', lineHeight: 1, minWidth: 'auto' }}
+                    style={{ padding: '6px 8px', fontSize: '12px', minWidth: 'auto' }}
                   >
-                    🔄
+                    {t('database.generatePassword')}
                   </button>
                 </div>
               </div>
@@ -1061,7 +1061,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                 <textarea
                   value={allowedIp}
                   onChange={(e) => {
-                    // Auto-convert spaces/commas to newlines
+                    // 自动将空格或逗号转换为换行
                     const val = e.target.value.replace(/[,，\s]+/g, '\n')
                     setAllowedIp(val)
                   }}
@@ -1107,7 +1107,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         </div>
       )}
       
-      {/* Delete Confirmation Dialog */}
+      {/* 删除确认对话框 */}
       {deleteTarget && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -1159,7 +1159,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         </div>
       )}
       
-      {/* Clear Database Dialog */}
+      {/* 清空数据库对话框 */
       {clearTarget && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -1211,7 +1211,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         </div>
       )}
       
-      {/* Change Root Password Dialog */}
+      {/* 修改 root 密码对话框 */}
       {showChangePwDialog && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -1237,9 +1237,9 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                   type="button"
                   onClick={() => setShowRootPassword(!showRootPassword)}
                   title={showRootPassword ? t('database.hidePassword') : t('database.showPassword')}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', padding: '4px 6px', lineHeight: 1 }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', padding: '4px 6px', lineHeight: 1 }}
                 >
-                  {showRootPassword ? '🙈' : '👁'}
+                  {showRootPassword ? t('database.hidePassword') : t('database.showPassword')}
                 </button>
               </div>
             </div>
@@ -1268,7 +1268,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         </div>
       )}
             
-      {/* Change Access Permission Dialog */}
+      {/* 修改访问权限对话框 */}
       {showAccessDialog && accessTarget && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -1302,7 +1302,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                 <textarea
                   value={newAllowedIp}
                   onChange={(e) => {
-                    // Auto-convert spaces/commas to newlines
+                    // 自动将空格或逗号转换为换行
                     const val = e.target.value.replace(/[,，\s]+/g, '\n')
                     setNewAllowedIp(val)
                   }}
@@ -1340,7 +1340,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         </div>
       )}
       
-      {/* Change DB User Password Dialog */}
+      {/* 修改数据库用户密码对话框 */}
       {showChangePwDbDialog && changePwTarget && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -1377,9 +1377,9 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                     setNewDbPassword(pass)
                   }}
                   title={t('database.generatePassword')}
-                  style={{ padding: '6px 8px', fontSize: '14px', lineHeight: 1, minWidth: 'auto' }}
+                  style={{ padding: '6px 8px', fontSize: '12px', minWidth: 'auto' }}
                 >
-                  🔄
+                  {t('database.generatePassword')}
                 </button>
               </div>
             </div>
@@ -1422,7 +1422,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                       allowedIp: savedAllowedIp
                     })
                     setMsg(result)
-                    // Update password in SQLite
+                    // 更新 SQLite 中的密码
                     try {
                       await invoke<string>('server_update_db_credential_password', {
                         sessionId,
@@ -1450,7 +1450,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         </div>
       )}
       
-      {/* Backup Dialog */}
+      {/* 备份对话框 */}
       {showBackupDialog && backupTarget && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px' }}>
@@ -1467,7 +1467,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
               {t('database.backupSaveLocation')}
             </div>
             
-            {/* Backup list */}
+            {/* 备份列表 */}
             <div style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: '16px', border: '1px solid var(--border)', borderRadius: '6px' }}>
               {loadingBackups ? (
                 <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>{t('common.loading')}</div>
@@ -1542,7 +1542,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         </div>
       )}
       
-      {/* Import Dialog */}
+      {/* 导入对话框 */}
       {showImportDialog && importTarget && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
@@ -1615,7 +1615,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
             )}
             
             <div style={{ marginBottom: '16px', padding: '10px', background: 'var(--red)22', borderRadius: '6px', fontSize: '12px', color: 'var(--red)' }}>
-              ⚠️ {t('common.warning')}: {t('database.importOverwriteWarn')}
+              {t('common.warning')}: {t('database.importOverwriteWarn')}
             </div>
             
             <div className="modal-actions">
@@ -1638,7 +1638,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
         </div>
       )}
 
-      {/* Missing unzip tool modal */}
+      {/* 缺少 unzip 工具弹窗 */}
       {missingToolModal && (
         <div className="modal-overlay" onClick={() => setMissingToolModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px', textAlign: 'center' }}>

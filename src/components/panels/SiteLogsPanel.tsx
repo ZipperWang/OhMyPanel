@@ -104,14 +104,14 @@ export default function SiteLogsPanel({ sessionId }: SiteLogsPanelProps) {
     }
   }, [sessionId, selectedLog?.path, logLines, dateFrom, dateTo])
 
-  // Queue-based read: if busy, mark pending and wait for current to finish
+  // 基于队列读取：忙碌时标记为待处理，等待当前读取完成
   const readLog = useCallback(async () => {
     if (readInProgress.current) {
       pendingRead.current = true
       return
     }
     await doReadLog()
-    // Process any pending read that arrived during the current one
+    // 处理当前读取期间到达的待处理读取请求
     while (pendingRead.current) {
       pendingRead.current = false
       await doReadLog()
@@ -122,7 +122,7 @@ export default function SiteLogsPanel({ sessionId }: SiteLogsPanelProps) {
   useEffect(() => { fetchLogs() }, [fetchLogs])
   useEffect(() => { readLog() }, [readLog])
 
-  // Auto-scroll to bottom when content loads
+  // 内容加载时自动滚动到底部
   useEffect(() => {
     if (logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight
@@ -163,7 +163,7 @@ export default function SiteLogsPanel({ sessionId }: SiteLogsPanelProps) {
             >
               {logs.map(l => (
                 <option key={l.path} value={l.path}>
-                  {l.log_type === 'access' ? `📗 ${t('logs.access')}` : `📕 ${t('logs.error')}`} — {l.path} ({formatSize(l.size)})
+                  {l.log_type === 'access' ? t('logs.access') : t('logs.error')} — {l.path} ({formatSize(l.size)})
                 </option>
               ))}
             </select>
@@ -201,7 +201,7 @@ export default function SiteLogsPanel({ sessionId }: SiteLogsPanelProps) {
           )}
 
           <button className="svc-cfg-btn" onClick={readLog} disabled={!selectedLog}>
-            🔄 {t('logs.refresh')}
+            {t('logs.refresh')}
           </button>
         </div>
 
@@ -227,7 +227,7 @@ export default function SiteLogsPanel({ sessionId }: SiteLogsPanelProps) {
         <div className="site-logs-status">{t('logs.noLogFiles', { domain: selectedSite })}</div>
       )}
 
-      {/* ponytail: search results hint */}
+      {/* ponytail：搜索结果提示 */}
       {searchTerm && (
         <div style={{ color: 'var(--red)', marginBottom: '8px', fontSize: '14px' }}>
           {t('logs.searchResultsHint')}

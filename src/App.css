@@ -1,4 +1,4 @@
-/* ===== Theme Variables (dark base / light override) ===== */
+/* ===== 主题变量（深色基底 / 浅色覆盖）===== */
 :root {
   --bg: #0d1117;
   --bg-panel: #161b22;
@@ -58,7 +58,7 @@
   --green-soft: rgba(26, 127, 55, 0.13);
   --green-soft-strong: rgba(26, 127, 55, 0.40);
 }
-/* ===== Global Reset ===== */
+/* ===== 全局重置 ===== */
 * {
   margin: 0;
   padding: 0;
@@ -73,14 +73,14 @@ body {
   overflow: hidden;
 }
 
-/* ===== App Layout ===== */
+/* ===== 应用布局 ===== */
 .app {
   display: flex;
   height: 100vh;
   width: 100vw;
 }
 
-/* ===== Sidebar ===== */
+/* ===== 侧边栏 ===== */
 .sidebar {
   width: 100%;
   background: var(--bg-panel);
@@ -89,7 +89,7 @@ body {
   overflow: hidden;
 }
 
-/* ===== Vertical Divider ===== */
+/* ===== 垂直分隔线 ===== */
 .v-divider {
   width: 4px;
   background: var(--border);
@@ -102,7 +102,7 @@ body {
   background: var(--accent);
 }
 
-/* ===== Sidebar Toggle Button ===== */
+/* ===== 侧边栏切换按钮 ===== */
 .sidebar-toggle-btn {
   position: absolute;
   left: -12px;
@@ -204,7 +204,7 @@ body {
   background: var(--bg-subtle);
 }
 
-/* ponytail: green dot marks the currently active server */
+/* ponytail: 绿色圆点表示当前激活的服务器 */
 .connection-item.active .conn-name::before {
   content: '';
   display: inline-block;
@@ -319,7 +319,7 @@ body {
   cursor: not-allowed;
 }
 
-/* ===== Sidebar Edit Dialog ===== */
+/* ===== 侧边栏编辑弹窗 ===== */
 .sidebar-edit-header {
   display: flex;
   align-items: center;
@@ -427,8 +427,10 @@ body {
 }
 
 .sidebar-edit-action-btn {
-  width: 32px;
+  width: auto;
+  min-width: 32px;
   height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--border);
   background: var(--bg-subtle);
   color: var(--text-muted);
@@ -439,6 +441,7 @@ body {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  white-space: nowrap;
   transition: all 0.2s ease;
 }
 
@@ -472,7 +475,7 @@ body {
   box-shadow: 0 4px 12px rgba(31, 111, 235, 0.4);
 }
 
-/* ===== Sidebar Confirm Dialog ===== */
+/* ===== 侧边栏确认弹窗 ===== */
 .sidebar-confirm-overlay {
   position: fixed;
   inset: 0;
@@ -567,7 +570,7 @@ body {
   background: var(--red);
 }
 
-/* ===== Language Switcher ===== */
+/* ===== 语言切换器 ===== */
 .sidebar-language-switcher {
   padding: 10px 12px;
   border-top: 1px solid var(--border);
@@ -622,7 +625,7 @@ body {
   background: var(--bg-subtle);
 }
 
-/* ===== Main Area ===== */
+/* ===== 主区域 ===== */
 .main-area {
   flex: 1;
   display: flex;
@@ -655,7 +658,7 @@ body {
 }
 
 
-/* ===== Top Bar ===== */
+/* ===== 顶栏 ===== */
 .top-bar {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
@@ -710,7 +713,7 @@ body {
   opacity: 0.5;
 }
 
-/* Password visibility toggle */
+/* 密码可见性切换 */
 .input-with-toggle {
   position: relative;
   display: flex;
@@ -746,7 +749,7 @@ body {
   color: var(--accent);
 }
 
-/* Key path browse button */
+/* 密钥路径浏览按钮 */
 .input-with-browse {
   display: flex;
   gap: 4px;
@@ -778,7 +781,7 @@ body {
   cursor: not-allowed;
 }
 
-/* Remember checkbox */
+/* 记住复选框 */
 .remember-toggle {
   display: flex;
   align-items: center;
@@ -906,14 +909,14 @@ body {
   background: var(--bg-subtle);
 }
 
-/* ===== Terminal Area ===== */
+/* ===== 终端区域 ===== */
 .terminal-area {
   flex: 1;
   overflow: hidden;
   background: var(--bg);
 }
 
-/* ===== Split Container ===== */
+/* ===== 分割容器 ===== */
 .split-container {
   flex: 1;
   display: flex;
@@ -922,7 +925,7 @@ body {
   min-height: 0;
 }
 
-/* ===== Session Tabs ===== */
+/* ===== 会话标签页 ===== */
 .session-tabs {
   display: flex;
   background: var(--bg-panel);
@@ -975,7 +978,7 @@ body {
   background: rgba(248, 81, 73, 0.1);
 }
 
-/* ponytail: reconnecting state — yellow pulse so user sees which tab is unstable */
+/* ponytail: 重连中状态 —— 黄色脉冲提示用户当前哪个标签不稳定 */
 .session-tab.reconnecting {
   color: var(--yellow);
 }
@@ -996,16 +999,11 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* ponytail: disconnected tab — dimmed text + warning icon so user sees which tab lost SSH */
+/* ponytail: 已断开标签 —— 文本变暗并带警告图标，显示哪个标签失去 SSH */
 .session-tab.disconnected {
   color: var(--text-muted);
 }
-.session-tab-discon-icon {
-  font-size: 12px;
-  opacity: 0.7;
-}
-
-/* ponytail: disconnected toast-bar — persistent warning at top when session lost */
+/* ponytail: 断开提示条 —— 会话丢失时顶部持续显示警告 */
 .toast-bar.disconnected-bar {
   background: transparent;
   color: var(--red-strong);
@@ -1038,7 +1036,7 @@ body {
   background: var(--bg);
 }
 
-/* ===== Scrollbar ===== */
+/* ===== 滚动条 ===== */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -1056,7 +1054,7 @@ body {
   background: var(--text-faint);
 }
 
-/* ===== Upload Button ===== */
+/* ===== 上传按钮 ===== */
 .btn-upload {
   height: 32px;
   padding: 0 14px;
@@ -1081,7 +1079,7 @@ body {
   cursor: not-allowed;
 }
 
-/* ===== Upload Progress Bar ===== */
+/* ===== 上传进度条 ===== */
 .upload-progress-bar {
   position: relative;
   height: 20px;
@@ -1112,7 +1110,7 @@ body {
   font-weight: 500;
 }
 
-/* ===== Toast Notification ===== */
+/* ===== 提示通知 ===== */
 .toast-bar {
   display: flex;
   align-items: center;
@@ -1172,7 +1170,7 @@ body {
   background: var(--accent-strong-hover);
 }
 
-/* ===== Error Dialog ===== */
+/* ===== 错误弹窗 ===== */
 .error-dialog-overlay {
   position: fixed;
   top: 0;
@@ -1229,12 +1227,6 @@ body {
   color: var(--text-heading);
 }
 
-.error-dialog-icon {
-  font-size: 48px;
-  text-align: center;
-  margin-bottom: 16px;
-}
-
 .error-dialog-title {
   font-size: 18px;
   font-weight: 600;
@@ -1269,7 +1261,7 @@ body {
   background: var(--green-strong);
 }
 
-/* ===== File Browser ===== */
+/* ===== 文件浏览 ===== */
 .file-browser {
   display: flex;
   flex-direction: column;
@@ -1567,7 +1559,7 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 8px;
-  padding-bottom: 26px; /* room for status bar */
+  padding-bottom: 26px; /* 为状态栏预留空间 */
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
   gap: 4px;
@@ -1676,11 +1668,6 @@ body.dragging-files * {
   max-width: 320px;
 }
 
-.fb-drag-ghost-icon {
-  font-size: 22px;
-  flex-shrink: 0;
-}
-
 .fb-drag-ghost-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1768,8 +1755,8 @@ body.dragging-files * {
   border-color: #6b7a90;
 }
 
-/* ===== File Preview Modal ===== */
-/* ===== Editor Modal ===== */
+/* ===== 文件预览弹窗 ===== */
+/* ===== 编辑器弹窗 ===== */
 .fb-editor-overlay {
   position: fixed;
   top: 0;
@@ -1921,7 +1908,7 @@ body.dragging-files * {
   overflow: auto;
 }
 
-/* ===== File Browser Context Menu ===== */
+/* ===== 文件浏览器上下文菜单 ===== */
 .fb-context-menu {
   position: fixed;
   z-index: 1100;
@@ -1946,7 +1933,7 @@ body.dragging-files * {
   gap: 24px;
 }
 
-/* ponytail: shortcut hint — small grey text, right-aligned via parent flex */
+/* ponytail: 快捷键提示 —— 小字号灰色文字，父级 flex 右对齐 */
 .fb-shortcut {
   font-size: 11px;
   color: var(--text-dim);
@@ -1971,7 +1958,7 @@ body.dragging-files * {
   margin: 4px 0;
 }
 
-/* ===== Paste Button ===== */
+/* ===== 粘贴按钮 ===== */
 .fb-btn-paste {
   background: var(--accent-strong) !important;
   color: #fff !important;
@@ -1981,12 +1968,12 @@ body.dragging-files * {
   background: var(--accent-strong-hover) !important;
 }
 
-/* ===== Cut item visual ===== */
+/* ===== 剪切项视觉提示 ===== */
 .fb-item-cut {
   opacity: 0.45;
 }
 
-/* Delete log floating panel */
+/* 删除日志浮动面板 */
 .fb-delete-log {
   position: absolute;
   bottom: 36px;
@@ -2033,7 +2020,7 @@ body.dragging-files * {
   line-height: 1.5;
 }
 
-/* Archive progress floating panel (extends .fb-delete-log) */
+/* 归档进度浮动面板（继承 .fb-delete-log） */
 .fb-archive-log {
   bottom: 36px;
 }
@@ -2042,7 +2029,7 @@ body.dragging-files * {
   max-height: 200px;
 }
 
-/* ===== Dialogs (Confirm / Prompt / Info) ===== */
+/* ===== 弹窗（确认 / 输入 / 信息）===== */
 .fb-dialog-overlay {
   position: fixed;
   inset: 0;
@@ -2102,7 +2089,7 @@ body.dragging-files * {
   background: rgba(255,255,255,0.08);
 }
 
-/* Universal modal close button */
+/* 通用弹窗关闭按钮 */
 .modal-close-btn {
   position: absolute;
   top: 12px;
@@ -2158,7 +2145,7 @@ body.dragging-files * {
 }
 .fb-dialog-btn.danger:hover { background: var(--red); }
 
-/* Nginx install prompt dialog */
+/* Nginx 安装提示弹窗 */
 .nginx-prompt-dialog {
   text-align: center;
   padding: 32px 24px;
@@ -2184,7 +2171,7 @@ body.dragging-files * {
   font-style: italic;
 }
 
-/* Success modal */
+/* 成功弹窗 */
 .success-modal {
   text-align: center;
   padding: 40px 32px;
@@ -2212,7 +2199,7 @@ body.dragging-files * {
   line-height: 1.5;
 }
 
-/* Delete Site Dialog Styles */
+/* 删除站点弹窗样式 */
 .fb-delete-site-dialog {
   min-width: 480px;
   max-width: 560px;
@@ -2222,13 +2209,7 @@ body.dragging-files * {
 .delete-warning-header {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
   margin-bottom: 20px;
-}
-
-.warning-icon {
-  font-size: 32px;
-  flex-shrink: 0;
 }
 
 .warning-title h3 {
@@ -2356,7 +2337,7 @@ body.dragging-files * {
   border-color: var(--red);
 }
 
-/* Delete Site Dialog Specific Styles */
+/* 删除站点弹窗特定样式 */
 .fb-delete-site-dialog {
   min-width: 520px;
   max-width: 600px;
@@ -2366,14 +2347,7 @@ body.dragging-files * {
 .delete-warning-header {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
   margin-bottom: 20px;
-}
-
-.warning-icon {
-  font-size: 36px;
-  flex-shrink: 0;
-  line-height: 1;
 }
 
 .warning-title h3 {
@@ -2523,7 +2497,7 @@ body.dragging-files * {
   cursor: not-allowed;
 }
 
-/* Toast notification */
+/* 提示通知 */
 .toast-notification {
   position: fixed;
   top: 50%;
@@ -2572,13 +2546,13 @@ body.dragging-files * {
   to   { transform: translate(-50%, -50%) scale(1);    opacity: 1; }
 }
 
-/* Edit site dialog */
+/* 编辑站点弹窗 */
 .edit-site-dialog {
   min-width: 400px;
   max-width: 500px;
 }
 
-/* Resizable config editor popup */
+/* 可调整大小的配置编辑弹窗 */
 .config-editor-dialog {
   background: #1e1e2e;
   border: 1px solid #444;
@@ -2702,7 +2676,7 @@ body.dragging-files * {
   cursor: not-allowed;
 }
 
-/* Edit tabs */
+/* 编辑标签 */
 .edit-tabs {
   display: flex;
   gap: 2px;
@@ -2765,14 +2739,14 @@ body.dragging-files * {
   font-size: 13px;
 }
 
-/* Confirm dialog */
+/* 确认弹窗 */
 .fb-confirm-msg {
   font-size: 13px;
   color: var(--text);
   line-height: 1.6;
 }
 
-/* Conflict dialog */
+/* 冲突弹窗 */
 .fb-conflict-dialog {
   min-width: 380px;
 }
@@ -2781,9 +2755,6 @@ body.dragging-files * {
   color: var(--text);
   line-height: 1.6;
   margin-bottom: 4px;
-}
-.fb-conflict-icon {
-  margin-right: 4px;
 }
 .fb-conflict-msg strong {
   color: var(--text-heading);
@@ -2824,7 +2795,7 @@ body.dragging-files * {
   background: var(--red) !important;
 }
 
-/* Prompt dialog */
+/* 输入弹窗 */
 .fb-prompt-input {
   width: 100%;
   padding: 8px 12px;
@@ -2842,7 +2813,7 @@ body.dragging-files * {
   border-color: var(--accent);
 }
 
-/* File Info dialog */
+/* 文件信息弹窗 */
 .fb-info-grid {
   display: grid;
   grid-template-columns: 100px 1fr;
@@ -2867,7 +2838,7 @@ body.dragging-files * {
   border: 1px solid var(--bg-subtle);
 }
 
-/* Permission Dialog */
+/* 权限弹窗 */
 .fb-perm-info {
   display: flex;
   align-items: center;
@@ -2920,7 +2891,7 @@ body.dragging-files * {
   margin-top: 2px;
 }
 
-/* Download Dialog */
+/* 下载弹窗 */
 .fb-download-path {
   font-size: 12px;
   color: var(--text-muted);
@@ -2929,7 +2900,7 @@ body.dragging-files * {
   word-break: break-all;
 }
 
-/* Download Progress Bar */
+/* 下载进度条 */
 .fb-progress-bar {
   position: absolute;
   bottom: 0;
@@ -2971,7 +2942,7 @@ body.dragging-files * {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* Upload Floating Button */
+/* 上传浮动按钮 */
 .fb-upload-btn {
   position: absolute;
   bottom: 32px;
@@ -3004,7 +2975,7 @@ body.dragging-files * {
   transform: scale(0.95);
 }
 
-/* Upload Menu */
+/* 上传菜单 */
 .fb-upload-menu {
   position: absolute;
   bottom: 74px;
@@ -3043,7 +3014,7 @@ body.dragging-files * {
   white-space: nowrap;
 }
 
-/* Status Bar */
+/* 状态栏 */
 .fb-status-bar {
   position: absolute;
   bottom: 0;
@@ -3071,7 +3042,7 @@ body.dragging-files * {
   margin-left: 12px;
 }
 
-/* ===== Context Menu ===== */
+/* ===== 右键菜单 ===== */
 .context-menu {
   position: fixed;
   z-index: 1000;
@@ -3115,7 +3086,7 @@ body.dragging-files * {
   margin: 4px 0;
 }
 
-/* ===== Compress Dialog ===== */
+/* ===== 压缩弹窗 ===== */
 .fb-compress-items {
   display: flex;
   flex-wrap: wrap;
@@ -3142,14 +3113,14 @@ body.dragging-files * {
   color: var(--accent);
 }
 
-/* Full-height tab content */
+/* 全高度标签内容 */
 .split-full {
   flex: 1;
   height: 100%;
   overflow: hidden;
 }
 
-/* ===== Server Panel Layout ===== */
+/* ===== 服务器面板布局 ===== */
 .server-panel {
   display: flex;
   height: 100%;
@@ -3170,7 +3141,6 @@ body.dragging-files * {
 .sp-nav-item {
   display: flex;
   align-items: center;
-  gap: 8px;
   padding: 8px 16px;
   border: none;
   background: transparent;
@@ -3198,12 +3168,6 @@ body.dragging-files * {
   cursor: not-allowed;
 }
 
-.sp-nav-icon {
-  font-size: 14px;
-  width: 20px;
-  text-align: center;
-}
-
 .sp-content {
   flex: 1;
   overflow-y: auto;
@@ -3213,7 +3177,7 @@ body.dragging-files * {
   min-height: 0;
 }
 
-/* ===== Placeholder ===== */
+/* ===== 占位符 ===== */
 .sp-placeholder {
   display: flex;
   flex-direction: column;
@@ -3238,7 +3202,7 @@ body.dragging-files * {
   font-size: 13px;
 }
 
-/* ===== Dashboard ===== */
+/* ===== 仪表盘 ===== */
 .sp-empty,
 .sp-loading {
   display: flex;
@@ -3330,7 +3294,7 @@ body.dragging-files * {
   cursor: not-allowed;
 }
 
-/* Cards */
+/* 卡片 */
 .sp-card {
   background: var(--bg-panel);
   border: 1px solid var(--bg-subtle);
@@ -3348,7 +3312,7 @@ body.dragging-files * {
   margin-bottom: 12px;
 }
 
-/* About Card */
+/* 关于卡片 */
 .sp-about-content {
   max-width: 720px;
 }
@@ -3373,7 +3337,7 @@ body.dragging-files * {
   display: none;
 }
 
-/* Info Grid */
+/* 信息网格 */
 .sp-info-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3399,7 +3363,7 @@ body.dragging-files * {
   word-break: break-all;
 }
 
-/* Resources */
+/* 资源 */
 .sp-resource-list {
   display: flex;
   flex-direction: column;
@@ -3437,7 +3401,7 @@ body.dragging-files * {
   transition: width 0.5s ease;
 }
 
-/* Services */
+/* 服务 */
 .sp-service-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -3504,7 +3468,7 @@ body.dragging-files * {
   padding: 20px 0;
 }
 
-/* ===== Install LNMP ===== */
+/* ===== 安装 LNMP ===== */
 .install-lnmp {
   max-width: 700px;
 }
@@ -3532,7 +3496,7 @@ body.dragging-files * {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* All Done */
+/* 全部完成 */
 .install-all-done {
   display: flex;
   flex-direction: column;
@@ -3593,7 +3557,7 @@ body.dragging-files * {
   background: var(--border);
 }
 
-/* Status Summary */
+/* 状态摘要 */
 .install-status-summary {
   background: var(--bg-panel);
   border: 1px solid var(--bg-subtle);
@@ -3652,7 +3616,7 @@ body.dragging-files * {
   opacity: 0.7;
 }
 
-/* Selection Form */
+/* 选择表单 */
 .install-select-title {
   font-size: 14px;
   font-weight: 600;
@@ -3766,7 +3730,7 @@ body.dragging-files * {
   transform: scale(0.98);
 }
 
-/* Progress */
+/* 进度 */
 .install-progress {
   display: flex;
   flex-direction: column;
@@ -3870,7 +3834,7 @@ body.dragging-files * {
   background: var(--green-strong);
 }
 
-/* ===== Service Panels (Nginx/MySQL/PHP) ===== */
+/* ===== 服务面板（Nginx/MySQL/PHP）===== */
 .svc-panel {
   max-width: 900px;
   display: flex;
@@ -3980,7 +3944,7 @@ body.dragging-files * {
   margin-bottom: 12px;
 }
 
-/* Tabs */
+/* 标签 */
 .svc-tabs {
   display: flex;
   gap: 0;
@@ -4014,7 +3978,7 @@ body.dragging-files * {
   min-height: 0;
 }
 
-/* Status Grid */
+/* 状态网格 */
 .svc-status-grid {
   display: flex;
   flex-direction: column;
@@ -4051,7 +4015,7 @@ body.dragging-files * {
   color: var(--accent);
 }
 
-/* Config Editor */
+/* 配置编辑器 */
 .svc-config {
   display: flex;
   flex-direction: column;
@@ -4158,7 +4122,7 @@ body.dragging-files * {
   border-color: var(--border);
 }
 
-/* Vhosts */
+/* 虚拟主机 */
 .svc-vhosts {
   display: flex;
   gap: 12px;
@@ -4233,7 +4197,7 @@ body.dragging-files * {
   padding: 30px 0;
 }
 
-/* Logs */
+/* 日志 */
 .svc-logs {
   display: flex;
   flex-direction: column;
@@ -4276,7 +4240,7 @@ body.dragging-files * {
   max-height: 400px;
 }
 
-/* Query Tab (MySQL) */
+/* 查询标签（MySQL） */
 .svc-query {
   display: flex;
   flex-direction: column;
@@ -4332,7 +4296,7 @@ body.dragging-files * {
   max-height: 350px;
 }
 
-/* ===== Sites Panel ===== */
+/* ===== 站点面板 ===== */
 .sites-panel {
   max-width: 900px;
 }
@@ -4393,10 +4357,6 @@ body.dragging-files * {
   padding: 60px 0;
   color: var(--text-faint);
   gap: 10px;
-}
-
-.sites-empty-icon {
-  font-size: 48px;
 }
 
 .sites-grid {
@@ -4532,13 +4492,13 @@ body.dragging-files * {
   border: none;
   color: var(--red);
   cursor: pointer;
-  padding: 4px;
+  padding: 4px 6px;
   border-radius: 4px;
   transition: all 0.15s;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 12px;
 }
 
 .site-delete-btn:hover {
@@ -4576,7 +4536,7 @@ body.dragging-files * {
   border-radius: 3px;
 }
 
-/* Create Site Form */
+/* 创建站点表单 */
 .create-site-form {
   background: var(--bg-panel);
   border: 1px solid var(--bg-subtle);
@@ -4696,7 +4656,7 @@ body.dragging-files * {
   border-color: var(--text-faint);
 }
 
-/* Site creation progress logs */
+/* 站点创建进度日志 */
 .create-progress-logs {
   margin-top: 16px;
   border: 1px solid var(--border);
@@ -4733,7 +4693,7 @@ body.dragging-files * {
   background: rgba(255, 255, 255, 0.02);
 }
 
-/* ===== Monitor Panel ===== */
+/* ===== 监控面板 ===== */
 .monitor-panel {
   max-width: 900px;
 }
@@ -4785,7 +4745,7 @@ body.dragging-files * {
   font-size: 12px;
 }
 
-/* Gauges */
+/* 计量表 */
 .monitor-gauges {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -4846,7 +4806,7 @@ body.dragging-files * {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* Chart */
+/* 图表 */
 .monitor-chart-card {
   background: var(--bg-panel);
   border: 1px solid var(--bg-subtle);
@@ -4869,7 +4829,7 @@ body.dragging-files * {
   height: 80px;
 }
 
-/* Processes Table */
+/* 进程列表 */
 .monitor-processes-card {
   background: var(--bg-panel);
   border: 1px solid var(--bg-subtle);
@@ -4924,7 +4884,7 @@ body.dragging-files * {
   background: var(--bg-subtle)22;
 }
 
-/* ===== Firewall Panel ===== */
+/* ===== 防火墙面板 ===== */
 
 .firewall-panel {
   padding: 20px;
@@ -5099,7 +5059,7 @@ body.dragging-files * {
 .firewall-submit-btn:hover { background: var(--green-strong); }
 .firewall-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Rules Table */
+/* 规则表 */
 .firewall-rules-table {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -5162,7 +5122,7 @@ body.dragging-files * {
   font-size: 13px;
 }
 
-/* Confirm Delete Dialog */
+/* 确认删除对话框 */
 .firewall-confirm-overlay {
   position: fixed;
   inset: 0;
@@ -5225,7 +5185,7 @@ body.dragging-files * {
 .firewall-confirm-btn.danger:hover { background: var(--red); }
 .firewall-confirm-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Port kill dialog — larger fonts & method explainer */
+/* 端口终止弹窗 — 更大的字体与方式说明 */
 .port-kill-dialog { min-width: 420px; max-width: 480px; }
 .port-kill-dialog .firewall-confirm-title { font-size: 18px; }
 .port-kill-dialog .firewall-confirm-msg { font-size: 15px; line-height: 1.5; }
@@ -5246,7 +5206,7 @@ body.dragging-files * {
 .port-kill-danger { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: var(--red-soft, #fdeaea); color: var(--red, #c0392b); font-size: 14px; line-height: 1.5; }
 .port-kill-confirm-hint { font-size: 13px; color: var(--text-faint, #888); margin-top: 6px; }
 
-/* Toggle Switch */
+/* 开关 */
 .firewall-toggle {
   display: flex;
   align-items: center;
@@ -5295,7 +5255,7 @@ body.dragging-files * {
 
 .firewall-toggle.on .toggle-label { color: var(--green); }
 
-/* Disabled states */
+/* 禁用状态 */
 .firewall-actions.disabled { pointer-events: none; opacity: 0.4; }
 
 .firewall-rules-table.disabled {
@@ -5307,7 +5267,7 @@ body.dragging-files * {
   opacity: 0.6;
 }
 
-/* --- Firewall enhancements --- */
+/* --- 防火墙增强 --- */
 .firewall-header-actions {
   display: flex;
   align-items: center;
@@ -5325,7 +5285,7 @@ body.dragging-files * {
   color: var(--accent);
 }
 
-/* Stats cards */
+/* 统计卡片 */
 .fw-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -5359,7 +5319,7 @@ body.dragging-files * {
 .fw-stat-card.deny .fw-stat-num { color: var(--red); }
 .fw-stat-card.reject .fw-stat-num { color: var(--yellow); }
 
-/* Quick ports */
+/* 快速端口 */
 .fw-quick-ports {
   margin-bottom: 16px;
 }
@@ -5438,7 +5398,7 @@ body.dragging-files * {
   color: #fff;
 }
 
-/* Toolbar: search + filter + actions */
+/* 工具栏：搜索 + 过滤 + 操作 */
 .fw-toolbar {
   display: flex;
   align-items: center;
@@ -5472,7 +5432,7 @@ body.dragging-files * {
 
 .fw-toolbar-spacer { flex: 1; }
 
-/* Rule row expand + copy */
+/* 规则行展开与复制 */
 .firewall-table-row {
   cursor: pointer;
 }
@@ -5540,7 +5500,7 @@ body.dragging-files * {
   font-family: 'JetBrains Mono', Consolas, monospace;
 }
 
-/* ===== Software Repository ===== */
+/* ===== 软件仓库 ===== */
 .sw-panel {
   max-width: 900px;
 }
@@ -5731,7 +5691,7 @@ body.dragging-files * {
   font-size: 11px;
 }
 
-/* Running state */
+/* 运行状态 */
 .sw-running {
   display: flex;
   flex-direction: column;
@@ -5834,7 +5794,7 @@ body.dragging-files * {
   margin: 2px 0;
 }
 
-/* Error details collapsible section */
+/* 错误详情可折叠区 */
 .sw-error-details {
   margin-top: 12px;
   background: var(--bg);
@@ -5881,7 +5841,7 @@ body.dragging-files * {
   border-top: 1px solid var(--bg-subtle);
 }
 
-/* Confirm dialog */
+/* 确认弹窗 */
 .sw-confirm-overlay {
   position: fixed;
   inset: 0;
@@ -5953,7 +5913,7 @@ body.dragging-files * {
   gap: 8px;
 }
 
-/* ===== SSL Panel ===== */
+/* ===== SSL 面板 ===== */
 .ssl-panel {
   display: flex;
   flex-direction: column;
@@ -6046,7 +6006,7 @@ body.dragging-files * {
   color: var(--text);
 }
 
-/* ===== Server Settings Panel ===== */
+/* ===== 服务器设置面板 ===== */
 
 .settings-panel {
   padding: 16px;
@@ -6062,7 +6022,7 @@ body.dragging-files * {
   margin: 0;
 }
 
-/* Grid layout for settings cards */
+/* 设置卡片网格布局 */
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 380px));
@@ -6295,7 +6255,7 @@ body.dragging-files * {
   word-break: break-all;
 }
 
-/* ===== Site Logs Panel ===== */
+/* ===== 站点日志面板 ===== */
 .site-logs-panel {
   display: flex;
   flex-direction: column;
@@ -6368,7 +6328,7 @@ body.dragging-files * {
   border-color: var(--accent-strong);
 }
 
-/* Ensure datetime-local calendar icon is visible in dark theme */
+/* 确保 datetime-local 在深色主题下可见日历图标 */
 .site-logs-date-input::-webkit-calendar-picker-indicator {
   filter: invert(0.8);
   cursor: pointer;
@@ -6427,7 +6387,7 @@ body.dragging-files * {
   word-wrap: break-word;
 }
 
-/* ===== Reboot Confirm Dialog ===== */
+/* ===== 重启确认弹窗 ===== */
 .reboot-confirm-dialog {
   min-width: 380px;
   max-width: 440px;
@@ -6468,7 +6428,7 @@ body.dragging-files * {
   flex-shrink: 0;
 }
 
-/* ===== Reboot Command Execution Floating Panel ===== */
+/* ===== 重启命令执行浮动面板 ===== */
 .reboot-exec-panel {
   position: absolute;
   bottom: 16px;
@@ -6556,7 +6516,7 @@ body.dragging-files * {
   color: var(--red);
 }
 
-/* ========== Floating Upload Panel ========== */
+/* ========= 浮动上传面板 ========= */
 .upload-panel {
   position: fixed;
   bottom: 16px;
@@ -6639,11 +6599,6 @@ body.dragging-files * {
 .upload-queue-item.stopped .upload-item-name { color: var(--text-muted); }
 .upload-queue-item.uploading .upload-item-name { color: var(--accent); }
 
-.upload-item-icon {
-  flex-shrink: 0;
-  font-size: 11px;
-}
-
 .upload-item-name {
   flex: 1;
   overflow: hidden;
@@ -6702,7 +6657,7 @@ body.dragging-files * {
   background: var(--red-soft);
 }
 
-/* ===== Docker Panel ===== */
+/* ===== Docker 面板 ===== */
 
 .docker-panel {
   padding: 16px;
@@ -6946,14 +6901,14 @@ body.dragging-files * {
   background: var(--bg-panel);
 }
 
-/* Container columns */
+/* 容器列 */
 .docker-col-name { flex: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
 .docker-col-image { flex: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 .docker-col-status { flex: 1.5; }
 .docker-col-ports { flex: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 11px; }
 .docker-col-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
-/* Batch selection column */
+/* 批量选择列 */
 .docker-col-check { flex: 0 0 28px; display: flex; align-items: center; }
 .docker-checkbox {
   width: 14px;
@@ -6966,7 +6921,7 @@ body.dragging-files * {
   background: var(--accent-soft, rgba(88, 166, 255, 0.08));
 }
 
-/* Batch operation bar */
+/* 批量操作条 */
 .docker-batch-bar {
   display: flex;
   align-items: center;
@@ -7005,7 +6960,7 @@ body.dragging-files * {
   background: var(--red-soft);
 }
 
-/* Batch result dialog list */
+/* 批量结果弹窗列表 */
 .docker-batch-result-list {
   max-height: 280px;
   overflow-y: auto;
@@ -7041,13 +6996,13 @@ body.dragging-files * {
   white-space: nowrap;
 }
 
-/* Image columns */
+/* 镜像列 */
 .docker-col-repo { flex: 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .docker-col-tag { flex: 1; color: var(--accent); }
 .docker-col-id { flex: 1; color: var(--text-muted); font-family: monospace; font-size: 11px; }
 .docker-col-size { flex: 1; color: var(--text-muted); }
 
-/* State colors */
+/* 状态颜色 */
 .docker-state-running { color: var(--green); }
 .docker-state-exited { color: var(--red); }
 .docker-state-paused { color: var(--yellow); }
@@ -7095,7 +7050,7 @@ body.dragging-files * {
   50% { opacity: 0.3; }
 }
 
-/* Pull Image section */
+/* 拉取镜像区域 */
 .docker-pull-section {
   display: flex;
   gap: 8px;
@@ -7121,7 +7076,7 @@ body.dragging-files * {
   color: var(--text-faint);
 }
 
-/* Modal */
+/* 弹窗 */
 .docker-modal-overlay {
   position: fixed;
   top: 0;
@@ -7202,7 +7157,7 @@ body.dragging-files * {
   margin: 0;
 }
 
-/* Confirm Dialog */
+/* 确认对话框 */
 .docker-confirm-dialog {
   position: relative;
   background: var(--bg-panel);
@@ -7284,7 +7239,7 @@ body.dragging-files * {
   justify-content: flex-end;
 }
 
-/* Docker Streaming Log Panel */
+/* Docker 流日志面板 */
 .docker-stream-panel {
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -7337,7 +7292,7 @@ body.dragging-files * {
   word-break: break-all;
 }
 
-/* Docker Mirror Config */
+/* Docker 镜像源配置 */
 .docker-mirror-section {
   padding: 4px 0;
 }
@@ -7477,7 +7432,7 @@ body.dragging-files * {
   color: var(--text);
 }
 
-/* ===== Welcome Modal ===== */
+/* ===== 欢迎弹窗 ===== */
 .welcome-overlay {
   position: fixed;
   top: 0;
@@ -7635,7 +7590,7 @@ body.dragging-files * {
   transform: translateY(-2px);
 }
 
-/* ===== Edit Site Page ===== */
+/* ===== 编辑站点页面 ===== */
 .edit-site-page {
   display: flex;
   flex-direction: column;
@@ -7703,7 +7658,7 @@ body.dragging-files * {
   background: var(--bg-panel);
 }
 
-/* ===== Database Panel ===== */
+/* ===== 数据库面板 ===== */
 .db-panel {
   display: flex;
   flex-direction: column;
@@ -7711,7 +7666,7 @@ body.dragging-files * {
   padding: 4px 0;
 }
 
-/* Database Management Styles */
+/* 数据库管理样式 */
 .panel-container {
   max-width: 1200px;
 }
@@ -7953,7 +7908,7 @@ body.dragging-files * {
   border-color: rgba(88,166,255,0.5);
 }
 
-/* Buttons */
+/* 按钮 */
 .btn-primary {
   background: var(--green-bg);
   border: 1px solid rgba(240,246,252,0.1);
@@ -8018,7 +7973,7 @@ body.dragging-files * {
   cursor: not-allowed;
 }
 
-/* Alerts */
+/* 警示 */
 .alert {
   padding: 10px 14px;
   border-radius: 6px;
@@ -8038,7 +7993,7 @@ body.dragging-files * {
   color: var(--red);
 }
 
-/* Modal */
+/* 弹窗 */
 .modal-overlay {
   position: fixed;
   top: 0;

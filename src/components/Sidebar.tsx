@@ -61,14 +61,14 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
     loadConnections()
   }, [])
 
-  // Refresh when refreshKey changes
+  // refreshKey 变化时刷新
   useEffect(() => {
     if (refreshKey && refreshKey > 0) {
       loadConnections()
     }
   }, [refreshKey])
 
-  // Close context menu on click outside
+  // 点击外部时关闭上下文菜单
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -81,7 +81,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
     }
   }, [contextMenu])
 
-  // Close lang dropdown on click outside
+  // 点击外部时关闭语言下拉菜单
   useEffect(() => {
     if (!langDropdownOpen) return
     const handleClick = (e: MouseEvent) => {
@@ -97,7 +97,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
     const list = await invoke<Connection[]>('config_list')
     setConnections(list)
     
-    // Check if empty on first load only
+    // 仅在首次加载时检查是否为空
     if (!hasCheckedEmpty && list.length === 0) {
       setCreating({
         name: '',
@@ -120,14 +120,14 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
 
   const handleSaveEdit = async () => {
     if (!editing) return
-    // Trim whitespace from host, username, and port
+    // 清理主机、用户名和端口两端的空白
     const trimmed = {
       ...editing,
       host: editing.host.trim(),
       username: editing.username.trim(),
       port: Number(String(editing.port).trim()) || editing.port,
       remember_me: editing.remember_me || false,
-      // Only save credentials if remember_me is checked
+      // 仅在勾选 remember_me 时保存凭据
       password: editing.remember_me ? editing.password : undefined,
       key_path: editing.remember_me ? editing.key_path : undefined
     }
@@ -139,14 +139,14 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
   const handleSaveAndConnect = async () => {
     if (!editing) return
     
-    // Save first
+    // 先保存
     const trimmed = {
       ...editing,
       host: editing.host.trim(),
       username: editing.username.trim(),
       port: Number(String(editing.port).trim()) || editing.port,
       remember_me: editing.remember_me || false,
-      // Only save credentials if remember_me is checked
+      // 仅在勾选 remember_me 时保存凭据
       password: editing.remember_me ? editing.password : undefined,
       key_path: editing.remember_me ? editing.key_path : undefined
     }
@@ -155,7 +155,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
     setEditing(null)
     loadConnections()
     
-    // Trigger reconnect via custom event
+    // 通过自定义事件触发重连
     window.dispatchEvent(new CustomEvent('sidebar-reconnect-after-edit', {
       detail: { conn: trimmed }
     }))
@@ -173,14 +173,14 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
 
   const handleSaveNewConnection = async () => {
     if (!creating) return
-    // Trim whitespace from host, username, and port
+    // 清理主机、用户名和端口两端的空白
     const trimmed = {
       ...creating,
       host: creating.host.trim(),
       username: creating.username.trim(),
       port: Number(String(creating.port).trim()) || creating.port,
       remember_me: creating.remember_me || false,
-      // Only save credentials if remember_me is checked
+      // 仅在勾选 remember_me 时保存凭据
       password: creating.remember_me ? creating.password : undefined,
       key_path: creating.remember_me ? creating.key_path : undefined
     }
@@ -242,7 +242,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
                   onClick={(e) => {
                     e.stopPropagation()
                     if (isConnected) {
-                      // Disconnect this specific session
+                      // 断开此特定会话
                       window.dispatchEvent(new CustomEvent('sidebar-disconnect', { detail: { configId: conn.id } }))
                     } else {
                       onConnect(conn)
@@ -263,7 +263,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
                   }}
                   title={t('common.edit')}
                 >
-                  ✏️ {t('common.edit')}
+                  {t('common.edit')}
                 </button>
               </div>
             </div>
@@ -271,7 +271,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
         })}
       </div>
 
-      {/* Context Menu */}
+      {/* 上下文菜单 */}
       {contextMenu && (
         <div
           ref={menuRef}
@@ -285,7 +285,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
               setContextMenu(null)
             }}
           >
-            ⚡ {t('common.connect')}
+            {t('common.connect')}
           </div>
           <div
             className="context-menu-item"
@@ -294,7 +294,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
               setContextMenu(null)
             }}
           >
-             ✏️ {t('common.edit')}
+            {t('common.edit')}
           </div>
           <div className="context-menu-divider" />
           <div
@@ -304,11 +304,11 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
               setContextMenu(null)
             }}
           >
-            🗑 {t('common.delete')}
+            {t('common.delete')}
           </div>
         </div>
       )}
-      {/* Edit Modal */}
+      {/* 编辑弹窗 */}
       {editing && (
         <div className="sidebar-confirm-overlay">
           <div className="sidebar-edit-dialog" onClick={(e) => e.stopPropagation()}>
@@ -363,7 +363,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
                   <label>{t('sidebar.password')}</label>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input className="sidebar-edit-input" style={{ flex: 1 }} type={showEditPassword ? 'text' : 'password'} value={editing.password || ''} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
-                    <button className="sidebar-edit-action-btn" onClick={() => setShowEditPassword(!showEditPassword)} title={showEditPassword ? t('sidebar.hidePassword') : t('sidebar.showPassword')}>{showEditPassword ? '🙈' : '👁'}</button>
+                    <button className="sidebar-edit-action-btn" onClick={() => setShowEditPassword(!showEditPassword)} title={showEditPassword ? t('sidebar.hidePassword') : t('sidebar.showPassword')}>{showEditPassword ? t('sidebar.hidePassword') : t('sidebar.showPassword')}</button>
                   </div>
                 </div>
               )}
@@ -372,7 +372,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
                   <label>{t('sidebar.keyPath')}</label>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <input className="sidebar-edit-input" style={{ flex: 1 }} value={editing.key_path || ''} onChange={(e) => setEditing({ ...editing, key_path: e.target.value })} />
-                    <button className="sidebar-edit-action-btn" onClick={pickKeyFile} title={t('sidebar.browseKeyFile')}>📂</button>
+                    <button className="sidebar-edit-action-btn" onClick={pickKeyFile} title={t('sidebar.browseKeyFile')}>{t('sidebar.browseKeyFile')}</button>
                   </div>
                 </div>
               )}
@@ -388,7 +388,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
           </div>
         </div>
       )}
-      {/* Confirm Delete Dialog */}
+      {/* 确认删除对话框 */}
       {confirmDelete && (
         <div className="sidebar-confirm-overlay" onClick={() => setConfirmDelete(null)}>
           <div className="sidebar-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -403,7 +403,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
           </div>
         </div>
       )}
-      {/* Create New Connection Modal */}
+      {/* 新建连接弹窗 */}
       {creating && (
         <div className="sidebar-confirm-overlay">
           <div className="sidebar-edit-dialog" onClick={(e) => e.stopPropagation()}>
@@ -458,7 +458,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
                   <label>{t('sidebar.password')}</label>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input className="sidebar-edit-input" style={{ flex: 1 }} type={showCreatePassword ? 'text' : 'password'} value={creating.password || ''} onChange={(e) => setCreating({ ...creating, password: e.target.value })} placeholder={t('sidebar.enterPassword')} />
-                    <button className="sidebar-edit-action-btn" onClick={() => setShowCreatePassword(!showCreatePassword)} title={showCreatePassword ? t('sidebar.hidePassword') : t('sidebar.showPassword')}>{showCreatePassword ? '🙈' : '👁'}</button>
+                    <button className="sidebar-edit-action-btn" onClick={() => setShowCreatePassword(!showCreatePassword)} title={showCreatePassword ? t('sidebar.hidePassword') : t('sidebar.showPassword')}>{showCreatePassword ? t('sidebar.hidePassword') : t('sidebar.showPassword')}</button>
                   </div>
                 </div>
               )}
@@ -467,7 +467,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
                   <label>{t('sidebar.keyPath')}</label>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <input className="sidebar-edit-input" style={{ flex: 1 }} value={creating.key_path || ''} onChange={(e) => setCreating({ ...creating, key_path: e.target.value })} placeholder="~/.ssh/id_rsa" />
-                    <button className="sidebar-edit-action-btn" onClick={pickCreateKeyFile} title={t('sidebar.browseKeyFile')}>📂</button>
+                    <button className="sidebar-edit-action-btn" onClick={pickCreateKeyFile} title={t('sidebar.browseKeyFile')}>{t('sidebar.browseKeyFile')}</button>
                   </div>
                 </div>
               )}
@@ -483,13 +483,13 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
           </div>
         </div>
       )}
-      {/* Language Switcher */}
+      {/* 语言切换器 */}
       <div className="sidebar-language-switcher" ref={langRef} style={{ position: 'relative' }}>
         <button
           className="lang-toggle-btn"
           onClick={() => setLangDropdownOpen(!langDropdownOpen)}
         >
-          🌐 {t('sidebar.language')} ▾
+          {t('sidebar.language')} ▾
         </button>
         {langDropdownOpen && (
           <div className="lang-dropdown">

@@ -1,6 +1,6 @@
 use crate::{DbPool, config::{ConfigManager, Connection, Settings, SettingsManager, Favorite, FavoritesManager}};
 
-// ponytail: clear proxy env vars on demand so updater can retry without proxy
+// ponytail: 按需清理代理环境变量，以便更新器在无代理时重试
 #[tauri::command]
 pub fn clear_proxy_env() {
     for var in ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"] {
@@ -80,13 +80,13 @@ pub fn favorites_remove(db: tauri::State<'_, DbPool>, path: &str) -> Result<(), 
 
 // ===== Data Directory Commands =====
 
-/// Get the local SQLite data directory (stores connections, settings, cache, etc.)
+/// 获取本地 SQLite 数据目录（存储连接、设置、缓存等）
 #[tauri::command]
 pub fn get_data_dir() -> String {
     crate::db::db_dir().to_string_lossy().to_string()
 }
 
-/// Open the local SQLite data directory in the system file explorer
+/// 在系统文件资源管理器中打开本地 SQLite 数据目录
 #[tauri::command]
 pub fn open_data_dir() -> Result<(), String> {
     let dir = crate::db::db_dir();

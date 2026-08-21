@@ -55,7 +55,7 @@ pub async fn server_service_action(
     drop(mgr);
     let cmd = format!("systemctl {} {}", action, service);
     let (_, stderr, code) = ssh::session_exec_with_output(&session, &cmd, 30).await?;
-    // ponytail: invalidate service/software cache after start/stop/restart
+    // ponytail：启动、停止或重启后使服务或软件缓存失效
     cache.invalidate(session_id, &["service_statuses", "software_list"]);
     if code != 0 && !stderr.is_empty() {
         Err(format!("{} failed: {}", service, stderr.trim()))

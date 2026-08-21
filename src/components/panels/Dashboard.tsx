@@ -92,22 +92,22 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
 
   useEffect(() => {
     fetchData()
-    // Auto-refresh every 30s only when tab is visible
+    // 仅在标签页可见时每 30 秒自动刷新
     let interval: number | undefined
     
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        // Tab hidden - clear interval to stop polling
+        // 标签页隐藏，清除定时器以停止轮询
         if (interval) clearInterval(interval)
         interval = undefined
       } else {
-        // Tab visible - refresh immediately and restart polling
+        // 标签页可见，立即刷新并重新开始轮询
         fetchData()
         interval = setInterval(fetchData, 30000)
       }
     }
     
-    // Start polling
+    // 开始轮询
     interval = setInterval(fetchData, 30000)
     document.addEventListener('visibilitychange', handleVisibilityChange)
     
@@ -138,7 +138,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
   const swap = sysInfo ? percentBar(sysInfo.swap_used_mb, sysInfo.swap_total_mb) : null
   const cpu = sysInfo && sysInfo.cpu_percent !== undefined ? percentBar(sysInfo.cpu_percent, 100) : null
 
-  // Deduplicate MySQL/MariaDB services
+  // 对 MySQL/MariaDB 服务去重
   const displayServices = services.filter(s => {
     if (s.name === 'mysql' && services.some(x => x.name === 'mysqld' && x.active)) return false
     return true
@@ -157,7 +157,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
 
   return (
     <div className="sp-dashboard">
-      {/* Header */}
+      {/* 页头 */}
       <div className="sp-dash-header">
         <div className="sp-dash-title">
           <h2>Dashboard</h2>
@@ -171,7 +171,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
         </button>
       </div>
 
-      {/* About OhMyPanel Card */}
+      {/* 关于 OhMyPanel 卡片 */}
       <div className="sp-card">
         <div className="sp-card-title">{t('about.title')}</div>
         <div className="sp-about-content">
@@ -188,7 +188,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
         </div>
       </div>
 
-      {/* System Info Card */}
+      {/* 系统信息卡片 */}
       {sysInfo && (
         <div className="sp-card">
           <div className="sp-card-title">{t('dashboard.system')}</div>
@@ -221,7 +221,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
         </div>
       )}
 
-      {/* Resources Card */}
+      {/* 资源卡片 */}
       {sysInfo && (
         <div className="sp-card">
           <div className="sp-card-title">{t('dashboard.resources')}</div>
@@ -238,7 +238,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
                 </div>
               </div>
             )}
-            {/* Memory */}
+            {/* 内存 */}
             {mem && (
               <div className="sp-resource-item">
                 <div className="sp-resource-header">
@@ -250,7 +250,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
                 </div>
               </div>
             )}
-            {/* Swap */}
+            {/* 交换分区 */}
             {swap && sysInfo.swap_total_mb > 0 && (
               <div className="sp-resource-item">
                 <div className="sp-resource-header">
@@ -262,7 +262,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
                 </div>
               </div>
             )}
-            {/* Disks */}
+            {/* 磁盘 */}
             {sysInfo.disks.map((d, i) => {
               const pct = parseInt(d.use_percent) || 0
               const color = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--green)'
@@ -282,7 +282,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
         </div>
       )}
 
-      {/* Services Card */}
+      {/* 服务卡片 */}
       <div className="sp-card">
         <div className="sp-card-title">{t('dashboard.services')}</div>
         {displayServices.length === 0 ? (

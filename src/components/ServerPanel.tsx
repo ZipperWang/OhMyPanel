@@ -3,10 +3,10 @@ import { invoke } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
 import { open } from '@tauri-apps/plugin-shell'
 import Dashboard from './panels/Dashboard'
-// ponytail: InstallLnmp removed
+// ponytail：已移除 InstallLnmp
 // import InstallLnmp from './panels/InstallLnmp'
 import NginxPanel from './panels/NginxPanel'
-// ponytail: PhpPanel not yet wired up
+// ponytail：PhpPanel 尚未接入
 // import PhpPanel from './panels/PhpPanel'
 import SitesPanel from './panels/SitesPanel'
 import SslPanel from './panels/SslPanel'
@@ -57,28 +57,25 @@ interface ServerPanelProps {
   onShowToast?: (msg: string) => void
 }
 
-const NAV_ITEMS: { key: PanelSection; labelKey: string; icon: string }[] = [
-  { key: 'dashboard', labelKey: 'nav.dashboard', icon: '📊' },
-  { key: 'terminal', labelKey: 'nav.terminal', icon: '💻' },
-  { key: 'files', labelKey: 'nav.files', icon: '📂' },
-  // { key: 'install', labelKey: 'nav.installLnmp', icon: '📦' },
-  { key: 'software', labelKey: 'nav.software', icon: '🧩' },
-  // { key: 'nginx', labelKey: 'Nginx', icon: '' },
-  { key: 'sites', labelKey: 'nav.sites', icon: '🌐' },
-  { key: 'ssl', labelKey: 'nav.ssl', icon: '🔒' },
-  { key: 'docker', labelKey: 'nav.docker', icon: '🐳' },
-  { key: 'database', labelKey: 'nav.database', icon: '🗄' },
-  { key: 'redis', labelKey: 'nav.redis', icon: '⚡' },
-  // { key: 'php', labelKey: 'PHP', icon: '' },
-  { key: 'logs', labelKey: 'nav.logs', icon: '📋' },
-  { key: 'monitor', labelKey: 'nav.monitor', icon: '📈' },
-  { key: 'firewall', labelKey: 'nav.firewall', icon: '🧱' },
-  { key: 'port', labelKey: 'nav.port', icon: '🔌' },
-  { key: 'tunnel', labelKey: 'nav.tunnel', icon: '🔗' },
-  { key: 'bbr', labelKey: 'nav.bbr', icon: '🚀' },
-  { key: 'update', labelKey: 'nav.update', icon: '🔄' },
-  { key: 'settings', labelKey: 'nav.settings', icon: '⚙' },
-  { key: 'discussions', labelKey: 'nav.discussions', icon: '💬' },
+const NAV_ITEMS: { key: PanelSection; labelKey: string }[] = [
+  { key: 'dashboard', labelKey: 'nav.dashboard' },
+  { key: 'terminal', labelKey: 'nav.terminal' },
+  { key: 'files', labelKey: 'nav.files' },
+  { key: 'software', labelKey: 'nav.software' },
+  { key: 'sites', labelKey: 'nav.sites' },
+  { key: 'ssl', labelKey: 'nav.ssl' },
+  { key: 'docker', labelKey: 'nav.docker' },
+  { key: 'database', labelKey: 'nav.database' },
+  { key: 'redis', labelKey: 'nav.redis' },
+  { key: 'logs', labelKey: 'nav.logs' },
+  { key: 'monitor', labelKey: 'nav.monitor' },
+  { key: 'firewall', labelKey: 'nav.firewall' },
+  { key: 'port', labelKey: 'nav.port' },
+  { key: 'tunnel', labelKey: 'nav.tunnel' },
+  { key: 'bbr', labelKey: 'nav.bbr' },
+  { key: 'update', labelKey: 'nav.update' },
+  { key: 'settings', labelKey: 'nav.settings' },
+  { key: 'discussions', labelKey: 'nav.discussions' },
 ]
 
 export default function ServerPanel({ sessionId, connHost, connUsername, initialSection = 'dashboard', jumpToPath, setJumpToPath, termRef, onStartUpload, onUploadComplete, appSettings, onToggleAutoReconnect, onUpdateSettings, onShowToast }: ServerPanelProps) {
@@ -87,10 +84,10 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
   const cdHereRef = useRef<string | null>(null)
   const fileBrowserRef = useRef<FileBrowserHandle | null>(null)
 
-  // ponytail: per-server panel memory — key = lastPanel_${user}@${host}
+  // ponytail：按服务器保存面板记忆，键为 lastPanel_${user}@${host}
   const panelKey = connHost && connUsername ? `lastPanel_${connUsername}@${connHost}` : ''
 
-  // Sync activeSection when initialSection changes (redundant with key remount, kept as safety net)
+  // initialSection 变化时同步 activeSection（key 重挂载已能处理，但保留此逻辑作为安全保障）
   useEffect(() => {
     if (initialSection && NAV_ITEMS.some(s => s.key === initialSection)) {
       setActiveSectionRaw(initialSection as PanelSection)
@@ -106,9 +103,9 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
     setActiveSection(section as PanelSection)
   }
 
-  // ponytail: removed auto-switch to terminal on connection - let user choose where to go
+  // ponytail：移除连接后自动切换到终端的逻辑，让用户自行选择目标面板
 
-  // Clear jumpToPath after FileBrowser consumes it
+  // FileBrowser 使用 jumpToPath 后将其清空
   useEffect(() => {
     if (jumpToPath && activeSection === 'files') {
       const timer = setTimeout(() => setJumpToPath?.(null), 100)
@@ -116,7 +113,7 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
     }
   }, [jumpToPath, activeSection]) // eslint-disable-line
 
-  // Handle cd-here from FileBrowser
+  // 处理来自 FileBrowser 的 cd-here
   useEffect(() => {
     if (activeSection === 'terminal' && cdHereRef.current) {
       const path = cdHereRef.current
@@ -135,14 +132,14 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
     setActiveSection('terminal')
   }
 
-  // Handle upload complete - refresh current directory
+  // 处理上传完成事件，刷新当前目录
   const handleUploadComplete = useCallback(() => {
     if (fileBrowserRef.current && activeSection === 'files') {
       fileBrowserRef.current.refreshCurrentDirectory()
     }
   }, [activeSection])
 
-  // ponytail: auto-focus FileBrowser on tab switch so keyboard shortcuts work immediately
+  // ponytail：切换标签页时自动聚焦 FileBrowser，使键盘快捷键立即生效
   useEffect(() => {
     if (activeSection === 'files' && fileBrowserRef.current) {
       fileBrowserRef.current.focus()
@@ -173,7 +170,7 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
         return <FirewallPanel sessionId={sessionId} />
       case 'port':
         return <PortPanel sessionId={sessionId} />
-      // case 'software': removed - always mounted below
+      // case 'software'：已移除，下面始终挂载
       case 'bbr':
         return <BbrPanel sessionId={sessionId} />
       case 'database':
@@ -204,34 +201,33 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
             className={`sp-nav-item ${activeSection === item.key ? 'active' : ''}`}
             onClick={() => {
               if (item.key === 'discussions') { open('https://github.com/ZipperWang/OhMyPanel/discussions'); return }
-              // ponytail: no session → toast hint instead of disabling nav items
-              if (!sessionId) { onShowToast?.(`⚠ ${t('common.connectFirst')}`); return }
+              // ponytail：没有会话时显示 Toast 提示，而不是禁用导航项
+              if (!sessionId) { onShowToast?.(t('common.connectFirst')); return }
               setActiveSection(item.key)
             }}
           >
-            <span className="sp-nav-icon">{item.icon}</span>
             <span className="sp-nav-label">{t(item.labelKey)}</span>
           </button>
         ))}
       </nav>
       <div className="sp-content">
-        {/* Terminal always mounted to preserve SSH session */}
+        {/* 始终挂载终端以保留 SSH 会话 */}
         <div style={{ display: activeSection === 'terminal' ? 'block' : 'none', height: '100%' }}>
           <Terminal ref={termRef} sessionId={sessionId} isActive={activeSection === 'terminal'} theme={appSettings?.theme || 'light'} />
         </div>
-        {/* Files always mounted to preserve state and avoid reload flash */}
+        {/* 始终挂载文件面板以保留状态并避免重新加载闪烁 */}
         <div style={{ display: activeSection === 'files' ? 'block' : 'none', height: '100%' }}>
           <FileBrowser sessionId={sessionId} connHost={connHost} jumpToPath={jumpToPath} ref={fileBrowserRef} onCdHere={handleCdHere} onStartUpload={onStartUpload} onNavigateToSoftware={() => setActiveSection('software')} />
         </div>
-        {/* Sites always mounted to preserve list state */}
+        {/* 始终挂载站点面板以保留列表状态 */}
         <div style={{ display: activeSection === 'sites' ? 'block' : 'none', height: '100%' }}>
           <SitesPanel sessionId={sessionId} onOpenFolder={handleInternalOpenFolder} visible={activeSection === 'sites'} onNavigateToSoftware={() => setActiveSection('software')} />
         </div>
-        {/* Software always mounted to preserve install progress state */}
+        {/* 始终挂载软件面板以保留安装进度状态 */}
         <div style={{ display: activeSection === 'software' ? 'block' : 'none', height: '100%' }}>
           <SoftwareRepo sessionId={sessionId} />
         </div>
-        {/* Update always mounted to preserve update state */}
+        {/* 始终挂载更新面板以保留更新状态 */}
         <div style={{ display: activeSection === 'update' ? 'block' : 'none', height: '100%' }}>
           <UpdatePanel />
         </div>

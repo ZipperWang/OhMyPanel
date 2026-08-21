@@ -67,7 +67,7 @@ export default function NginxPanel({ sessionId }: NginxPanelProps) {
 
   return (
     <div className="svc-panel">
-      {/* Header */}
+      {/* 页头 */}
       <div className="svc-header">
         <div className="svc-title">
           <h2>{t('nginx.title')}</h2>
@@ -96,7 +96,7 @@ export default function NginxPanel({ sessionId }: NginxPanelProps) {
 
       {error && <div className="svc-error">{error}</div>}
 
-      {/* Tabs */}
+      {/* 标签页 */}
       <div className="svc-tabs">
         {(['status', 'config', 'vhosts', 'logs'] as Tab[]).map((tabKey) => (
           <button
@@ -109,7 +109,7 @@ export default function NginxPanel({ sessionId }: NginxPanelProps) {
         ))}
       </div>
 
-      {/* Tab Content */}
+      {/* 标签页内容 */}
       <div className="svc-tab-content">
         {tab === 'status' && info && <StatusTab info={info} />}
         {tab === 'config' && <ConfigTab sessionId={sessionId} configPath={info?.config_path || '/etc/nginx/nginx.conf'} />}

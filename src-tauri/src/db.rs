@@ -3,7 +3,7 @@ use russh_keys::PublicKeyBase64;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-/// Get the SQLite data directory: <config_dir>/ohmypanel
+/// 获取 SQLite 数据目录：<config_dir>/ohmypanel
 pub fn db_dir() -> PathBuf {
     let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
     path.push("ohmypanel");
@@ -11,24 +11,24 @@ pub fn db_dir() -> PathBuf {
     path
 }
 
-/// Get the SQLite database path: <config_dir>/ohmypanel/data.db
+/// 获取 SQLite 数据库路径：<config_dir>/ohmypanel/data.db
 pub fn db_path() -> PathBuf {
     let mut path = db_dir();
     path.push("data.db");
     path
 }
 
-/// Initialize the database and create tables if needed.
+/// 初始化数据库，并在需要时创建数据表。
 pub fn init_db() -> Result<Mutex<SqliteConn>, String> {
     let path = db_path();
     let conn = SqliteConn::open(&path)
         .map_err(|e| format!("Failed to open SQLite DB: {}", e))?;
 
-    // Enable WAL mode for better concurrency
+    // 启用 WAL 模式以提高并发能力
     conn.execute_batch("PRAGMA journal_mode=WAL;")
         .map_err(|e| format!("Failed to set WAL mode: {}", e))?;
 
-    // Create tables
+    // 创建数据表
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS connections (
             id TEXT PRIMARY KEY,
@@ -121,7 +121,7 @@ pub fn init_db() -> Result<Mutex<SqliteConn>, String> {
         CREATE INDEX IF NOT EXISTS idx_tunnels_server_key ON tunnels(server_key);"
     ).map_err(|e| format!("Failed to create tables: {}", e))?;
 
-    // ponytail: versioned schema migrations — add new versions at the bottom
+    // ponytail：版本化数据库结构迁移；新增版本请追加到末尾
     let schema_version: i32 = conn
         .query_row("SELECT value FROM settings WHERE key='schema_version'", [], |r| r.get::<_, String>(0))
         .ok()
@@ -129,12 +129,12 @@ pub fn init_db() -> Result<Mutex<SqliteConn>, String> {
         .unwrap_or(0);
 
     if schema_version < 1 {
-        // v1: sites table removed — sites are now read directly from Nginx via SSH
-        // Drop the sites table if it exists (ponytail: user confirmed no backup needed)
+        // v1：移除 sites 表；现在通过 SSH 直接从 Nginx 读取站点
+        // 如果 sites 表存在则删除（ponytail：用户已确认无需备份）
         let _ = conn.execute_batch("DROP TABLE IF EXISTS sites;");
     }
 
-    // Always ensure remember_me column exists (idempotent migration)
+    // 始终确保 remember_me 列存在（幂等迁移）
     let has_remember_me: bool = conn
         .query_row(
             "SELECT COUNT(*) FROM pragma_table_info('connections') WHERE name='remember_me'",
@@ -148,7 +148,7 @@ pub fn init_db() -> Result<Mutex<SqliteConn>, String> {
         let _ = conn.execute_batch("ALTER TABLE connections ADD COLUMN remember_me INTEGER DEFAULT 0;");
     }
 
-    // v3: add db_user column to db_credentials (ponytail: idempotent ALTER TABLE)
+    // v3：为 db_credentials 添加 db_user 列（ponytail：幂等 ALTER TABLE）
     let has_db_user: bool = conn
         .query_row(
             "SELECT COUNT(*) FROM pragma_table_info('db_credentials') WHERE name='db_user'",
@@ -162,7 +162,7 @@ pub fn init_db() -> Result<Mutex<SqliteConn>, String> {
         let _ = conn.execute_batch("ALTER TABLE db_credentials ADD COLUMN db_user TEXT NOT NULL DEFAULT '';");
     }
 
-    // v4: add note column to tunnels (idempotent ALTER TABLE)
+    // v4：为 tunnels 添加 note 列（幂等 ALTER TABLE）
     let has_tunnel_note: bool = conn
         .query_row(
             "SELECT COUNT(*) FROM pragma_table_info('tunnels') WHERE name='note'",
@@ -176,7 +176,7 @@ pub fn init_db() -> Result<Mutex<SqliteConn>, String> {
         let _ = conn.execute_batch("ALTER TABLE tunnels ADD COLUMN note TEXT NOT NULL DEFAULT '';");
     }
 
-    // Update schema version to latest
+    // 更新数据库结构版本号至最新值
     conn.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '5')",
         [],
@@ -283,14 +283,14 @@ impl HostKeyStore {
     }
 }
 
-// ===== File Browser Favorites =====
+// ===== 文件浏览器收藏夹 =====
 
-// ===== File Browser Directory Cache =====
+// ===== 文件浏览器目录缓存 =====
 
 pub struct FbDirCache;
 
 impl FbDirCache {
-    // ponytail: get cached JSON + cached_at if within ttl_hours; returns None if expired or missing
+    // ponytail：如果 cached_at 在 ttl_hours 范围内则获取缓存的 JSON 和 cached_at；缓存过期或不存在时返回 None
     pub fn get(conn: &SqliteConn, server_host: &str, path: &str, ttl_hours: u32) -> Option<(String, i64)> {
         let mut stmt = conn.prepare(
             "SELECT data, cached_at FROM fb_dir_cache WHERE server_host = ?1 AND path = ?2"
@@ -303,7 +303,7 @@ impl FbDirCache {
             .unwrap_or_default()
             .as_millis() as i64;
         let ttl_ms = (ttl_hours as i64) * 3600 * 1000;
-        if now - cached_at > ttl_ms { return None; } // ponytail: expired
+        if now - cached_at > ttl_ms { return None; } // ponytail：已过期
         Some((data, cached_at))
     }
 
@@ -319,7 +319,7 @@ impl FbDirCache {
         Ok(())
     }
 
-    // ponytail: touch cached_at without rewriting data
+    // ponytail：更新 cached_at，但不重写数据
     pub fn touch(conn: &SqliteConn, server_host: &str, path: &str) -> Result<(), String> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -332,14 +332,14 @@ impl FbDirCache {
         Ok(())
     }
 
-    // ponytail: delete all cached directories
+    // ponytail：删除所有缓存目录
     pub fn clear_all(conn: &SqliteConn) -> Result<u32, String> {
         let affected = conn.execute("DELETE FROM fb_dir_cache", [])
             .map_err(|e| format!("Failed to clear cache: {}", e))?;
         Ok(affected as u32)
     }
 
-    // ponytail: count cached directories
+    // ponytail：统计缓存目录数量
     pub fn count(conn: &SqliteConn) -> u32 {
         conn.query_row("SELECT COUNT(*) FROM fb_dir_cache", [], |r| r.get::<_, u32>(0))
             .unwrap_or(0)
@@ -376,7 +376,7 @@ impl FbFavorites {
     }
 }
 
-// ===== Database Credentials =====
+// ===== 数据库凭据 =====
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DbCredential {
@@ -390,7 +390,7 @@ pub struct DbCredential {
 pub struct DbCredentialsManager;
 
 impl DbCredentialsManager {
-    /// Save or update database credentials
+    /// 保存或更新数据库凭据
     pub fn save(
         conn: &SqliteConn,
         server_host: &str,
@@ -407,7 +407,7 @@ impl DbCredentialsManager {
         Ok(())
     }
 
-    /// Get credentials for a specific database
+    /// 获取指定数据库的凭据
     pub fn get(conn: &SqliteConn, server_host: &str, db_name: &str) -> Option<DbCredential> {
         conn.query_row(
             "SELECT db_name, db_user, password, access_type, allowed_ip FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
@@ -424,7 +424,7 @@ impl DbCredentialsManager {
         ).ok()
     }
 
-    /// List all credentials for a server
+    /// 列出服务器的所有凭据
     pub fn list_for_server(conn: &SqliteConn, server_host: &str) -> Vec<DbCredential> {
         let mut stmt = conn.prepare(
             "SELECT db_name, db_user, password, access_type, allowed_ip FROM db_credentials WHERE server_host = ?1"
@@ -442,7 +442,7 @@ impl DbCredentialsManager {
         .collect()
     }
 
-    /// Delete credentials for a database
+    /// 删除指定数据库的凭据
     pub fn delete(conn: &SqliteConn, server_host: &str, db_name: &str) -> Result<(), String> {
         conn.execute(
             "DELETE FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
@@ -451,9 +451,9 @@ impl DbCredentialsManager {
         Ok(())
     }
 
-    /// Update only the password (preserves existing db_user)
+    /// 仅更新密码（保留现有的 db_user）
     pub fn update_password(conn: &SqliteConn, server_host: &str, db_name: &str, password: &str) -> Result<(), String> {
-        // Check if record exists
+        // 检查记录是否存在
         let exists = conn.query_row(
             "SELECT COUNT(*) FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
             rusqlite::params![server_host, db_name],
@@ -466,7 +466,7 @@ impl DbCredentialsManager {
                 rusqlite::params![server_host, db_name, password],
             ).map_err(|e| format!("Failed to update password: {}", e))?;
         } else if !password.is_empty() {
-            // Create new record with defaults if password is not empty
+        // 如果密码非空，则使用默认值创建新记录
             conn.execute(
                 "INSERT INTO db_credentials (server_host, db_name, db_user, password, access_type, allowed_ip) VALUES (?1, ?2, ?2, ?3, 'local', '')",
                 rusqlite::params![server_host, db_name, password],
@@ -475,7 +475,7 @@ impl DbCredentialsManager {
         Ok(())
     }
 
-    /// Clear password only (set to empty)
+    /// 仅清空密码（设为空字符串）
     pub fn clear_password(conn: &SqliteConn, server_host: &str, db_name: &str) -> Result<(), String> {
         let exists = conn.query_row(
             "SELECT COUNT(*) FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
@@ -493,12 +493,12 @@ impl DbCredentialsManager {
     }
 }
 
-// ===== Database Remarks =====
+// ===== 数据库备注 =====
 
 pub struct DbRemarksManager;
 
 impl DbRemarksManager {
-    /// Save or update a database remark
+    /// 保存或更新数据库备注
     pub fn save(conn: &SqliteConn, server_host: &str, db_name: &str, remark: &str) -> Result<(), String> {
         conn.execute(
             "INSERT OR REPLACE INTO db_remarks (server_host, db_name, remark) VALUES (?1, ?2, ?3)",
@@ -507,7 +507,7 @@ impl DbRemarksManager {
         Ok(())
     }
 
-    /// Get remark for a specific database
+    /// 获取指定数据库的备注
     pub fn get(conn: &SqliteConn, server_host: &str, db_name: &str) -> Option<String> {
         conn.query_row(
             "SELECT remark FROM db_remarks WHERE server_host = ?1 AND db_name = ?2",
@@ -516,7 +516,7 @@ impl DbRemarksManager {
         ).ok()
     }
 
-    /// List all remarks for a server
+    /// 列出服务器的所有数据库备注
     pub fn list_for_server(conn: &SqliteConn, server_host: &str) -> Vec<(String, String)> {
         let mut stmt = conn.prepare(
             "SELECT db_name, remark FROM db_remarks WHERE server_host = ?1"
@@ -528,7 +528,7 @@ impl DbRemarksManager {
         .collect()
     }
 
-    /// Delete remark for a database
+    /// 删除指定数据库的备注
     pub fn delete(conn: &SqliteConn, server_host: &str, db_name: &str) -> Result<(), String> {
         conn.execute(
             "DELETE FROM db_remarks WHERE server_host = ?1 AND db_name = ?2",
@@ -538,7 +538,7 @@ impl DbRemarksManager {
     }
 }
 
-// ===== Custom Software =====
+// ===== 自定义软件 =====
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CustomSoftwareEntry {
@@ -582,14 +582,14 @@ impl CustomSoftwareManager {
     }
 }
 
-// ===== Site Metadata (for tracking site creation time) =====
+// ===== 站点元数据（用于跟踪站点创建时间） =====
 
 pub struct SiteMetadataManager;
 
 impl SiteMetadataManager {
-    /// Save or get site creation timestamp.
-    /// If the site already exists, return its stored created_at.
-    /// Otherwise, store current_mtime as created_at and return it.
+    /// 保存或获取站点创建时间戳。
+    /// 如果站点已存在，则返回已保存的 created_at。
+    /// 否则将 current_mtime 保存为 created_at 并返回。
     pub fn save_or_get_created_at(
         conn: &SqliteConn,
         server_host: &str,
@@ -614,7 +614,7 @@ impl SiteMetadataManager {
         }
     }
 
-    /// List all site metadata for a server
+    /// 列出服务器的所有站点元数据
     pub fn list_for_server(conn: &SqliteConn, server_host: &str) -> Vec<(String, i64)> {
         let mut stmt = conn.prepare(
             "SELECT domain, created_at FROM site_metadata WHERE server_host = ?1"
@@ -626,7 +626,7 @@ impl SiteMetadataManager {
         .collect()
     }
 
-    /// Delete site metadata
+    /// 删除站点元数据
     pub fn delete(conn: &SqliteConn, server_host: &str, domain: &str) -> Result<(), String> {
         conn.execute(
             "DELETE FROM site_metadata WHERE server_host = ?1 AND domain = ?2",
@@ -636,10 +636,10 @@ impl SiteMetadataManager {
     }
 }
 
-// ===== Tunnel Persistence =====
+// ===== 隧道持久化 =====
 
-/// A persisted tunnel configuration. Lives across disconnects/reconnects;
-/// only removed when the user explicitly deletes the tunnel.
+/// 持久化的隧道配置。断开或重新连接后仍会保留；
+/// 只有用户明确删除隧道时才会移除。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SavedTunnel {
     pub id: String,
@@ -674,7 +674,7 @@ impl TunnelStore {
         Ok(())
     }
 
-    /// Update only the note of a persisted tunnel config.
+    /// 仅更新已持久化隧道配置的备注。
     pub fn update_note(conn: &SqliteConn, id: &str, note: &str) -> Result<(), String> {
         conn.execute(
             "UPDATE tunnels SET note = ?1 WHERE id = ?2",
@@ -738,7 +738,7 @@ impl TunnelStore {
 mod tests {
     use super::*;
 
-    // ponytail: in-memory SQLite for all tests — same schema as init_db, no filesystem
+    // ponytail：所有测试使用内存 SQLite；结构与 init_db 相同，不使用文件系统
     fn test_conn() -> SqliteConn {
         let conn = SqliteConn::open(":memory:").unwrap();
         conn.execute_batch(
@@ -789,7 +789,7 @@ mod tests {
         assert!(HostKeyStore::trust(&conn, "", 22, &generated_host_key(), false).is_err());
     }
 
-    // ===== FbFavorites =====
+    // ===== 文件浏览器收藏夹 =====
 
     #[test]
     fn fb_favorites_add_and_list() {
@@ -825,7 +825,7 @@ mod tests {
         assert_eq!(FbFavorites::list(&conn, "host1").len(), 1);
     }
 
-    // ===== FbDirCache =====
+    // ===== 文件浏览器目录缓存 =====
 
     #[test]
     fn fb_dir_cache_put_and_get() {
@@ -840,7 +840,7 @@ mod tests {
     #[test]
     fn fb_dir_cache_expired_returns_none() {
         let conn = test_conn();
-        // Manually insert with old timestamp
+        // 手动插入旧时间戳
         let old_ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64 - 48 * 3600 * 1000;
         conn.execute(
@@ -869,7 +869,7 @@ mod tests {
         assert_eq!(FbDirCache::count(&conn), 0);
     }
 
-    // ===== DbCredentialsManager =====
+    // ===== 数据库凭据管理器 =====
 
     #[test]
     fn db_credentials_save_and_get() {
@@ -907,7 +907,7 @@ mod tests {
         DbCredentialsManager::update_password(&conn, "host1", "mydb", "new").unwrap();
         let cred = DbCredentialsManager::get(&conn, "host1", "mydb").unwrap();
         assert_eq!(cred.password, "new");
-        assert_eq!(cred.db_user, "admin"); // preserved
+        assert_eq!(cred.db_user, "admin"); // 已保留
     }
 
     #[test]
@@ -927,7 +927,7 @@ mod tests {
         assert_eq!(cred.password, "");
     }
 
-    // ===== DbRemarksManager =====
+    // ===== 数据库备注管理器 =====
 
     #[test]
     fn db_remarks_save_and_get() {
@@ -953,7 +953,7 @@ mod tests {
         assert_eq!(DbRemarksManager::get(&conn, "host1", "mydb"), None);
     }
 
-    // ===== CustomSoftwareManager =====
+    // ===== 自定义软件管理器 =====
 
     #[test]
     fn custom_software_add_and_list() {
@@ -974,7 +974,7 @@ mod tests {
         assert!(CustomSoftwareManager::list(&conn, "host1").is_empty());
     }
 
-    // ===== SiteMetadataManager =====
+    // ===== 站点元数据管理器 =====
 
     #[test]
     fn site_metadata_save_or_get_first_call_stores() {
@@ -988,7 +988,7 @@ mod tests {
         let conn = test_conn();
         SiteMetadataManager::save_or_get_created_at(&conn, "host1", "example.com", 1000).unwrap();
         let ts = SiteMetadataManager::save_or_get_created_at(&conn, "host1", "example.com", 2000).unwrap();
-        assert_eq!(ts, 1000); // returns original, not 2000
+        assert_eq!(ts, 1000); // 返回原始值，而不是 2000
     }
 
     #[test]

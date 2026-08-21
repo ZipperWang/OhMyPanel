@@ -38,14 +38,14 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   
-  // Search and pagination
+  // 搜索和分页
   const [searchQuery, setSearchQuery] = useState('')
   const [searchType, setSearchType] = useState<'key' | 'value'>('key')
   const [pageSize, setPageSize] = useState(50)
   const [totalKeys, setTotalKeys] = useState(0)
   const [cursor, setCursor] = useState<number>(0)
   
-  // Dialogs
+  // 对话框
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [newKeyName, setNewKeyName] = useState('')
   const [newValue, setNewValue] = useState('')
@@ -61,16 +61,16 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
   const [backups, setBackups] = useState<BackupInfo[]>([])
   const [loadingBackups, setLoadingBackups] = useState(false)
   
-  // Flush DB confirmation modal
+  // 清空数据库确认弹窗
   const [showFlushConfirm, setShowFlushConfirm] = useState(false)
   const [flushInput, setFlushInput] = useState('')
   
   const [creatingBackup, setCreatingBackup] = useState(false)
   
-  // ponytail: skip duplicate loadKeys on initial mount (loadDbSizes already loads keys)
+  // ponytail：跳过首次挂载时重复的 loadKeys（loadDbSizes 已经加载键）
   const initialKeysLoaded = useRef(false)
   
-  // Check Redis status on mount
+  // 挂载时检查 Redis 状态
   useEffect(() => {
     checkRedis()
   }, [])
@@ -79,7 +79,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
     if (!sessionId) return
     
     try {
-      // ponytail: fire dbSizes speculatively in parallel with status check
+      // ponytail：与状态检查并行预先发起 dbSizes 请求
       const sizesPromise = invoke<RedisDbSize[]>('server_redis_dbsize_all', { sessionId }).catch(() => null)
       
       const [isRunning, version] = await Promise.all([
@@ -118,7 +118,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
       setLoading(true)
       setError('')
       
-      // Load DB sizes and keys in parallel
+      // 并行加载数据库大小和键
       const [sizes, keyResult] = await Promise.all([
         invoke<RedisDbSize[]>('server_redis_dbsize_all', { sessionId }),
         (async () => {
@@ -149,7 +149,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
     }
   }
   
-  // ponytail: load keys for a specific db using pre-fetched sizes (avoids duplicate SSH calls on init)
+  // ponytail：使用预先获取的大小加载指定数据库的键（避免初始化时重复 SSH 调用）
   const loadKeysForDb = async (db: number, sizes: RedisDbSize[]) => {
     if (!sessionId) return
     try {
@@ -182,7 +182,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
     setLoading(true)
     try {
       const scanCursor = resetCursor ? 0 : cursor
-      // Auto-wrap search query with wildcards for Redis SCAN pattern matching
+      // 自动为搜索查询添加通配符，以匹配 Redis SCAN 模式
       const pattern = searchQuery ? `*${searchQuery}*` : '*'
       
       const result = await invoke<[RedisKeyInfo[], number]>('server_redis_scan_keys', {
@@ -199,7 +199,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
       if (resetCursor) {
         setKeys(keyList)
         setCursor(nextCursor)
-        // Use cached total from dbSizes
+        // 使用 dbSizes 中缓存的总数
         setTotalKeys(dbSizes.find(d => d.db_index === currentDb)?.key_count || 0)
       } else {
         setKeys(prev => [...prev, ...keyList])
@@ -214,7 +214,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
     }
   }
   
-  // Reload when DB changes (skip initial mount — loadDbSizes already loaded keys)
+  // 数据库变化时重新加载（跳过首次挂载，loadDbSizes 已经加载键）
   useEffect(() => {
     if (redisStatus === 'running' && dbSizes.length > 0) {
       if (initialKeysLoaded.current) {
@@ -258,7 +258,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
       setNewValue('')
       setNewTTL('')
       
-      // Refresh list
+      // 刷新列表
       await loadKeys()
     } catch (e) {
       setMsg(`${t('common.error')}: ` + String(e))
@@ -281,7 +281,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
       setMsg(`Deleted ${deleted} keys`)
       setDeleteTarget(null)
       
-      // Refresh list
+      // 刷新列表
       await loadKeys()
     } catch (e) {
       setMsg(`${t('common.error')}: ` + String(e))
@@ -307,7 +307,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
       setMsg(`Deleted ${deleted} keys`)
       setSelectedKeys(new Set())
       
-      // Refresh list
+      // 刷新列表
       await loadKeys()
     } catch (e) {
       setMsg(`${t('common.error')}: ` + String(e))
@@ -413,7 +413,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
     }
   }
   
-  // ponytail: unified not-installed/stopped warning — same pattern as MySQL
+  // ponytail：统一处理未安装或已停止警告，与 MySQL 使用相同模式
   if (redisStatus === 'not_installed' || redisStatus === 'stopped') {
     return (
       <div className="panel-container">
@@ -427,7 +427,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
   
   return (
     <div className="panel-container">
-      {/* Header */}
+      {/* 页头 */}
       <div className="panel-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <h2>{t('redis.title')}</h2>
@@ -448,7 +448,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
         </div>
       </div>
       
-      {/* Messages */}
+      {/* 消息 */}
       {msg && (
         <div className={`alert ${msg.includes('failed') || msg.includes('Failed') ? 'alert-error' : 'alert-success'}`}>
           {msg}
@@ -461,7 +461,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
         </div>
       )}
       
-      {/* Database Tabs */}
+      {/* 数据库标签页 */}
       <div style={{ display: 'flex', overflowX: 'auto', gap: '4px', marginBottom: '16px', paddingBottom: '8px' }}>
         {dbSizes.map((db) => (
           <button
@@ -483,7 +483,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
         ))}
       </div>
       
-      {/* Search Bar */}
+      {/* 搜索栏 */}
       <div className="toolbar">
         <select 
           className="search-type-select"
@@ -503,18 +503,18 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
           onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
         />
         <button className="btn-secondary" onClick={handleSearch}>
-          🔍
+          {t('common.search')}
         </button>
       </div>
       
-      {/* ponytail: search results hint */}
+      {/* ponytail：搜索结果提示 */}
       {searchQuery && (
         <div style={{ color: 'var(--red)', marginBottom: '12px', fontSize: '14px' }}>
           {t('redis.searchResultsHint')}
         </div>
       )}
       
-      {/* Keys Table */}
+      {/* 键表格 */}
       <div className="table-wrapper">
         <table className="data-table">
           <thead>
@@ -592,7 +592,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
         </table>
       </div>
       
-      {/* Bottom Toolbar */}
+      {/* 底部工具栏 */}
       <div className="bottom-toolbar">
         <div className="batch-ops">
           <select 
@@ -647,7 +647,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
         </div>
       </div>
       
-      {/* Add Key Dialog */}
+      {/* 添加键对话框 */}
       {showAddDialog && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -712,7 +712,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
         </div>
       )}
       
-      {/* Delete Confirmation Dialog */}
+      {/* 删除确认对话框 */}
       {deleteTarget && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -744,7 +744,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
         </div>
       )}
       
-      {/* Backup List Dialog */}
+      {/* 备份列表对话框 */}
       {showBackupDialog && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
@@ -804,7 +804,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
         </div>
       )}
       
-      {/* Flush DB Confirmation Modal */}
+      {/* 清空数据库确认弹窗 */}
       {showFlushConfirm && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -816,7 +816,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
               }}
               title="Close"
             >×</button>
-            <h3 style={{ color: 'var(--red)' }}>⚠️ {t('redis.flushDatabase')}</h3>
+            <h3 style={{ color: 'var(--red)' }}>{t('redis.flushDatabase')}</h3>
             
             <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--red-soft)', borderRadius: '6px', border: '1px solid var(--red)' }}>
               <p style={{ margin: '0 0 8px 0', color: 'var(--text)', fontWeight: 'bold' }}>

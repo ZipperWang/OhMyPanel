@@ -33,17 +33,17 @@ export default function InstallLnmp({ sessionId, onInstallationComplete }: Insta
   const [logs, setLogs] = useState<string[]>([])
   const logEndRef = useRef<HTMLDivElement>(null)
 
-  // Component selections
+  // 组件选择
   const [installNginx, setInstallNginx] = useState(true)
   const [installPhp, setInstallPhp] = useState(true)
   const [reinstall, setReinstall] = useState(false)
 
-  // Auto-scroll log
+  // 自动滚动日志
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
 
-  // Check current status
+  // 检查当前状态
   const checkStatus = async () => {
     if (!sessionId) return
     setState('checking')
@@ -56,7 +56,7 @@ export default function InstallLnmp({ sessionId, onInstallationComplete }: Insta
       setLnmpStatus(lnmp)
       setOsInfo(sysInfo.os)
 
-      // Auto-select based on what's not installed
+      // 根据未安装的组件自动选择
       if (lnmp.nginx_installed) setInstallNginx(false)
       if (lnmp.php_installed) setInstallPhp(false)
       setReinstall(false)
@@ -72,7 +72,7 @@ export default function InstallLnmp({ sessionId, onInstallationComplete }: Insta
     checkStatus()
   }, [sessionId])
 
-  // Listen for install progress events
+  // 监听安装进度事件
   useEffect(() => {
     if (!sessionId) return
     const unlisten = listen<{ sessionId: string; line: string; status: string }>(
@@ -112,7 +112,7 @@ export default function InstallLnmp({ sessionId, onInstallationComplete }: Insta
         },
       })
       setState('done')
-      // Notify parent to reconnect after successful installation
+      // 安装成功后通知父组件重连
       onInstallationComplete?.()
     } catch (e) {
       const msg = String(e)
@@ -140,7 +140,7 @@ export default function InstallLnmp({ sessionId, onInstallationComplete }: Insta
         )}
       </div>
 
-      {/* Current Status */}
+      {/* 当前状态 */}
       {state === 'checking' && (
         <div className="sp-loading">{t('install.checkingStatus')}</div>
       )}
@@ -152,7 +152,7 @@ export default function InstallLnmp({ sessionId, onInstallationComplete }: Insta
         </div>
       )}
 
-      {/* Already all installed */}
+      {/* 已全部安装 */}
       {state === 'ready' && allInstalled && !reinstall && (
         <div className="install-all-done">
           <div className="install-done-icon">✓</div>
@@ -175,10 +175,10 @@ export default function InstallLnmp({ sessionId, onInstallationComplete }: Insta
         </div>
       )}
 
-      {/* Selection UI */}
+      {/* 选择界面 */}
       {(state === 'ready' && (!allInstalled || reinstall)) && (
         <div className="install-form">
-          {/* Status summary */}
+          {/* 状态摘要 */}
           {lnmpStatus && (
             <div className="install-status-summary">
               <div className="install-status-title">{t('install.currentStatus')}</div>
@@ -225,7 +225,7 @@ export default function InstallLnmp({ sessionId, onInstallationComplete }: Insta
         </div>
       )}
 
-      {/* Installing Progress */}
+      {/* 安装进度 */}
       {(state === 'installing' || state === 'done') && (
         <div className="install-progress">
           <div className={`install-progress-header ${state}`}>
@@ -255,7 +255,7 @@ export default function InstallLnmp({ sessionId, onInstallationComplete }: Insta
         </div>
       )}
 
-      {/* Error during install */}
+      {/* 安装期间发生错误 */}
       {state === 'error' && lnmpStatus !== null && (
         <div className="install-progress">
           <div className="install-progress-header error">

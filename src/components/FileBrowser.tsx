@@ -107,7 +107,7 @@ function isImageFile(name: string): boolean {
   return IMAGE_EXTS.has(getFileExtension(name))
 }
 
-// SVG Icons
+// SVG 图标
 const FolderIcon = () => (
   <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
     <path d="M4 10C4 8.89543 4.89543 8 6 8H18L22 12H42C43.1046 12 44 12.8954 44 14V38C44 39.1046 43.1046 40 42 40H6C4.89543 40 4 39.1046 4 38V10Z" fill="#E8A838"/>
@@ -150,7 +150,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   const [currentPath, setCurrentPath] = useState('/')
   const [files, setFiles] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(false)
-  const [cacheTime, setCacheTime] = useState<number>(0) // ponytail: cached_at ms
+  const [cacheTime, setCacheTime] = useState<number>(0) // ponytail：cached_at 毫秒
   const initializedRef = useRef(false)
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
@@ -199,39 +199,38 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   const folderInputRef = useRef<HTMLInputElement>(null)
   const filesInputRef = useRef<HTMLInputElement>(null)
 
-  // Favorites management
+  // 收藏夹管理
   const [favorites, setFavorites] = useState<string[]>([])
   const [showFavoritesDropdown, setShowFavoritesDropdown] = useState(false)
 
-  // ponytail: client-side filename filter — no backend round-trip
+  // ponytail：客户端文件名过滤，无需往返后端
   const filteredFiles = useMemo(() => {
     if (!searchQuery) return files
     const q = searchQuery.toLowerCase()
     return files.filter(f => f.name.toLowerCase().includes(q))
   }, [files, searchQuery])
 
-  // Helper: resolve full remote path for a file entry
+  // 辅助函数：解析文件条目的完整远程路径
   const resolvePath = useCallback((entry: FileEntry) =>
     currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`
   , [currentPath])
 
-  // Helper: get all currently selected FileEntry objects
+  // 辅助函数：获取当前选中的所有 FileEntry 对象
   const getSelectedEntries = useCallback((): FileEntry[] =>
     files.filter(f => selectedFiles.has(f.name))
   , [files, selectedFiles])
 
-  // Toast system → append to operation log floating panel
-  const showToast = useCallback((message: string, type: Toast['type'] = 'info') => {
-    const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'
-    setOperationLog(prev => ({ lines: [...(prev?.lines ?? []), `${icon} ${message}`] }))
+  // Toast 系统：追加到操作日志浮动面板
+  const showToast = useCallback((message: string, _type: Toast['type'] = 'info') => {
+    setOperationLog(prev => ({ lines: [...(prev?.lines ?? []), message] }))
   }, [])
 
-  // Confirm dialog (replaces native confirm)
+  // 确认对话框（替代原生 confirm）
   const showConfirm = useCallback((message: string, onConfirm: () => void) => {
     setConfirmDialog({ message, onConfirm })
   }, [])
 
-  // Prompt dialog (replaces native prompt)
+  // 输入对话框（替代原生 prompt）
   const showPrompt = useCallback((title: string, onSubmit: (v: string) => void, defaultValue = '') => {
     setPromptDialog({ title, value: defaultValue, onSubmit })
     setTimeout(() => {
@@ -243,14 +242,14 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     }, 50)
   }, [])
 
-  // Conflict dialog (ask user to replace, rename, or skip)
+  // 冲突对话框（询问用户替换、重命名或跳过）
   const showConflict = useCallback((item: ConflictItem, remaining: number): Promise<{ action: 'replace' | 'rename' | 'skip', applyToAll: boolean }> => {
     return new Promise((resolve) => {
       setConflictDialog({ item, remaining, resolve })
     })
   }, [])
 
-  // Load favorites from SQLite
+  // 从 SQLite 加载收藏夹
   useEffect(() => {
     if (sessionId) {
       invoke<string[]>('fb_favorites_list', { sessionId }).then(setFavorites).catch(() => {})
@@ -286,7 +285,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       ? path
       : currentPath === '/' ? `/${path}` : `${currentPath}/${path}`
 
-    // ponytail: SWR - show cache immediately, revalidate in background
+    // ponytail：SWR：立即显示缓存，并在后台重新验证
     let cachedJson: string | null = null
     if (!forceRefresh) {
       try {
@@ -295,7 +294,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
           cachedJson = result[0]
           setCacheTime(result[1])
         }
-      } catch { /* ignore */ }
+      } catch { /* 忽略 */ }
     }
 
     if (cachedJson) {
@@ -305,10 +304,10 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         setFiles(cached)
         setCurrentPath(resolvedPath)
         setPathInputValue(resolvedPath)
-      } catch { /* bad cache, fall through to loading */ }
+      } catch { /* 缓存无效，继续加载 */ }
     }
 
-    setLoading(!cachedJson) // only show spinner if no cache
+    setLoading(!cachedJson) // 仅在没有缓存时显示加载指示器
     try {
       const json = await invoke<string>('ssh_list_dir', { sessionId, path: resolvedPath })
       let entries: FileEntry[] = JSON.parse(json)
@@ -316,7 +315,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
         return a.name.localeCompare(b.name)
       })
-      // ponytail: update UI + cache if data changed or force refresh; otherwise just touch timestamp
+      // ponytail：数据变化或强制刷新时更新 UI 和缓存，否则仅更新时间戳
       if (json !== cachedJson || forceRefresh) {
         setFiles(entries)
         setCurrentPath(resolvedPath)
@@ -324,7 +323,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         invoke('fb_cache_put', { sessionId, path: resolvedPath, data: json, fileCount: entries.length }).catch(() => {})
         setCacheTime(Date.now())
       } else {
-        // ponytail: data unchanged - refresh cache timestamp only
+        // ponytail：数据未变化，仅刷新缓存时间戳
         invoke('fb_cache_touch', { sessionId, path: resolvedPath }).catch(() => {})
         setCacheTime(Date.now())
       }
@@ -343,11 +342,11 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   useImperativeHandle(ref, () => ({
     jumpToPath: (path: string) => navigateTo(path),
     refreshCurrentDirectory: () => navigateTo(currentPath),
-    // ponytail: expose focus() so parent can move focus here on tab switch — fixes keyboard shortcuts
+    // ponytail：暴露 focus()，使父组件切换标签页时可以将焦点移到这里，修复键盘快捷键问题
     focus: () => fileBrowserRef.current?.focus()
   }), [navigateTo, currentPath])
 
-  // Get unique filename in current directory
+  // 获取当前目录中的唯一文件名
   const getUniqueName = useCallback((name: string) => {
     const existing = new Set(files.map(f => f.name))
     if (!existing.has(name)) return name
@@ -361,7 +360,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     return `${base}_copy${ext}`
   }, [files])
 
-  // Check disk space and write permission before paste/download
+  // 粘贴或下载前检查磁盘空间和写权限
   const checkDirReady = useCallback(async (): Promise<{ ok: boolean; existingFiles: Map<string, 'file' | 'dir'> }> => {
     if (!sessionId) return { ok: false, existingFiles: new Map() }
     try {
@@ -369,7 +368,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       const parts = raw.split('---').map(s => s.trim())
       const availBytes = parseInt(parts[0]) || 0
       const writeOk = parts[1] === 'OK'
-      // Parse file list with type code from find -printf '%y': d=dir, f=file, l=link, etc.
+      // 解析 find -printf '%y' 返回的带类型代码文件列表：d=目录，f=文件，l=链接等
       const fileMap = new Map<string, 'file' | 'dir'>()
       ;(parts[2] || '').split('\n').filter(Boolean).forEach(line => {
         const lastPipe = line.lastIndexOf('|')
@@ -390,14 +389,14 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       }
       return { ok: true, existingFiles: fileMap }
     } catch {
-      // Fallback to current files array (without type info)
+      // 回退使用当前文件数组（不包含类型信息）
       const fallbackMap = new Map<string, 'file' | 'dir'>()
       files.forEach(f => fallbackMap.set(f.name, f.isDir ? 'dir' : 'file'))
       return { ok: true, existingFiles: fallbackMap }
     }
   }, [sessionId, currentPath, files, showToast])
 
-  // Listen for download progress events
+  // 监听下载进度事件
   useEffect(() => {
     const unlisten = listen<{ progress: number; status: string; error?: string }>('download-progress', (e) => {
       setDownloadProgress({ progress: e.payload.progress, status: e.payload.status })
@@ -416,7 +415,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     return () => { unlisten.then(f => f()) }
   }, [currentPath, navigateTo, showToast]) // eslint-disable-line
 
-  // Listen for archive progress events
+  // 监听归档进度事件
   useEffect(() => {
     const unlisten = listen<{ sessionId: string; line: string; status: string }>('archive-progress', (e) => {
       setArchiveProgress(prev => {
@@ -432,7 +431,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     return () => { unlisten.then(f => f()) }
   }, [])
 
-  // Listen for copy progress events
+  // 监听复制进度事件
   useEffect(() => {
     const unlisten = listen<{ sessionId: string; line: string; status: string }>('copy-progress', (e) => {
       setCopyProgress(prev => {
@@ -447,28 +446,28 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     return () => { unlisten.then(f => f()) }
   }, [])
 
-  // Auto-scroll archive log to bottom
+  // 自动将归档日志滚动到底部
   useEffect(() => {
     if (archiveLogRef.current) {
       archiveLogRef.current.scrollTop = archiveLogRef.current.scrollHeight
     }
   }, [archiveProgress?.logs.length])
 
-  // Auto-scroll copy log to bottom
+  // 自动将复制日志滚动到底部
   useEffect(() => {
     if (copyLogRef.current) {
       copyLogRef.current.scrollTop = copyLogRef.current.scrollHeight
     }
   }, [copyProgress?.logs.length])
 
-  // Auto-scroll operation log to bottom
+  // 自动将操作日志滚动到底部
   useEffect(() => {
     if (operationLogRef.current) {
       operationLogRef.current.scrollTop = operationLogRef.current.scrollHeight
     }
   }, [operationLog?.lines.length])
 
-  // Auto-dismiss operation log 5s after last entry
+  // 最后一条记录后 5 秒自动关闭操作日志
   useEffect(() => {
     if (operationLog) {
       const timer = setTimeout(() => setOperationLog(null), 5000)
@@ -476,7 +475,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     }
   }, [operationLog?.lines.length])
 
-  // Auto-dismiss archive panel 5s after completion
+  // 完成后 5 秒自动关闭归档面板
   useEffect(() => {
     if (archiveProgress?.done) {
       const timer = setTimeout(() => setArchiveProgress(null), 5000)
@@ -484,7 +483,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     }
   }, [archiveProgress?.done])
 
-  // Auto-dismiss copy panel 5s after completion
+  // 完成后 5 秒自动关闭复制面板
   useEffect(() => {
     if (copyProgress?.done) {
       const timer = setTimeout(() => setCopyProgress(null), 5000)
@@ -492,9 +491,9 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     }
   }, [copyProgress?.done])
 
-  // Prevent WebView2 from intercepting file drops at native level
-  // This MUST use native DOM listeners (not React synthetic events)
-  // Only preventDefault — do NOT stopPropagation so React events still fire
+  // 防止 WebView2 在原生层拦截文件拖放
+  // 此处必须使用原生 DOM 监听器（不能使用 React 合成事件）
+  // 仅调用 preventDefault，不要调用 stopPropagation，以便 React 事件仍能触发
   useEffect(() => {
     const prevent = (e: DragEvent) => {
       e.preventDefault()
@@ -507,7 +506,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     }
   }, [])
 
-  // Handle files dropped from local computer or selected via file picker
+  // 处理从本地电脑拖入或通过文件选择器选中的文件
   const handleUploadFiles = useCallback(async (items: FileList) => {
     if (!sessionId) return
     if (!items || items.length === 0) return
@@ -515,7 +514,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     const { ok, existingFiles } = await checkDirReady()
     if (!ok) return
 
-    // Collect conflict names (files that already exist on remote)
+    // 收集冲突名称（远程已存在的文件）
     const conflictNames: string[] = []
     for (let i = 0; i < items.length; i++) {
       if (existingFiles.has(items[i].name)) {
@@ -523,14 +522,14 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       }
     }
 
-    // Resolve conflicts: map name -> 'replace' | 'rename' | 'skip'
+    // 处理冲突：名称 -> 'replace' | 'rename' | 'skip'
     const resolutions = new Map<string, 'replace' | 'rename' | 'skip'>()
     if (conflictNames.length > 0) {
       let globalAction: 'replace' | 'rename' | 'skip' | null = null
       for (let i = 0; i < conflictNames.length; i++) {
         const name = conflictNames[i]
         if (globalAction) {
-          // Apply the global action chosen by user
+          // 应用用户选择的全局操作
           resolutions.set(name, globalAction)
         } else {
           const fileType = existingFiles.get(name)
@@ -545,7 +544,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       }
     }
 
-    // Upload each file respecting resolutions
+    // 按冲突处理结果上传每个文件
     const uploadFiles: { file: File; fileName: string; remotePath: string }[] = []
     for (let i = 0; i < items.length; i++) {
       const file = items[i]
@@ -564,9 +563,9 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     navigateTo(currentPath)
   }, [sessionId, currentPath, checkDirReady, getUniqueName, navigateTo, showToast, showConflict, onStartUpload])
 
-  // ponytail: shared folder upload logic — create dirs + upload files with relative paths
+  // ponytail：共享文件夹上传逻辑，创建目录并按相对路径上传文件
   const uploadFolderFiles = useCallback(async (files: { file: File; relPath: string }[], extraDirs: string[] = []) => {
-    // Create directory structure on server
+    // 在服务器上创建目录结构
     const dirsToCreate = new Set<string>(extraDirs.map(d => currentPath === '/' ? '/' + d : currentPath + '/' + d))
     for (const f of files) {
       const parts = f.relPath.split('/')
@@ -578,9 +577,9 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       }
     }
     const sortedDirs = [...dirsToCreate].sort((a, b) => a.split('/').length - b.split('/').length)
-    // ponytail: single mkdir -p command instead of individual ssh_create_dir calls
+    // ponytail：使用一条 mkdir -p 命令，替代逐个调用 ssh_create_dir
     if (sortedDirs.length > 0) {
-      try { await invoke('ssh_create_dirs_batch', { sessionId, paths: sortedDirs }) } catch (_) { /* may partially exist */ }
+      try { await invoke('ssh_create_dirs_batch', { sessionId, paths: sortedDirs }) } catch (_) { /* 目录可能已部分存在 */ }
     }
     const uploadList: { file: File; fileName: string; remotePath: string }[] = []
     for (const f of files) {
@@ -593,7 +592,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     navigateTo(currentPath)
   }, [sessionId, currentPath, navigateTo, onStartUpload])
 
-  // ponytail: recursively traverse FileSystemDirectoryEntry from drag-drop
+  // ponytail：递归遍历拖放得到的 FileSystemDirectoryEntry
   const readEntries = (reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> =>
     new Promise((resolve, reject) => reader.readEntries(resolve, reject))
 
@@ -613,13 +612,13 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         allEntries.push(...batch)
       } while (batch.length > 0)
       const results = await Promise.all(allEntries.map(e => walkDragEntries(e, dirPath + '/')))
-      // ponytail: include this dir itself so empty dirs get created
+      // ponytail：包含目录自身，以便创建空目录
       return { files: results.flatMap(r => r.files), dirs: [dirPath, ...results.flatMap(r => r.dirs)] }
     }
     return { files: [], dirs: [] }
   }
 
-  // ponytail: native <input webkitdirectory> — same lazy File objects as drag-drop, no makeLazyFile needed
+  // ponytail：原生 <input webkitdirectory>，与拖放使用相同的延迟 File 对象，无需 makeLazyFile
   const handleUploadFolder = useCallback(() => {
     folderInputRef.current?.click()
   }, [])
@@ -635,19 +634,19 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       const relPath = f.webkitRelativePath
       if (!relPath) continue
       files.push({ file: f, relPath })
-      // collect intermediate directory paths
+      // 收集中间目录路径
       const parts = relPath.split('/')
       for (let j = 1; j < parts.length; j++) {
         dirsSet.add(parts.slice(0, j).join('/'))
       }
     }
-    input.value = '' // reset so same folder can be re-selected
+    input.value = '' // 重置，以便重新选择同一文件夹
     if (files.length > 0 || dirsSet.size > 0) {
       await uploadFolderFiles(files, [...dirsSet])
     }
   }, [uploadFolderFiles])
 
-  // ponytail: native <input multiple> for file upload — lazy File objects, zero memory preload
+  // ponytail：用于文件上传的原生 <input multiple>，使用延迟 File 对象，不预加载到内存
   const handleUploadFilesBtn = useCallback(() => {
     filesInputRef.current?.click()
   }, [])
@@ -669,7 +668,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     }
   }, [currentPath, navigateTo, onStartUpload])
 
-  // Close upload menu on outside click
+  // 点击外部时关闭上传菜单
   useEffect(() => {
     if (!uploadMenuOpen) return
     const handleClick = () => setUploadMenuOpen(false)
@@ -677,12 +676,12 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     return () => document.removeEventListener('click', handleClick)
   }, [uploadMenuOpen])
 
-  // Handle files/directories dropped from local computer
+  // 处理从本地电脑拖入的文件或目录
   const handleDropFiles = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setDropActive(false)
-    // Check for directory entries via Web API
+    // 通过 Web API 检查目录条目
     const dirEntries: FileSystemEntry[] = []
     const fileItems: DataTransferItem[] = []
     for (let i = 0; i < e.dataTransfer.items.length; i++) {
@@ -694,7 +693,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         fileItems.push(item)
       }
     }
-    // Upload regular files
+    // 上传普通文件
     if (fileItems.length > 0) {
       const files = new DataTransfer()
       for (const item of fileItems) {
@@ -703,9 +702,9 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       }
       if (files.files.length > 0) await handleUploadFiles(files.files)
     }
-    // Upload directories using Web API traversal + shared upload logic
+    // 使用 Web API 遍历和共享上传逻辑上传目录
     if (dirEntries.length > 0) {
-      // ponytail: merge all folder entries then call uploadFolderFiles once
+      // ponytail：合并所有文件夹条目，然后调用一次 uploadFolderFiles
       const allFiles: { file: File; relPath: string }[] = []
       const allDirs: string[] = []
       for (const entry of dirEntries) {
@@ -719,7 +718,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     }
   }, [handleUploadFiles, uploadFolderFiles])
 
-  // Track drag-enter/leave with a counter to avoid flicker on child elements
+  // 使用计数器跟踪 drag-enter/leave，避免经过子元素时闪烁
   const dragCounterRef = useRef(0)
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -748,14 +747,14 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
 
   useEffect(() => {
     if (!sessionId) return
-    // Use jumpToPath prop to navigate (triggered when value changes)
+    // 使用 jumpToPath 属性导航（值变化时触发）
     if (jumpToPath) {
       setLoading(true)
       navigateTo(jumpToPath)
       initializedRef.current = true
       return
     }
-    // If not initialized yet, restore saved path on first mount
+    // 如果尚未初始化，则在首次挂载时恢复保存的路径
     if (!initializedRef.current && !loading) {
       setLoading(true)
       initializedRef.current = true
@@ -763,7 +762,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         const saved = connHost ? await invoke<string>('ui_state_get', { key: `fb_path_${connHost}` }).catch(() => '') : ''
         const target = saved || await invoke<string>('ssh_get_cwd', { sessionId }).catch(() => '/root')
         const ok = await navigateTo(target, true)
-        // ponytail: saved path may not exist — fall back to /
+        // ponytail：保存的路径可能不存在，回退到 /
         if (!ok && target !== '/') {
           await navigateTo('/', true)
         }
@@ -771,7 +770,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     }
   }, [sessionId, jumpToPath]) // eslint-disable-line
 
-  // Close suggestions when clicking outside
+  // 点击外部时关闭建议列表
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (favoritesDropdownRef.current && !favoritesDropdownRef.current.contains(e.target as Node)) {
@@ -782,36 +781,36 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Path edit: validate and go
+  // 编辑路径：验证后跳转
   const handleGoToPath = async () => {
     if (!sessionId) return
     const p = pathInputValue.trim() || '/'
     const target = p.startsWith('/') ? p : '/' + p
     try {
       await invoke<string>('ssh_list_dir', { sessionId, path: target })
-      // Path exists, navigate
+      // 路径存在，执行导航
       navigateTo(target)
     } catch {
       showToast(t('files.dirNotFound', { path: target }), 'error')
-      // Keep input open, content unchanged
+      // 保持输入框打开，内容不变
     }
   }
 
-  // Pointer-based drag and drop (reliable in WebView2)
+  // 基于指针的拖放（在 WebView2 中更可靠）
   const handleItemMouseDown = (e: React.MouseEvent, entry: FileEntry) => {
-    if (e.button !== 0) return // left button only
+    if (e.button !== 0) return // 仅左键
     dragItemRef.current = entry
     dragStartPos.current = { x: e.clientX, y: e.clientY }
     isDragging.current = false
   }
 
-  // Global mousemove/mouseup for drag
+  // 用于拖动的全局 mousemove/mouseup
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!dragItemRef.current || !dragStartPos.current) return
       const dx = e.clientX - dragStartPos.current.x
       const dy = e.clientY - dragStartPos.current.y
-      // Require 5px movement before starting drag (avoid accidental drags on click)
+      // 移动至少 5px 后才开始拖动（避免点击时误触发拖动）
       if (!isDragging.current) {
         if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return
         isDragging.current = true
@@ -820,7 +819,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       }
       setDragGhost({ name: dragItemRef.current.name, isDir: dragItemRef.current.isDir, x: e.clientX, y: e.clientY })
 
-      // Find drop target using elementFromPoint
+      // 使用 elementFromPoint 查找放置目标
       const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
       if (el) {
         const fbItem = el.closest('[data-fb-name]') as HTMLElement | null
@@ -840,7 +839,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       const dragged = dragItemRef.current
       const wasDragging = isDragging.current
 
-      // Reset state
+      // 重置状态
       dragItemRef.current = null
       dragStartPos.current = null
       isDragging.current = false
@@ -853,7 +852,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         return
       }
 
-      // Find drop target
+      // 查找放置目标
       const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
       setDragOverTarget(null)
       if (!el) return
@@ -867,7 +866,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       const targetIsDir = fbItem.dataset.fbIsdir === 'true'
 
       if (targetIsDir) {
-        // Move file(s) into folder — move all selected items if dragged item is selected
+        // 将文件移入文件夹；如果拖动项已选中，则移动所有选中项
         if (!sessionId) return
         const toMove = selectedFiles.has(dragged.name) && selectedFiles.size > 1
           ? files.filter(f => selectedFiles.has(f.name))
@@ -886,7 +885,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         setSelectedFiles(new Set())
         navigateTo(currentPath)
       } else {
-        // Reorder files in the local array
+        // 在本地数组中重新排序文件
         setFiles(prev => {
           const newFiles = [...prev]
           const dragIdx = newFiles.findIndex(f => f.name === dragged.name)
@@ -909,7 +908,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
 
   const handleItemClick = (entry: FileEntry, e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) {
-      // Toggle individual selection
+      // 切换单个选中状态
       setSelectedFiles(prev => {
         const next = new Set(prev)
         if (next.has(entry.name)) next.delete(entry.name)
@@ -918,7 +917,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       })
       setLastClickedFile(entry.name)
     } else if (e.shiftKey && lastClickedFile) {
-      // Range selection
+      // 范围选择
       const lastIdx = files.findIndex(f => f.name === lastClickedFile)
       const currIdx = files.findIndex(f => f.name === entry.name)
       if (lastIdx >= 0 && currIdx >= 0) {
@@ -926,7 +925,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         setSelectedFiles(new Set(files.slice(start, end + 1).map(f => f.name)))
       }
     } else {
-      // Single select
+      // 单选
       setSelectedFiles(new Set([entry.name]))
       setLastClickedFile(entry.name)
     }
@@ -961,7 +960,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   }
 
   const openEditor = async (entry: FileEntry) => {
-    // ponytail: allow all files up to 3MB, no format restriction
+    // ponytail：允许所有不超过 3 MB 的文件，不限制格式
     if (entry.size >= 3 * 1024 * 1024) {
       showToast(t('files.binaryOrLarge'), 'info')
       return
@@ -997,13 +996,13 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       : t('files.deleteItemsMsg', { count: entries.length })
     showConfirm(msg, async () => {
       try {
-        // Separate files and directories
+        // 分离文件和目录
         const files = entries.filter(e => !e.isDir).map(e => resolvePath(e))
         const dirs = entries.filter(e => e.isDir).map(e => resolvePath(e))
 
         const logs: string[] = []
 
-        // Delete files first (single command)
+        // 先删除文件（单条命令）
         if (files.length > 0) {
           const output = await invoke<string>('ssh_delete_files_batch', {
             sessionId,
@@ -1013,7 +1012,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
           if (output) logs.push(output.trim())
         }
 
-        // Then delete directories (single command)
+        // 再删除目录（单条命令）
         if (dirs.length > 0) {
           const output = await invoke<string>('ssh_delete_files_batch', {
             sessionId,
@@ -1092,7 +1091,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     const { ok, existingFiles } = await checkDirReady()
     if (!ok) return
 
-    // Resolve paste conflicts
+    // 处理粘贴冲突
     const pasteConflicts: string[] = []
     for (let i = 0; i < clipboard.names.length; i++) {
       if (existingFiles.has(clipboard.names[i])) {
@@ -1107,7 +1106,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         if (globalAction) {
           pasteResolutions.set(name, globalAction)
         } else {
-          // Use file type from existingFiles map instead of searching in files array
+          // 使用 existingFiles 映射中的文件类型，而不是在 files 数组中搜索
           const fileType = existingFiles.get(name)
           const isDir = fileType === 'dir'
           const remaining = pasteConflicts.length - i - 1
@@ -1126,14 +1125,14 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       setCopyProgress({ logs: [], done: false })
     }
 
-    // Check if we can use batch operation (no conflicts and all same type)
+    // 检查是否可以使用批量操作（无冲突且类型相同）
     const hasConflicts = pasteConflicts.length > 0
-    const allFiles = clipboard.isDirs.every(d => !d) // all are files
-    const allDirs = clipboard.isDirs.every(d => d)   // all are directories
+    const allFiles = clipboard.isDirs.every(d => !d) // 全部为文件
+    const allDirs = clipboard.isDirs.every(d => d)   // 全部为目录
     const canBatch = !hasConflicts && (allFiles || allDirs) && clipboard.paths.length > 1
 
     if (canBatch) {
-      // Use batch API for better performance
+      // 使用批量 API 提高性能
       try {
         const output = await invoke<string>('ssh_copy_files_batch', {
           sessionId,
@@ -1142,7 +1141,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
           isMove: clipboard.mode === 'cut'
         })
         
-        // Parse output to count successes/failures
+        // 解析输出以统计成功或失败数量
         const lines = output.trim().split('\n').filter(l => l.trim())
         success = lines.length
         fail = 0
@@ -1155,14 +1154,14 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         navigateTo(currentPath)
         return
       } catch (e) {
-        // Fallback to individual operations on error
+        // 出错时回退到逐个操作
         console.error('Batch copy failed, falling back to individual:', e)
         showToast(`Batch operation failed: ${e}`, 'error')
-        // Continue to individual processing below
+        // 继续执行下方的逐个处理逻辑
       }
     }
 
-    // Execute all copy/move operations concurrently (fallback or when batch not applicable)
+    // 并发执行所有复制或移动操作（回退情况或不适用批量操作时）
     const results = await Promise.allSettled(
       clipboard.paths.map(async (srcPath, i) => {
         let name = clipboard.names[i]
@@ -1195,7 +1194,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       })
     )
 
-    // Count results
+    // 统计结果
     results.forEach(result => {
       if (result.status === 'fulfilled') {
         if (result.value.status === 'success') {
@@ -1246,13 +1245,13 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     const { ok, existingFiles } = await checkDirReady()
     if (!ok) return
 
-    // Extract filename from URL
+    // 从 URL 提取文件名
     let fileName = 'download'
     try {
       const urlPath = new URL(url).pathname
       const last = urlPath.split('/').filter(Boolean).pop()
       if (last) fileName = decodeURIComponent(last)
-    } catch { /* use default */ }
+    } catch { /* 使用默认值 */ }
 
     if (existingFiles.has(fileName)) {
       const fileType = existingFiles.get(fileName)
@@ -1276,7 +1275,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       showToast(t('files.downloadedFile', { name: fileName }), 'success')
       setDownloadProgress(null)
       setDownloadDialog(null)
-      // Refresh directory to show the downloaded file
+      // 刷新目录以显示下载的文件
       navigateTo(currentPath)
     } catch (e) {
       showToast(t('files.downloadError', { error: e }), 'error')
@@ -1285,25 +1284,25 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   }
 
   const handleOpenPermissions = (entry?: FileEntry) => {
-    // If no entry provided, use selected files
+    // 如果未提供条目，则使用选中的文件
     let paths: string[]
     let names: string[]
     let currentPerms: string
 
     if (entry) {
-      // Single file from context menu
+      // 来自上下文菜单的单个文件
       const path = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`
       paths = [path]
       names = [entry.name]
       currentPerms = entry.permissions || '—'
     } else if (selectedFiles.size > 0) {
-      // Multiple selected files
+      // 多个选中的文件
       const entries = getSelectedEntries()
       paths = entries.map(e => currentPath === '/' ? `/${e.name}` : `${currentPath}/${e.name}`)
       names = entries.map(e => e.name)
-      currentPerms = entries[0]?.permissions || '—' // Show first file's permissions as reference
+      currentPerms = entries[0]?.permissions || '—' // 以第一个文件的权限作为参考
     } else {
-      return // No files to set permissions on
+      return // 没有可设置权限的文件
     }
 
     setPermissionDialog({ paths, names, currentPerms, mode: '' })
@@ -1312,7 +1311,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   const handleApplyPermissions = async () => {
     if (!permissionDialog || !permissionDialog.mode) return
     try {
-      // Use batch API if multiple files, otherwise single file API
+      // 多个文件时使用批量 API，否则使用单文件 API
       if (permissionDialog.paths.length > 1) {
         await invoke('ssh_set_permissions_batch', {
           sessionId,
@@ -1362,7 +1361,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
 
   const isArchive = (name: string) => /\.(tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|tar|zip)$/i.test(name)
 
-  // ponytail: pre-flight check — verify CLI tool is installed before compress/extract
+  // ponytail：预检：压缩或解压前确认 CLI 工具已安装
   const checkToolAvailable = async (tool: 'zip' | 'unzip'): Promise<boolean> => {
     if (!sessionId) return false
     try {
@@ -1378,7 +1377,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
 
   const handleCompress = async (names: string[], archiveName: string, format: string) => {
     if (!sessionId || names.length === 0) return
-    // ponytail: pre-flight check — only verify zip when format is zip
+    // ponytail：预检：仅当格式为 zip 时验证 zip 工具
     if (format === 'zip') {
       const hasZip = await checkToolAvailable('zip')
       if (!hasZip) {
@@ -1407,7 +1406,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
 
   const handleExtract = (entry: FileEntry) => {
     if (!sessionId) return
-    // ponytail: extract directly to user-chosen destDir — no extra subdirectory from archive name
+    // ponytail：直接解压到用户选择的 destDir，不根据归档名称创建额外子目录
     showPrompt(t('files.extractTo'), async (destDir) => {
       if (!destDir) return
 
@@ -1428,7 +1427,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
 
   const handleItemContextMenu = (e: React.MouseEvent, entry: FileEntry) => {
     e.preventDefault()
-    // If right-clicked item is not in selection, select only it
+    // 如果右键点击的项目不在选区中，则仅选中该项目
     if (!selectedFiles.has(entry.name)) {
       setSelectedFiles(new Set([entry.name]))
       setLastClickedFile(entry.name)
@@ -1451,16 +1450,16 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     }
   }, [contextMenu, bgContextMenu])
 
-  // Keyboard shortcuts: F5 refresh, Ctrl+A select all, Ctrl+C/X/V copy/cut/paste, Delete
-  // Only intercept when focus is within FileBrowser component
+  // 键盘快捷键：F5 刷新，Ctrl+A 全选，Ctrl+C/X/V 复制/剪切/粘贴，Delete 删除
+  // 仅在焦点位于 FileBrowser 组件内时拦截
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Check if the event target is within the FileBrowser component
+      // 检查事件目标是否位于 FileBrowser 组件内
       const target = e.target as Node
       if (!fileBrowserRef.current || !fileBrowserRef.current.contains(target)) {
-        return // Don't intercept if focus is outside FileBrowser
+        return // 焦点在 FileBrowser 外部时不拦截
       }
-      // Don't intercept shortcuts when focus is in an editable element
+      // 焦点位于可编辑元素时不拦截快捷键
       const el = e.target as HTMLElement
       if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
       
@@ -1508,11 +1507,11 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     navigateTo(parts.join('/') || '/')
   }
 
-  // Rubber band selection on grid empty area
+  // 在网格空白区域进行框选
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       setRubberBand(prev => prev ? { ...prev, endX: e.clientX, endY: e.clientY } : null)
-      // Calculate intersection with file items
+      // 计算与文件项的交集
       if (!gridRef.current) return
       const rb = { startX: rubberBand?.startX || 0, startY: rubberBand?.startY || 0, endX: e.clientX, endY: e.clientY }
       const left = Math.min(rb.startX, rb.endX)
@@ -1543,11 +1542,11 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   }, [rubberBand])
 
   const handleGridMouseDown = (e: React.MouseEvent) => {
-    // Only start rubber band on empty grid area (left button, not on file items)
+    // 仅在网格空白区域开始框选（左键且不在文件项上）
     if (e.button !== 0) return
     const target = e.target as HTMLElement
-    if (target.closest('[data-fb-name]')) return // clicked on a file item
-    // Clear selection and start rubber band
+    if (target.closest('[data-fb-name]')) return // 点击了文件项
+    // 清除选中状态并开始框选
     if (!e.ctrlKey && !e.shiftKey) {
       setSelectedFiles(new Set())
       setLastClickedFile(null)
@@ -1555,13 +1554,13 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     setRubberBand({ startX: e.clientX, startY: e.clientY, endX: e.clientX, endY: e.clientY })
   }
 
-  // Reset drag counter on drop
+  // 放置时重置拖动计数器
   const onDropWrapper = useCallback(async (e: React.DragEvent) => {
     dragCounterRef.current = 0
     await handleDropFiles(e)
   }, [handleDropFiles])
 
-  // File Grid drop zone
+  // 文件网格放置区域
   const gridDragHandlers = {
     onDragOver: handleDragOver,
     onDragEnter: handleDragEnter,
@@ -1584,51 +1583,51 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
       className={`file-browser ${dropActive ? 'fb-drop-active' : ''}`}
       {...gridDragHandlers}
     >
-      {/* Operation Log Floating Panel */}
+      {/* 操作日志浮动面板 */}
       {operationLog && (
         <div className="fb-delete-log fb-archive-log">
           <div className="fb-delete-log-header">
-            <span>📝 {t('files.operationLog')}</span>
+            <span>{t('files.operationLog')}</span>
             <button className="fb-delete-log-close" onClick={() => setOperationLog(null)}>✕</button>
           </div>
           <pre ref={operationLogRef} className="fb-delete-log-content">{operationLog.lines.join('\n')}</pre>
         </div>
       )}
 
-      {/* Delete Log Floating Panel */}
+      {/* 删除日志浮动面板 */}
       {deleteLog && (
         <div className="fb-delete-log">
           <div className="fb-delete-log-header">
-            <span>🗑️ {t('files.deleteLog')}</span>
+            <span>{t('files.deleteLog')}</span>
             <button className="fb-delete-log-close" onClick={() => setDeleteLog(null)}>✕</button>
           </div>
           <pre className="fb-delete-log-content">{deleteLog}</pre>
         </div>
       )}
 
-      {/* Archive Progress Floating Panel */}
+      {/* 归档进度浮动面板 */}
       {archiveProgress && (
         <div className="fb-delete-log fb-archive-log">
           <div className="fb-delete-log-header">
-            <span>{archiveProgress.type === 'compress' ? `🗜️ ${t('files.compressing')}` : `📂 ${t('files.extracting')}`}{archiveProgress.done ? ` — ${t('files.done')}` : '...'}</span>
+            <span>{archiveProgress.type === 'compress' ? t('files.compressing') : t('files.extracting')}{archiveProgress.done ? ` — ${t('files.done')}` : '...'}</span>
             <button className="fb-delete-log-close" onClick={() => setArchiveProgress(null)}>✕</button>
           </div>
           <pre ref={archiveLogRef} className="fb-delete-log-content">{archiveProgress.logs.join('\n')}</pre>
         </div>
       )}
 
-      {/* Copy Progress Floating Panel */}
+      {/* 复制进度浮动面板 */}
       {copyProgress && (
         <div className="fb-delete-log fb-archive-log">
           <div className="fb-delete-log-header">
-            <span>📋 {t('files.copying')}{copyProgress.done ? ` — ${t('files.done')}` : '...'}</span>
+            <span>{t('files.copying')}{copyProgress.done ? ` — ${t('files.done')}` : '...'}</span>
             <button className="fb-delete-log-close" onClick={() => setCopyProgress(null)}>✕</button>
           </div>
           <pre ref={copyLogRef} className="fb-delete-log-content">{copyProgress.logs.join('\n')}</pre>
         </div>
       )}
 
-      {/* Toolbar */}
+      {/* 工具栏 */}
       <div className="fb-toolbar">
         <button className="fb-btn" onClick={goUp} disabled={currentPath === '/'} title={t('files.goUp')}>
           <BackIcon />
@@ -1655,7 +1654,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
           <button
             className="fb-btn fb-btn-go"
             onMouseDown={(e) => {
-              e.preventDefault() // prevent input blur
+              e.preventDefault() // 防止输入框失去焦点
               handleGoToPath()
             }}
             title={t('files.go')}
@@ -1669,7 +1668,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
               onClick={() => setShowFavoritesDropdown(!showFavoritesDropdown)}
               title={t('files.favorites')}
             >
-                   ⭐{t('files.favorites')} 
+                  {t('files.favorites')}
             </button>
             {showFavoritesDropdown && (
               <div className="fb-favorites-dropdown">
@@ -1723,7 +1722,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       </div>
 
-      {/* File Grid */}
+      {/* 文件网格 */}
       <div
         ref={gridRef}
         className={`fb-grid ${dropActive ? 'fb-grid-drop-active' : ''}`}
@@ -1731,7 +1730,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
           if (e.target === e.currentTarget) { navigateTo(currentPath) }
         }}
         onContextMenu={(e) => {
-          // Check if right-click is on empty area (not on a file/folder item)
+          // 检查右键点击是否位于空白区域（而非文件或文件夹项目）
           const target = e.target as HTMLElement
           const isEmptyArea = 
             e.target === e.currentTarget ||
@@ -1785,15 +1784,14 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         ))}
       </div>
 
-      {/* Drag ghost */}
+      {/* 拖动幽灵图像 */}
       {dragGhost && (
         <div className="fb-drag-ghost" style={{ left: dragGhost.x, top: dragGhost.y }}>
-          <span className="fb-drag-ghost-icon">{dragGhost.isDir ? '📁' : '📄'}</span>
           <span className="fb-drag-ghost-name">{dragGhost.name}{selectedFiles.size > 1 ? ` (+${selectedFiles.size - 1})` : ''}</span>
         </div>
       )}
 
-      {/* Rubber band selection rect */}
+      {/* 框选矩形 */}
       {rubberBand && (
         <div className="fb-rubber-band" style={{
           left: Math.min(rubberBand.startX, rubberBand.endX),
@@ -1803,7 +1801,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         }} />
       )}
 
-      {/* Status bar */}
+      {/* 状态栏 */}
       <div className="fb-status">
         <span>{currentPath}</span>
         {selectedFiles.size > 0 && <span className="fb-selected-info">
@@ -1820,7 +1818,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </span>}
       </div>
 
-      {/* Editor modal */}
+      {/* 编辑器弹窗 */}
       {editor && (
         <div className={`fb-editor-overlay ${editor.minimized ? 'minimized' : ''}`} onClick={() => {
           if (editor.minimized) {
@@ -1842,7 +1840,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
                   onClick={handleSaveFile}
                   disabled={editor.saving || editor.content === editor.originalContent}
                 >
-                  {editor.saving ? t('common.saving') : `💾 ${t('common.save')}`}
+                  {editor.saving ? t('common.saving') : t('common.save')}
                 </button>
                 <button className="fb-editor-btn minimize" onClick={() => setEditor({ ...editor, minimized: true })} title={t('files.minimize')}>—</button>
                 <button className="fb-editor-btn maximize" onClick={() => setEditor({ ...editor, maximized: !editor.maximized })} title={editor.maximized ? t('files.restore') : t('files.maximize')}>
@@ -1875,7 +1873,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       )}
 
-      {/* Context Menu */}
+      {/* 上下文菜单 */}
       {contextMenu && (
         <div
           ref={menuRef}
@@ -1889,7 +1887,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
               navigateTo(newPath)
               setContextMenu(null)
             }}>
-              📂 {t('files.open')}
+              {t('files.open')}
             </div>
             </>
           ) : (
@@ -1897,7 +1895,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
               openEditor(contextMenu.entry)
               setContextMenu(null)
             }}>
-              ✏️ {t('files.edit')}
+              {t('files.edit')}
             </div>
           )}
           <div className="fb-context-divider" />
@@ -1905,14 +1903,14 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
             handleCopy()
             setContextMenu(null)
           }}>
-            📋 {t('common.copy')}{selectedFiles.size > 1 ? ` (${selectedFiles.size})` : ''}
+            {t('common.copy')}{selectedFiles.size > 1 ? ` (${selectedFiles.size})` : ''}
             <span className="fb-shortcut">Ctrl+C</span>
           </div>
           <div className="fb-context-item" onClick={() => {
             handleCut()
             setContextMenu(null)
           }}>
-            ✂️ {t('common.cut')}{selectedFiles.size > 1 ? ` (${selectedFiles.size})` : ''}
+            {t('common.cut')}{selectedFiles.size > 1 ? ` (${selectedFiles.size})` : ''}
             <span className="fb-shortcut">Ctrl+X</span>
           </div>
           {clipboard && (
@@ -1920,7 +1918,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
               handlePaste()
               setContextMenu(null)
             }}>
-              📥 {t('common.paste')}
+              {t('common.paste')}
               <span className="fb-shortcut">Ctrl+V</span>
             </div>
           )}
@@ -1929,14 +1927,14 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
             handleRename(contextMenu.entry)
             setContextMenu(null)
           }}>
-            ✏️ {t('common.rename')}
+            {t('common.rename')}
           </div>
           {!contextMenu.entry.isDir && (
             <div className="fb-context-item" onClick={() => {
               handleSaveAs(contextMenu.entry)
               setContextMenu(null)
             }}>
-              💾 {t('files.saveAs')}
+              {t('files.saveAs')}
             </div>
           )}
           <div className="fb-context-item" onClick={() => {
@@ -1944,7 +1942,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
             setCompressFormat('zip')
             setContextMenu(null)
           }}>
-            🗜️ {t('files.compress')}{selectedFiles.has(contextMenu.entry.name) && selectedFiles.size > 1 ? ` (${selectedFiles.size})` : ''}
+            {t('files.compress')}{selectedFiles.has(contextMenu.entry.name) && selectedFiles.size > 1 ? ` (${selectedFiles.size})` : ''}
           </div>
           {isArchive(contextMenu.entry.name) && (
             <div className="fb-context-item" onClick={async () => {
@@ -1959,33 +1957,33 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
               handleExtract(contextMenu.entry)
               setContextMenu(null)
             }}>
-              📂 {t('files.extract')}
+              {t('files.extract')}
             </div>
           )}
           <div className="fb-context-item" onClick={() => {
             handleShowInfo(contextMenu.entry)
             setContextMenu(null)
           }}>
-            ℹ️ {t('files.fileInfo')}
+            {t('files.fileInfo')}
           </div>
           <div className="fb-context-item" onClick={() => {
             handleOpenPermissions(contextMenu.entry)
             setContextMenu(null)
           }}>
-            🔒 {t('files.setPermissions')}
+            {t('files.setPermissions')}
           </div>
           <div className="fb-context-divider" />
           <div className="fb-context-item danger" onClick={() => {
             handleDelete()
             setContextMenu(null)
           }}>
-            🗑️ {t('common.delete')}{selectedFiles.size > 1 ? ` (${selectedFiles.size})` : ''}
+            {t('common.delete')}{selectedFiles.size > 1 ? ` (${selectedFiles.size})` : ''}
             <span className="fb-shortcut">Del</span>
           </div>
         </div>
       )}
 
-      {/* Background Context Menu (right-click on empty area) */}
+      {/* 背景上下文菜单（在空白区域右键点击） */}
       {bgContextMenu && (
         <div
           ref={bgMenuRef}
@@ -1996,33 +1994,33 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
             navigateTo(currentPath, true)
             setBgContextMenu(null)
           }}>
-            🔄 {t('files.refresh')}
+            {t('files.refresh')}
           </div>
           <div className="fb-context-divider" />
           <div className="fb-context-item" onClick={() => {
             handleNewFile()
             setBgContextMenu(null)
           }}>
-            📄 {t('files.newFile')}
+            {t('files.newFile')}
           </div>
           <div className="fb-context-item" onClick={() => {
             handleNewFolder()
             setBgContextMenu(null)
           }}>
-            📁 {t('files.newFolder')}
+            {t('files.newFolder')}
           </div>
           <div className="fb-context-item" onClick={() => {
             onCdHere?.(currentPath)
             setBgContextMenu(null)
           }}>
-             💻 {t('files.cdHere')}
+            {t('files.cdHere')}
           </div>
           <div className="fb-context-divider" />
           <div className="fb-context-item" onClick={() => {
             addFavorite(currentPath)
             setBgContextMenu(null)
           }}>
-            ⭐ {isFavorite(currentPath) ? t('files.removeFromFavorites') : t('files.addToFavorites')}
+            {isFavorite(currentPath) ? t('files.removeFromFavorites') : t('files.addToFavorites')}
           </div>
           {clipboard && (
             <>
@@ -2031,7 +2029,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
                 handlePaste()
                 setBgContextMenu(null)
               }}>
-                📥 {t('common.paste')}
+                {t('common.paste')}
                 <span className="fb-shortcut">Ctrl+V</span>
               </div>
             </>
@@ -2041,7 +2039,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
             setDownloadDialog({ url: '' })
             setBgContextMenu(null)
           }}>
-            ⬇️ {t('common.download')}
+            {t('common.download')}
           </div>
           {selectedFiles.size > 0 && (
             <div className="fb-context-item" onClick={() => {
@@ -2049,13 +2047,13 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
               setCompressFormat('zip')
               setBgContextMenu(null)
             }}>
-              🗜️ {t('files.compress')} ({selectedFiles.size})
+              {t('files.compress')} ({selectedFiles.size})
             </div>
           )}
         </div>
       )}
 
-      {/* File Info Dialog */}
+      {/* 文件信息对话框 */}
       {fileInfo && (
         <div className="fb-dialog-overlay">
           <div className="fb-dialog fb-info-dialog" onClick={(e) => e.stopPropagation()}>
@@ -2090,7 +2088,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       )}
 
-      {/* Missing Tool Modal */}
+      {/* 缺少工具弹窗 */}
       {missingToolModal && (
         <div className="fb-dialog-overlay" onClick={() => setMissingToolModal(null)}>
           <div className="fb-dialog fb-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -2110,7 +2108,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       )}
 
-      {/* Confirm Dialog */}
+      {/* 确认对话框 */}
       {confirmDialog && (
         <div className="fb-dialog-overlay">
           <div className="fb-dialog fb-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -2132,7 +2130,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       )}
 
-      {/* Conflict Dialog */}
+      {/* 冲突对话框 */}
       {conflictDialog && (
         <div className="fb-dialog-overlay">
           <div className="fb-dialog fb-conflict-dialog" onClick={(e) => e.stopPropagation()}>
@@ -2146,7 +2144,6 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
             >×</button>
             <div className="fb-dialog-title">{t('files.fileConflict')}</div>
             <div className="fb-conflict-msg">
-              <span className="fb-conflict-icon">{conflictDialog.item.isDir ? '📁' : '📄'}</span>
               {t('files.alreadyExists', { name: conflictDialog.item.name, type: conflictDialog.item.isDir ? t('files.folder') : t('files.file') })}
             </div>
             <div className="fb-conflict-question">{t('files.whatToDo')}</div>
@@ -2192,7 +2189,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       )}
 
-      {/* Prompt Dialog */}
+      {/* 输入对话框 */}
       {promptDialog && (
         <div className="fb-dialog-overlay">
           <div className="fb-dialog fb-prompt-dialog" onClick={(e) => e.stopPropagation()}>
@@ -2227,7 +2224,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       )}
 
-      {/* Permission Dialog */}
+      {/* 权限对话框 */}
       {permissionDialog && (
         <div className="fb-dialog-overlay">
           <div className="fb-dialog fb-perm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -2274,7 +2271,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       )}
 
-      {/* Compress Dialog */}
+      {/* 压缩对话框 */}
       {compressDialog && (
         <div className="fb-dialog-overlay">
           <div className="fb-dialog fb-compress-dialog" onClick={(e) => e.stopPropagation()}>
@@ -2283,7 +2280,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
               onClick={() => setCompressDialog(null)}
               title="关闭"
             >×</button>
-            <div className="fb-dialog-title">🗜️ {t('files.compressTitle', { count: compressDialog.names.length })}</div>
+            <div className="fb-dialog-title">{t('files.compressTitle', { count: compressDialog.names.length })}</div>
             <div className="fb-compress-items">
               {compressDialog.names.slice(0, 5).map(n => (
                 <span key={n} className="fb-compress-item">{n}</span>
@@ -2328,14 +2325,14 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       )}
 
-      {/* Download Dialog */}
+      {/* 下载对话框 */}
       {downloadDialog && (
         <div className="fb-dialog-overlay" onClick={() => {
           if (downloadProgress && downloadProgress.status === 'downloading') return
           setDownloadDialog(null)
         }}>
           <div className="fb-dialog fb-download-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="fb-dialog-title">⬇️ {t('files.downloadFromUrl')}</div>
+            <div className="fb-dialog-title">{t('files.downloadFromUrl')}</div>
             <input
               className="fb-prompt-input"
               placeholder="https://example.com/file.zip"
@@ -2361,7 +2358,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       )}
 
-      {/* Download Progress Bar (bottom of file browser) */}
+      {/* 下载进度条（文件浏览器底部） */}
       {downloadProgress && (
         <div className="fb-progress-bar">
           <div className="fb-progress-track">
@@ -2379,12 +2376,12 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       )}
 
-      {/* Save-to-local progress panel — reuses upload panel styles */}
+      {/* 保存到本地进度面板，复用上传面板样式 */}
       {saveProgress && (
         <div className="upload-panel" style={{ position: 'absolute', bottom: 36, right: 12, zIndex: 200 }}>
           <div className="upload-panel-header">
             <span className="upload-panel-title">
-              💾 {saveProgress.active ? (saveProgress.paused ? t('upload.paused') : t('files.savingToLocal')) : t('upload.complete')} — {saveProgress.fileName}
+              {saveProgress.active ? (saveProgress.paused ? t('upload.paused') : t('files.savingToLocal')) : t('upload.complete')} — {saveProgress.fileName}
             </span>
             {!saveProgress.active && <span className="upload-panel-toggle" style={{ cursor: 'pointer' }} onClick={() => setSaveProgress(null)}>✕</span>}
           </div>
@@ -2400,17 +2397,17 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
           {saveProgress.active && (
             <div className="upload-panel-actions">
               {!saveProgress.paused ? (
-                <button className="upload-btn" onClick={async () => { await invoke('ssh_save_pause'); setSaveProgress(prev => prev ? { ...prev, paused: true } : null) }}>⏸ {t('upload.pause')}</button>
+                <button className="upload-btn" onClick={async () => { await invoke('ssh_save_pause'); setSaveProgress(prev => prev ? { ...prev, paused: true } : null) }}>{t('upload.pause')}</button>
               ) : (
-                <button className="upload-btn" onClick={async () => { await invoke('ssh_save_resume'); setSaveProgress(prev => prev ? { ...prev, paused: false } : null) }}>▶ {t('upload.resume')}</button>
+                <button className="upload-btn" onClick={async () => { await invoke('ssh_save_resume'); setSaveProgress(prev => prev ? { ...prev, paused: false } : null) }}>{t('upload.resume')}</button>
               )}
-              <button className="upload-btn" onClick={() => { setShowSaveStopConfirm(true); setSaveStopInput('') }}>⏹ {t('upload.stop')}</button>
+              <button className="upload-btn" onClick={() => { setShowSaveStopConfirm(true); setSaveStopInput('') }}>{t('upload.stop')}</button>
             </div>
           )}
         </div>
       )}
 
-      {/* Save stop confirmation modal — same pattern as upload panel */}
+      {/* 保存停止确认弹窗，与上传面板使用相同模式 */}
       {showSaveStopConfirm && (
         <div className="fb-dialog-overlay" onClick={() => setShowSaveStopConfirm(false)}>
           <div className="fb-dialog" onClick={(e) => e.stopPropagation()} style={{ minWidth: 380 }}>
@@ -2438,35 +2435,35 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         </div>
       )}
 
-      {/* Upload menu */}
+      {/* 上传菜单 */}
       {uploadMenuOpen && (
         <div className="fb-upload-menu">
           <div className="fb-upload-menu-item" onClick={() => { handleUploadFilesBtn(); setUploadMenuOpen(false) }}>
-            📄 {t('files.uploadFiles')}
+            {t('files.uploadFiles')}
           </div>
           <div className="fb-upload-menu-item" onClick={() => { handleUploadFolder(); setUploadMenuOpen(false) }}>
-            📁 {t('files.uploadFolder')}
+            {t('files.uploadFolder')}
           </div>
           <div className="fb-upload-menu-hint">{t('files.dragUploadEnabled')}</div>
         </div>
       )}
 
-      {/* ponytail: hidden native inputs — same lazy File API as drag-drop */}
+      {/* ponytail：隐藏的原生输入框，与拖放使用相同的延迟 File API */}
       <input ref={folderInputRef} type="file" {...{ webkitdirectory: '', directory: '' } as any} style={{ display: 'none' }} onChange={handleFolderInputChange} />
       <input ref={filesInputRef} type="file" multiple style={{ display: 'none' }} onChange={handleFilesInputChange} />
 
-      {/* Upload floating button */}
+      {/* 上传浮动按钮 */}
       <button
         className="fb-upload-btn"
         onClick={(e) => { e.stopPropagation(); setUploadMenuOpen(v => !v) }}
         title={t('common.upload')}
       >+</button>
 
-      {/* Status Bar */}
+      {/* 状态栏 */}
       <div className="fb-status-bar">
         <span className="fb-status-path">{currentPath}</span>
         <span className="fb-status-cache">
-          {cacheTime ? `🕐 ${new Date(cacheTime).toLocaleString()}` : '—'}
+          {cacheTime ? new Date(cacheTime).toLocaleString() : '—'}
         </span>
       </div>
     </div>

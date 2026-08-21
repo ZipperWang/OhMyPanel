@@ -14,9 +14,9 @@ use crate::tunnel::TunnelManager;
 
 // ===== SSH Response Cache =====
 
-/// ponytail: in-memory cache for SSH responses, avoids redundant round-trips.
-/// Connection-lifetime for static data, short TTL for semi-static data.
-/// ponytail: std::sync::Mutex — HashMap ops are instant, no need for async lock
+/// ponytail：SSH 响应的内存缓存，避免重复往返请求。
+/// 静态数据缓存贯穿连接生命周期，半静态数据使用较短的 TTL。
+/// ponytail：std::sync::Mutex；HashMap 操作立即完成，无需异步锁
 pub struct SshCache {
     entries: std::sync::Mutex<HashMap<(String, String), (String, tokio::time::Instant)>>,
 }
@@ -57,10 +57,10 @@ impl SshCache {
     }
 }
 
-/// Parse curl -# progress bar output to extract percentage
+/// 解析 curl -# 进度条输出，提取百分比
 fn parse_curl_progress(line: &str) -> Option<f64> {
-    // curl -# outputs lines like: "### 45.2%" or "#=#=# 100%"
-    // Look for percentage pattern
+    // curl -# 输出类似 "### 45.2%" 或 "#=#=# 100%" 的行
+    // 查找百分比模式
     if let Some(idx) = line.rfind('%') {
         let before = line[..idx].trim_end_matches(|c: char| !c.is_ascii_digit() && c != '.');
         if let Ok(pct) = before.parse::<f64>() {
@@ -70,15 +70,15 @@ fn parse_curl_progress(line: &str) -> Option<f64> {
     None
 }
 
-/// A connection the server forwarded to us (remote forwarding, ssh -R).
-/// Handed to the matching remote tunnel via the forwarded_reg channel.
+/// 服务器转发给我们的连接（远程转发，ssh -R）。
+/// 通过 forwarded_reg 通道交给匹配的远程隧道。
 pub struct ForwardedTcpip {
     pub channel: russh::Channel<russh::client::Msg>,
 }
 
 pub struct SshHandler {
-    /// Remote-forward registrations: server listen port -> tunnel receiver.
-    /// The server names the port in server_channel_open_forwarded_tcpip.
+    /// 远程转发注册表：服务器监听端口 -> 隧道接收器。
+    /// 服务器在 server_channel_open_forwarded_tcpip 中提供端口。
     pub forwarded_reg: Arc<std::sync::Mutex<HashMap<u32, mpsc::UnboundedSender<ForwardedTcpip>>>>,
     expected_host_key: Option<russh_keys::key::PublicKey>,
     host_key_check: Arc<std::sync::Mutex<HostKeyCheckState>>,
@@ -132,8 +132,8 @@ impl Handler for SshHandler {
         Ok(accepted)
     }
 
-    /// Remote forwarding: the server opens a channel for a new incoming connection.
-    /// Route it to the tunnel registered for this port; drop it if none.
+    /// 远程转发：服务器为新的入站连接打开通道。
+    /// 将其路由到为该端口注册的隧道；如果没有则丢弃。
     async fn server_channel_open_forwarded_tcpip(
         &mut self,
         channel: russh::Channel<russh::client::Msg>,
@@ -177,7 +177,7 @@ pub struct SshSession {
     pub forwarded_reg: Arc<std::sync::Mutex<HashMap<u32, mpsc::UnboundedSender<ForwardedTcpip>>>>,
 }
 
-/// Controls pause/stop for active file transfers (save-to-local).
+/// 控制活动文件传输的暂停或停止（保存到本地）。
 pub struct TransferControl {
     pub paused: AtomicBool,
     pub stopped: AtomicBool,
@@ -283,7 +283,7 @@ impl SshManager {
         self.sessions.write().unwrap().insert(session_id, session);
     }
 
-    // ponytail: sync session extraction — std RwLock, no await needed
+    // ponytail：同步提取会话；使用 std RwLock，无需 await
     pub fn get_session(&self, session_id: &str) -> Result<SshSession, String> {
         self.sessions.read().unwrap()
             .get(session_id)
@@ -301,7 +301,7 @@ impl SshManager {
         self.sessions.write().unwrap().remove(session_id)
     }
 
-    // Network operations — no lock required
+    // 网络操作；无需锁
     pub async fn do_connect(
         session_id: String,
         host: String,
@@ -322,13 +322,13 @@ impl SshManager {
         };
         let forwarded_reg = handler.forwarded_reg.clone();
         let mut ssh_config = client::Config::default();
-        // Detect dead connections via keepalive + inactivity timeout
+        // 通过 keepalive 和不活动超时检测失效连接
         ssh_config.keepalive_interval = Some(std::time::Duration::from_secs(10));
         ssh_config.keepalive_max = 3;
         ssh_config.inactivity_timeout = Some(std::time::Duration::from_secs(60));
         let config = Arc::new(ssh_config);
         let addr_str = format!("{}:{}", host, port);
-        // ponytail: 15s timeout for TCP+SSH handshake — prevents indefinite hang on unreachable servers
+        // ponytail：TCP+SSH 握手超时 15 秒，防止无法访问服务器时无限等待
         let mut sh = match tokio::time::timeout(
             std::time::Duration::from_secs(15),
             client::connect(config, &addr_str, handler),
@@ -352,7 +352,7 @@ impl SshManager {
         let trusted_host_key = trusted_host_key
             .ok_or_else(|| "SSH host key was not trusted".to_string())?;
 
-        // Authenticate
+        // 身份验证
         if let Some(ref kp) = key_path {
             let key = load_secret_key_protected(kp)?;
             let auth_result = tokio::time::timeout(
@@ -417,7 +417,7 @@ impl SshManager {
         let sid = session_id.clone();
         let ah = app_handle.clone();
 
-        // Background task: owns shell channel + handles channel open requests
+        // 后台任务：持有 shell 通道并处理通道打开请求
         tokio::spawn(async move {
             let mut handle_rx: Option<mpsc::Receiver<ChannelOpen>> = Some(handle_rx);
 
@@ -437,7 +437,7 @@ impl SshManager {
                                     "sessionId": sid,
                                     "reason": "Connection lost",
                                 }));
-                                // Close all tunnels for this session
+                                // 关闭此会话的所有隧道
                                 if let Some(tm) = ah.try_state::<Arc<tokio::sync::Mutex<TunnelManager>>>() {
                                     tm.lock().await.close_session_tunnels(&sid).await;
                                 }
@@ -539,7 +539,7 @@ impl SshManager {
         session_open_sftp(&session).await
     }
 
-    /// ponytail: invalidate cached SFTP session so next open_sftp creates a fresh one
+    /// ponytail：使缓存的 SFTP 会话失效，以便下一次 open_sftp 创建新会话
     pub fn sftp_reset(&self, session_id: &str) {
         if let Ok(session) = self.get_session(session_id) {
             if let Ok(mut cache) = session.sftp_cache.try_lock() {
@@ -565,18 +565,18 @@ impl SshManager {
                 "owner": meta.user.as_deref().unwrap_or(""),
             }));
         }
-        // Don't close SFTP session - keep it alive for reuse via cache
+        // 不要关闭 SFTP 会话；通过缓存保持连接以便复用
         serde_json::to_string(&files).map_err(|e| format!("JSON error: {}", e))
     }
 
-    /// Check if a path exists and return its type (file/dir)
+    /// 检查路径是否存在并返回其类型（文件/目录）
     pub async fn stat_file(&self, session_id: &str, path: &str) -> Result<serde_json::Value, String> {
         let sftp = self.open_sftp(session_id).await?;
         let meta = sftp.metadata(path).await
             .map_err(|e| format!("Path does not exist: {}", e))?;
         let is_dir = meta.is_dir();
         let is_symlink = meta.is_symlink();
-        // If not dir and not symlink, it's a file
+        // 如果既不是目录也不是符号链接，则为文件
         let is_file = !is_dir && !is_symlink;
         Ok(serde_json::json!({
             "exists": true,
@@ -595,7 +595,7 @@ impl SshManager {
         let mut content = Vec::new();
         file.read_to_end(&mut content).await
             .map_err(|e| format!("Failed to read file: {}", e))?;
-        // Don't close SFTP session - keep it alive for reuse via cache
+        // 不要关闭 SFTP 会话；通过缓存保持连接以便复用
         if content.len() > 1024 * 1024 {
             Ok(String::from_utf8_lossy(&content[..1024 * 1024]).to_string())
         } else {
@@ -612,7 +612,7 @@ impl SshManager {
             .map_err(|e| format!("Failed to write file: {}", e))?;
         file.shutdown().await
             .map_err(|e| format!("Failed to flush file: {}", e))?;
-        // Don't close SFTP session - keep it alive for reuse via cache
+        // 不要关闭 SFTP 会话；通过缓存保持连接以便复用
         Ok(())
     }
 
@@ -626,7 +626,7 @@ impl SshManager {
         Ok(format!("{}{}", stdout, stderr))
     }
 
-    /// Batch delete multiple files/directories in a single command
+    /// 批量删除多个文件或目录，只需执行一条命令
     pub async fn delete_files_batch(
         &self,
         session_id: &str,
@@ -637,7 +637,7 @@ impl SshManager {
             return Ok(String::new());
         }
 
-        // Build rm command: rm -rfv 'file1' 'file2' 'file3' ...
+        // 构建 rm 命令：rm -rfv 'file1' 'file2' 'file3' ...
         let escaped_paths: Vec<String> = paths
             .iter()
             .map(|p| format!("'{}'", p.replace('\'', "'\\''")))
@@ -657,7 +657,7 @@ impl SshManager {
         let sftp = self.open_sftp(session_id).await?;
         sftp.create_dir(path).await
             .map_err(|e| format!("Failed to create directory: {}", e))?;
-        // Don't close SFTP session - keep it alive for reuse via cache
+        // 不要关闭 SFTP 会话；通过缓存保持连接以便复用
         Ok(())
     }
 
@@ -665,11 +665,11 @@ impl SshManager {
         let sftp = self.open_sftp(session_id).await?;
         sftp.rename(old_path, new_path).await
             .map_err(|e| format!("Failed to rename: {}", e))?;
-        // Don't close SFTP session - keep it alive for reuse via cache
+        // 不要关闭 SFTP 会话；通过缓存保持连接以便复用
         Ok(())
     }
 
-    /// Batch rename multiple files using mv command
+    /// 使用 mv 命令批量重命名多个文件
     pub async fn rename_files_batch(
         &self,
         session_id: &str,
@@ -679,7 +679,7 @@ impl SshManager {
             return Ok(());
         }
 
-        // Use mv command for each rename (SFTP rename doesn't support batch)
+        // 对每个重命名操作使用 mv 命令（SFTP rename 不支持批量操作）
         for (old_path, new_path) in renames {
             let safe_old = old_path.replace('\'', "'\\''");
             let safe_new = new_path.replace('\'', "'\\''");
@@ -694,13 +694,13 @@ impl SshManager {
         Ok(())
     }
 
-    /// Batch copy/move multiple files using cp/mv command
+    /// 使用 cp/mv 命令批量复制或移动多个文件
     pub async fn copy_files_batch(
         &self,
         session_id: &str,
-        sources: &[String], // source paths
-        dest_dir: &str,     // destination directory
-        is_move: bool,      // true = mv, false = cp
+        sources: &[String], // 源路径
+        dest_dir: &str,     // 目标目录
+        is_move: bool,      // true = mv，false = cp
     ) -> Result<String, String> {
         if sources.is_empty() {
             return Ok(String::new());
@@ -794,7 +794,7 @@ impl SshManager {
         let mut channel = self.open_channel(session_id).await?;
         let safe_src = src.replace('\'', "'\\''");
         let safe_dst = dst.replace('\'', "'\\''");
-        // Use cp -rvT to copy directory contents directly (not into existing dir), verbose for progress
+        // 使用 cp -rvT 直接复制目录内容（不复制到已有目录中），并输出详细进度
         let cmd = format!("cp -rvT '{}' '{}' 2>&1", safe_src, safe_dst);
 
         let _ = app_handle.emit("copy-progress", serde_json::json!({
@@ -891,7 +891,7 @@ impl SshManager {
         }
     }
 
-    /// Batch set permissions for multiple files using chmod command
+    /// 使用 chmod 命令批量设置多个文件的权限
     pub async fn set_permissions_batch(
         &self,
         session_id: &str,
@@ -916,12 +916,12 @@ impl SshManager {
         Ok(())
     }
 
-    /// Check disk space, write permission, and existing files in a directory
+    /// 检查目录的磁盘空间、写权限和现有文件
     pub async fn check_space(&self, session_id: &str, path: &str) -> Result<String, String> {
         let mut channel = self.open_channel(session_id).await?;
         let safe = path.replace('\'', "'\\''");
-        // df -B1 gets available bytes; touch test checks write permission
-        // find -printf '%f|%y' outputs filename|type directly (d=dir, f=file, l=link)
+        // df -B1 获取可用字节数；touch 测试检查写权限
+        // find -printf '%f|%y' 直接输出 filename|type（d=目录，f=文件，l=链接）
         let cmd = format!(
             "df -B1 '{}' | tail -1 | awk '{{print $4}}'; echo '---'; touch '{}/.__wtest__' 2>&1 && rm '{}/.__wtest__' && echo 'OK' || echo 'DENIED'; echo '---'; find '{}' -maxdepth 1 -mindepth 1 -printf '%f|%y\n' | grep -v '^\\.|'",
             safe, safe, safe, safe
@@ -956,7 +956,7 @@ impl SshManager {
         Ok(output.trim().to_string())
     }
 
-    /// Compress files/folders into an archive on the remote server
+    /// 将文件或文件夹压缩为远程服务器上的归档文件
     pub async fn compress(
         &self,
         session_id: &str,
@@ -971,14 +971,14 @@ impl SshManager {
             return Err("No paths to compress".to_string());
         }
 
-        // Get the common parent directory and relative paths
+        // 获取公共父目录和相对路径
         let first_path = &paths[0];
         let parent_dir = std::path::Path::new(first_path)
             .parent()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or(".".to_string());
         
-        // Extract relative filenames from full paths
+        // 从完整路径中提取相对文件名
         let rel_names: Vec<String> = paths
             .iter()
             .map(|p| {
@@ -997,7 +997,7 @@ impl SshManager {
             .collect();
         let names_str = safe_names.join(" ");
 
-        // Use -C to change to parent directory, then use relative names
+        // 使用 -C 切换到父目录，然后使用相对名称
         let cmd = match format {
             "tar.gz" => format!("cd '{}' && tar -czvf '{}' {} 2>&1", safe_parent, safe_output, names_str),
             "zip" => format!("cd '{}' && zip -r '{}' {} 2>&1", safe_parent, safe_output, names_str),
@@ -1058,7 +1058,7 @@ impl SshManager {
             }
         }
 
-        // Emit completion
+        // 发送完成事件
         let _ = app_handle.emit("archive-progress", serde_json::json!({
             "sessionId": session_id,
             "line": "Compression completed.",
@@ -1068,7 +1068,7 @@ impl SshManager {
         Ok(())
     }
 
-    /// Extract an archive on the remote server
+    /// 在远程服务器上解压归档文件
     pub async fn extract(
         &self,
         session_id: &str,
@@ -1081,7 +1081,7 @@ impl SshManager {
         let safe_archive = archive_path.replace('\'', "'\\' '");
         let safe_dest = dest_dir.replace('\'', "'\\' '");
 
-        // Detect format by extension and extract directly to destination
+        // 根据扩展名检测格式，并直接解压到目标目录
         let cmd = if archive_path.ends_with(".tar.gz") || archive_path.ends_with(".tgz") {
             format!("tar -xzvf '{}' -C '{}' 2>&1", safe_archive, safe_dest)
         } else if archive_path.ends_with(".tar.bz2") || archive_path.ends_with(".tbz2") {
@@ -1096,7 +1096,7 @@ impl SshManager {
             return Err(format!("Unsupported archive format: {}", archive_path));
         };
 
-        // Execute extract command (tar/unzip will create dest dir if needed with -C/-d)
+        // 执行解压命令（tar/unzip 在需要时会通过 -C/-d 创建目标目录）
         channel
             .exec(true, cmd)
             .await
@@ -1151,17 +1151,17 @@ impl SshManager {
             }
         }
 
-        // Check if extraction was successful
+        // 检查解压是否成功
         if !exit_ok {
             return Err(format!("Extraction failed: {}", stderr.trim()));
         }
 
-        // Log any output for debugging (tar -v outputs to stderr)
+        // 记录调试输出（tar -v 输出到 stderr）
         if !stderr.trim().is_empty() {
             eprintln!("Extract output: {}", stderr.trim());
         }
 
-        // Emit completion
+        // 发送完成事件
         let _ = app_handle.emit("archive-progress", serde_json::json!({
             "sessionId": session_id,
             "line": "Extraction completed.",
@@ -1171,7 +1171,7 @@ impl SshManager {
         Ok(())
     }
 
-    /// Download a file from URL to remote path using curl, emitting progress events
+    /// 使用 curl 将 URL 中的文件下载到远程路径，并发送进度事件
     pub async fn download_file(
         &self,
         session_id: &str,
@@ -1182,7 +1182,7 @@ impl SshManager {
         let mut channel = self.open_channel(session_id).await?;
         let safe_dest = dest.replace('\'', "'\\''");
         let safe_url = url.replace('\'', "'\\''");
-        // Use -f to fail on HTTP errors, -S to show errors even with -s/-#
+        // 使用 -f 在 HTTP 错误时失败，使用 -S 即使配合 -s/-# 也显示错误
         let cmd = format!(
             "curl -L -f -S -# -o '{}' '{}'",
             safe_dest, safe_url
@@ -1204,7 +1204,7 @@ impl SshManager {
                             if ext == 1 {
                                 let chunk = String::from_utf8_lossy(&data);
                                 stderr_buf.push_str(&chunk);
-                                // curl -# outputs progress lines like: ## 45.2%
+                                // curl -# 输出类似 ## 45.2% 的进度行
                                 for line in chunk.split('\r') {
                                     let line = line.trim();
                                     if let Some(pct) = parse_curl_progress(line) {
@@ -1228,7 +1228,7 @@ impl SshManager {
             }
         }
 
-        // Send 100% on success
+        // 成功时发送 100%
         if exit_ok {
             let _ = app_handle.emit("download-progress", serde_json::json!({
                 "sessionId": session_id,
@@ -1237,7 +1237,7 @@ impl SshManager {
             }));
             Ok(())
         } else {
-            // Combine stdout and stderr for better error reporting
+            // 合并 stdout 和 stderr，以便更好地报告错误
             let full_error = format!("{}{}", stdout_buf.trim(), stderr_buf.trim());
             let _ = app_handle.emit("download-progress", serde_json::json!({
                 "sessionId": session_id,
@@ -1258,16 +1258,16 @@ impl SshManager {
     ) -> Result<(), String> {
         let channel = self.open_channel(session_id).await?;
 
-        // Explicitly request SFTP subsystem
+        // 显式请求 SFTP 子系统
         channel
             .request_subsystem(true, "sftp")
             .await
             .map_err(|e| format!("SFTP subsystem request failed: {}", e))?;
 
-        // Convert channel to stream for SFTP
+        // 将通道转换为 SFTP 流
         let stream = channel.into_stream();
 
-        // Create SFTP session with extended timeout
+        // 创建 SFTP 会话并使用更长的超时时间
         let config = russh_sftp::client::Config {
             max_packet_len: 64 * 1024,
             max_concurrent_writes: 8,
@@ -1282,7 +1282,7 @@ impl SshManager {
         let chunk_size = 32 * 1024; // 32KB chunks
         let mut sent: usize = 0;
 
-        // Use create() + chunked write for progress reporting
+        // 使用 create() 和分块写入来报告进度
         let mut file = sftp
             .create(remote_path)
             .await
@@ -1309,13 +1309,13 @@ impl SshManager {
         file.shutdown()
             .await
             .map_err(|e| format!("Failed to finalize: {}", e))?;
-        // Don't close SFTP session - keep it alive for reuse via cache
+        // 不要关闭 SFTP 会话；通过缓存保持连接以便复用
 
         Ok(())
     }
 
-    /// Write a single chunk at a given offset (for streaming upload)
-    /// ponytail: uses cached SFTP session — no new channel/subsystem per chunk
+    /// 写入指定偏移量处的单个数据块（用于流式上传）
+    /// ponytail：使用缓存的 SFTP 会话，每个数据块无需新建通道或子系统
     pub async fn upload_chunk(
         &self,
         session_id: &str,
@@ -1346,7 +1346,7 @@ impl SshManager {
     pub async fn disconnect(&self, session_id: &str) -> Result<(), String> {
         let session = self.sessions.write().unwrap().remove(session_id);
         if let Some(session) = session {
-            // Use timeout to avoid hanging on dead connections
+            // 使用超时，避免在失效连接上无限挂起
             let h = session.handle.clone();
             let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 let h = h.lock().await;
@@ -1362,7 +1362,7 @@ impl SshManager {
 
     pub async fn reconnect(&self, session_id: &str, app_handle: AppHandle) -> Result<(), String> {
         let info = self.get_connect_info(session_id).ok_or("Session not found")?;
-        // ponytail: use AppHandle from command context — self.app_handle is never initialised
+        // ponytail：使用命令上下文中的 AppHandle；self.app_handle 从未初始化
         self.disconnect(session_id).await.ok();
         let result = tokio::time::timeout(std::time::Duration::from_secs(40), self.connect(
             session_id.to_string(),
@@ -1451,7 +1451,7 @@ pub async fn session_delete_files_batch(session: &SshSession, paths: &[String], 
 }
 
 pub async fn session_create_dir(session: &SshSession, path: &str) -> Result<(), String> {
-    // ponytail: use `mkdir -p` via SSH exec — SFTP create_dir fails when parent dirs don't exist
+    // ponytail：通过 SSH exec 使用 `mkdir -p`；当父目录不存在时 SFTP create_dir 会失败
     let escaped = path.replace('\'', "'\\''");
     let (_, _, code) = session_exec_with_output(session, &format!("mkdir -p '{}'", escaped), 10).await?;
     if code != 0 { return Err(format!("mkdir -p failed with exit code {}", code)); }
@@ -1607,9 +1607,9 @@ pub async fn session_read_file_bytes(session: &SshSession, path: &str) -> Result
     Ok(content)
 }
 
-/// Stream remote file to local path in chunks — avoids holding manager lock and caps memory at 256KB.
-/// Emits `save-local-progress` events: { sessionId, uploaded, total }
-/// Supports pause/stop via TransferControl.
+/// 将远程文件分块流式传输到本地路径，避免持有管理器锁，并将内存限制在 256KB。
+/// 发送 `save-local-progress` 事件：{ sessionId, uploaded, total }
+/// 支持通过 TransferControl 暂停或停止。
 pub async fn session_stream_file_to_local(session: &SshSession, remote_path: &str, local_path: &str, app_handle: &AppHandle, session_id: &str, ctrl: Arc<TransferControl>) -> Result<(), String> {
     use tokio::io::AsyncReadExt;
     let sftp = session_open_sftp(session).await?;
@@ -1620,7 +1620,7 @@ pub async fn session_stream_file_to_local(session: &SshSession, remote_path: &st
     let mut buf = vec![0u8; 256 * 1024];
     let mut sent: u64 = 0;
     loop {
-        // ponytail: check stop/pause flags each chunk
+        // ponytail：每个数据块都检查停止或暂停标志
         if ctrl.stopped.load(Ordering::Relaxed) {
             drop(out);
             let _ = tokio::fs::remove_file(local_path).await;
@@ -1651,7 +1651,7 @@ pub async fn session_download_to_local(session: &SshSession, remote_path: &str, 
     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
     let local_path = temp_dir.join(file_name);
     let local_str = local_path.to_string_lossy().to_string();
-    // ponytail: image preview — no pause/stop needed, pass inert control
+    // ponytail：图片预览不需要暂停或停止，传入无操作控制对象
     let ctrl = Arc::new(TransferControl { paused: AtomicBool::new(false), stopped: AtomicBool::new(false) });
     session_stream_file_to_local(session, remote_path, &local_str, app_handle, session_id, ctrl).await?;
     let _ = open::that(&local_path);
@@ -1726,7 +1726,7 @@ pub async fn session_open_channel_and_exec(
 }
 
 pub async fn session_open_sftp(session: &SshSession) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
-    // Check cache
+    // 检查缓存
     {
         let cache = session.sftp_cache.lock().await;
         if let Some((sftp, created_at)) = cache.as_ref() {
@@ -1830,7 +1830,7 @@ mod tests {
 
     #[test]
     fn parse_curl_progress_percentage() {
-        // ponytail: function only handles simple 'N%' patterns; prefix like '#=#=#' is stripped upstream by split('\r')
+        // ponytail：此函数仅处理简单的 'N%' 模式；类似 '#=#=#' 的前缀已在上游通过 split('\r') 去除
         assert_eq!(parse_curl_progress("45.2%"), Some(45.2));
         assert_eq!(parse_curl_progress("100%"), Some(100.0));
         assert_eq!(parse_curl_progress("0.5%"), Some(0.5));
@@ -1859,7 +1859,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_ttl_zero_always_valid() {
-        // ttl_secs=0 means no expiry check
+        // ttl_secs=0 表示不检查过期
         let cache = SshCache::new();
         cache.put("s1", "k", "v".to_string());
         assert_eq!(cache.get("s1", "k", 0), Some("v".to_string()));

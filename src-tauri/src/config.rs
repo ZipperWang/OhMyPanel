@@ -173,7 +173,7 @@ pub struct Settings {
     pub reconnect_interval: u32,
     #[serde(default = "default_max_attempts")]
     pub max_reconnect_attempts: u32,
-    // ponytail: when true, tab is removed on disconnect; when false, tab stays alive (greyed out)
+    // ponytail: 当为 true 时，断开连接后移除标签页；否则保留标签（置灰）
     #[serde(default)]
     pub close_tab_on_disconnect: bool,
     #[serde(default = "default_cache_ttl")]
@@ -186,7 +186,7 @@ pub struct Settings {
     pub command_timeout_minutes: u32,
     #[serde(default = "default_upload_workers")]
     pub upload_workers: u32,
-    // ponytail: ui theme — 'light' (default) or 'dark'
+    // ponytail: 界面主题，取值 'light'（默认）或 'dark'
     #[serde(default = "default_theme")]
     pub theme: String,
 }

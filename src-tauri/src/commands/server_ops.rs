@@ -5,7 +5,7 @@ use server::*;
 
 // ===== Site Commands =====
 
-// ponytail: list sites directly from Nginx via SSH (10-min read cache)
+// ponytail：通过 SSH 直接从 Nginx 列出站点（10 分钟读取缓存）
 #[tauri::command]
 pub async fn server_list_sites(
     ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
@@ -18,7 +18,7 @@ pub async fn server_list_sites(
     let host = mgr.get_host(session_id).unwrap_or_default();
     drop(mgr);
     let mut sites = server::list_sites(&session, &cache, session_id).await?;
-    // ponytail: fix up creation times from DB after SSH call (db is not Send)
+    // ponytail：SSH 调用完成后从数据库修正创建时间（db 不具备 Send 能力）
     let conn = db.lock().map_err(|e| e.to_string())?;
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -420,7 +420,7 @@ pub async fn server_software_action(
     let session = mgr.get_session(session_id)?;
     let cache = mgr.cache.clone();
     drop(mgr);
-    // ponytail: read command timeout from settings, default 30 min
+    // ponytail：从设置中读取命令超时，默认 30 分钟
     let timeout_mins: u64 = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         conn.query_row("SELECT value FROM settings WHERE key = 'command_timeout_minutes'", [], |r| r.get::<_, String>(0))
@@ -826,7 +826,7 @@ pub async fn server_docker_set_mirror_config(
 
 // ===== Cache & Misc =====
 
-// ponytail: explicit cache invalidation from frontend
+// ponytail：由前端显式使缓存失效
 #[tauri::command]
 pub async fn server_cache_invalidate(
     ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
@@ -928,7 +928,7 @@ pub async fn server_check_installation(
     let mgr = ssh_mgr.lock().await;
     let session = mgr.get_session(session_id)?;
     drop(mgr);
-    // ponytail: check if login shell has active child processes (install script/tee)
+    // ponytail：检查登录 shell 是否有活动子进程（安装脚本或 tee）
     let (pid_out, _, _) = ssh::session_exec_with_output(
         &session,
         "test -f /tmp/ohmypanel-install.pid && pgrep -P $(cat /tmp/ohmypanel-install.pid) >/dev/null 2>&1 && test -f /tmp/ohmypanel-install.log && test \"$(find /tmp/ohmypanel-install.log -mmin -5 2>/dev/null)\" && echo RUNNING || (rm -f /tmp/ohmypanel-install.pid /tmp/ohmypanel-install.info; echo IDLE)",

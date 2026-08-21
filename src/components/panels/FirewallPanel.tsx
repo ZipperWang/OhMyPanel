@@ -27,7 +27,7 @@ interface FirewallPanelProps {
   sessionId: string | null
 }
 
-// Common service ports for one-click open/close
+// 常见服务端口，用于一键开启或关闭
 const QUICK_PORTS = [
   { port: '80', protocol: 'tcp', label: 'HTTP' },
   { port: '443', protocol: 'tcp', label: 'HTTPS' },
@@ -46,19 +46,19 @@ export default function FirewallPanel({ sessionId }: FirewallPanelProps) {
   const [actionLoading, setActionLoading] = useState('')
   const [notice, setNotice] = useState<{ type: 'success' | 'info', text: string } | null>(null)
 
-  // Add rule form
+  // 添加规则表单
   const [showAdd, setShowAdd] = useState(false)
   const [newPort, setNewPort] = useState('')
   const [newProtocol, setNewProtocol] = useState('tcp')
   const [newAction, setNewAction] = useState('allow')
   const [newSource, setNewSource] = useState('')
 
-  // Filters / interactions
+  // 过滤器和交互状态
   const [search, setSearch] = useState('')
   const [actionFilter, setActionFilter] = useState('all')
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  // Confirm dialogs
+  // 确认对话框
   const [confirmDelete, setConfirmDelete] = useState<FirewallRule | null>(null)
   const [toggling, setToggling] = useState(false)
   const [sshPortNotice, setSshPortNotice] = useState<string | null>(null)
@@ -261,14 +261,14 @@ export default function FirewallPanel({ sessionId }: FirewallPanelProps) {
 
       {notice && (
         <div className={`firewall-notice ${notice.type}`}>
-          <span>{notice.type === 'success' ? '✅ ' : 'ℹ️ '}{notice.text}</span>
+          <span>{notice.text}</span>
           <button className="firewall-notice-close" onClick={() => setNotice(null)}>✕</button>
         </div>
       )}
 
       {sshPortNotice && (
         <div className="firewall-notice" onClick={() => setSshPortNotice(null)}>
-          <span>🛡️ {sshPortNotice}</span>
+          <span>{sshPortNotice}</span>
           <button className="firewall-notice-close" onClick={(e) => { e.stopPropagation(); setSshPortNotice(null) }}>✕</button>
         </div>
       )}
@@ -277,7 +277,7 @@ export default function FirewallPanel({ sessionId }: FirewallPanelProps) {
 
       {info && (
         <>
-          {/* Status bar */}
+          {/* 状态栏 */}
           <div className="firewall-status">
             <span className={`firewall-badge ${info.firewall_type === 'none' ? 'none' : info.enabled ? 'active' : 'inactive'}`}>
               {info.firewall_type === 'none'
@@ -299,7 +299,7 @@ export default function FirewallPanel({ sessionId }: FirewallPanelProps) {
             )}
           </div>
 
-          {/* Stats cards */}
+          {/* 统计卡片 */}
           <div className="fw-stats">
             <div className="fw-stat-card total">
               <span className="fw-stat-num">{stats.total}</span>
@@ -319,7 +319,7 @@ export default function FirewallPanel({ sessionId }: FirewallPanelProps) {
             </div>
           </div>
 
-          {/* Quick ports */}
+          {/* 快速端口 */}
           {managed && info.enabled && (
             <div className="fw-quick-ports">
               <div className="fw-section-title">
@@ -348,7 +348,7 @@ export default function FirewallPanel({ sessionId }: FirewallPanelProps) {
             </div>
           )}
 
-          {/* Toolbar */}
+          {/* 工具栏 */}
           <div className="fw-toolbar">
             <input
               className="fw-search"
@@ -375,7 +375,7 @@ export default function FirewallPanel({ sessionId }: FirewallPanelProps) {
             )}
           </div>
 
-          {/* Add Rule Form */}
+          {/* 添加规则表单 */}
           {showAdd && managed && info.enabled && (
             <div className="firewall-add-form">
               <div className="firewall-form-row">
@@ -425,7 +425,7 @@ export default function FirewallPanel({ sessionId }: FirewallPanelProps) {
             </div>
           )}
 
-          {/* Rules Table */}
+          {/* 规则表格 */}
           {stats.total > 0 ? (
             filteredRules.length > 0 ? (
               <div className={`firewall-rules-table ${!info.enabled ? 'disabled' : ''}`}>
@@ -494,7 +494,7 @@ export default function FirewallPanel({ sessionId }: FirewallPanelProps) {
         </>
       )}
 
-      {/* Confirm Delete Dialog */}
+      {/* 确认删除对话框 */}
       {confirmDelete && (
         <div className="firewall-confirm-overlay" onClick={() => setConfirmDelete(null)}>
           <div className="firewall-confirm-dialog" onClick={(e) => e.stopPropagation()}>

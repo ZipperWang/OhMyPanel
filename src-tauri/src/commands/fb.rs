@@ -35,10 +35,10 @@ pub async fn fb_cache_get(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>
     let mgr = ssh_mgr.lock().await;
     let host = mgr.get_host(session_id).unwrap_or_default();
     let conn = db.lock().map_err(|e| e.to_string())?;
-    // ponytail: check if cache is enabled
+    // ponytail: 检查是否启用缓存
     let enabled: bool = conn.query_row("SELECT value FROM settings WHERE key = 'cache_enabled'", [], |r| r.get::<_, String>(0)).ok().and_then(|v| v.parse().ok()).unwrap_or(true);
     if !enabled { return Ok(None); }
-    // ponytail: read ttl from settings, default 24h
+    // ponytail: 从设置读取 ttl，默认 24 小时
     let ttl: u32 = conn.query_row("SELECT value FROM settings WHERE key = 'cache_ttl_hours'", [], |r| r.get::<_, String>(0)).ok().and_then(|v| v.parse().ok()).unwrap_or(24);
     Ok(FbDirCache::get(&conn, &host, path, ttl))
 }
@@ -55,7 +55,7 @@ pub async fn fb_cache_put(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>
     FbDirCache::put(&conn, &host, path, data)
 }
 
-// ponytail: touch cached_at without rewriting data
+// ponytail: 更新 cached_at，不重写数据内容
 #[tauri::command]
 pub async fn fb_cache_touch(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>, db: tauri::State<'_, DbPool>, session_id: &str, path: &str) -> Result<(), String> {
     let mgr = ssh_mgr.lock().await;
@@ -66,14 +66,14 @@ pub async fn fb_cache_touch(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>
     FbDirCache::touch(&conn, &host, path)
 }
 
-// ponytail: clear all directory cache
+// ponytail: 清空全部目录缓存
 #[tauri::command]
 pub async fn fb_cache_clear_all(db: tauri::State<'_, DbPool>) -> Result<u32, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     FbDirCache::clear_all(&conn)
 }
 
-// ponytail: count cached directories
+// ponytail: 统计缓存目录数量
 #[tauri::command]
 pub async fn fb_cache_count(db: tauri::State<'_, DbPool>) -> Result<u32, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
@@ -86,7 +86,7 @@ pub async fn fb_cache_count(db: tauri::State<'_, DbPool>) -> Result<u32, String>
 pub fn ui_state_get(db: tauri::State<'_, DbPool>, key: &str) -> Result<String, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.query_row("SELECT value FROM settings WHERE key = ?1", rusqlite::params![key], |row| row.get(0))
-        .map_err(|_| String::new()) // ponytail: return empty on not-found, simpler than Option
+        .map_err(|_| String::new()) // ponytail: 未命中时返回空字符串，简化 Option 处理
 }
 
 #[tauri::command]

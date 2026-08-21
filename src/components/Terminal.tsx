@@ -18,7 +18,7 @@ export interface TerminalHandle {
   clear: () => void
 }
 
-// GitHub Dark palette
+// GitHub 深色配色
 const XTERM_DARK_THEME = {
   background: '#0d1117',
   foreground: '#c9d1d9',
@@ -42,7 +42,7 @@ const XTERM_DARK_THEME = {
   brightWhite: '#f0f6fc',
 }
 
-// GitHub Light palette (used when theme = light)
+// GitHub 浅色配色（theme = light 时使用）
 const XTERM_LIGHT_THEME = {
   background: '#ffffff',
   foreground: '#1f2328',
@@ -71,14 +71,14 @@ export default forwardRef<TerminalHandle, TerminalProps>(function Terminal({ ses
   const termRef = useRef<XTerminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const sidRef = useRef(sessionId)
-  // ponytail: track selection state ourselves because ClipboardAddon may clear it before onData fires
+  // ponytail：自行跟踪选中状态，因为 ClipboardAddon 可能在 onData 触发前清除该状态
   const hasSelectionRef = useRef(false)
 
   useEffect(() => {
     sidRef.current = sessionId
   }, [sessionId])
 
-  // Initialize terminal
+  // 初始化终端
   useEffect(() => {
     if (!containerRef.current) return
 
@@ -96,13 +96,13 @@ export default forwardRef<TerminalHandle, TerminalProps>(function Terminal({ ses
     term.loadAddon(fitAddon)
     term.loadAddon(webLinksAddon)
     term.open(containerRef.current)
-    // ponytail: block all DECSET/DECRST mouse-tracking sequences so local text selection works
-    // Remote shells (bash/tmux/vim) send \e[?1000h etc. which capture mouse events
+    // ponytail：屏蔽所有 DECSET/DECRST 鼠标跟踪序列，使本地文本选择正常工作
+    // 远程 Shell（bash/tmux/vim）会发送 \e[?1000h 等序列来捕获鼠标事件
     const MOUSE_MODES = new Set([9, 1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1015])
     for (const final of ['h', 'l']) {
       term.parser.registerCsiHandler({ final, prefix: '?' }, (params) => {
         const p = Array.isArray(params[0]) ? params[0][0] : params[0]
-        if (MOUSE_MODES.has(p)) return true // block mouse tracking
+        if (MOUSE_MODES.has(p)) return true // 屏蔽鼠标跟踪
         return false
       })
     }
@@ -110,12 +110,12 @@ export default forwardRef<TerminalHandle, TerminalProps>(function Terminal({ ses
     const clipboardAddon = new ClipboardAddon()
     term.loadAddon(clipboardAddon)
 
-    // Track selection state for Ctrl+C copy logic
+    // 跟踪选中状态，用于 Ctrl+C 复制逻辑
     term.onSelectionChange(() => {
       hasSelectionRef.current = term.hasSelection()
     })
 
-    // ponytail: sync remote PTY size with xterm.js after every fit
+    // ponytail：每次 fit 后将远程 PTY 大小与 xterm.js 同步
     const syncSize = () => {
       const sid = sidRef.current
       if (sid) {
@@ -127,8 +127,8 @@ export default forwardRef<TerminalHandle, TerminalProps>(function Terminal({ ses
     term.onData((data) => {
       const sid = sidRef.current
       if (sid) {
-        // ponytail: when text is selected, Ctrl+C should copy only (not send interrupt)
-        // use our own ref because ClipboardAddon may have cleared term.hasSelection()
+        // ponytail：选中文本时，Ctrl+C 只执行复制（不发送中断信号）
+        // 使用自有 ref，因为 ClipboardAddon 可能已清除 term.hasSelection()
         if (data === '\x03' && hasSelectionRef.current) {
           navigator.clipboard.writeText(term.getSelection()).catch(() => {})
           term.clearSelection()
@@ -142,10 +142,10 @@ export default forwardRef<TerminalHandle, TerminalProps>(function Terminal({ ses
     termRef.current = term
     fitRef.current = fitAddon
 
-    // Expose sendCommand via ref
+    // 通过 ref 暴露 sendCommand
     // (done in separate useEffect below)
 
-    // Listen for SSH output
+    // 监听 SSH 输出
     const unlisten = listen<{ sessionId: string; data: string }>('ssh-output', (event) => {
       const sid = sidRef.current
       if (sid && event.payload.sessionId === sid) {
@@ -153,7 +153,7 @@ export default forwardRef<TerminalHandle, TerminalProps>(function Terminal({ ses
       }
     })
 
-    // Handle resize
+    // 处理大小调整
     const handleResize = () => {
       if (fitRef.current) {
         fitRef.current.fit()
@@ -169,7 +169,7 @@ export default forwardRef<TerminalHandle, TerminalProps>(function Terminal({ ses
     }
     window.addEventListener('resize', handleResize)
 
-    // Listen for connection closed
+    // 监听连接关闭
     const unlistenClosed = listen<string>('ssh-closed', (event) => {
       const sid = sidRef.current
       if (sid && event.payload === sid) {
@@ -199,14 +199,14 @@ export default forwardRef<TerminalHandle, TerminalProps>(function Terminal({ ses
     },
   }))
 
-  // ponytail: swap xterm palette live when the app theme changes
+  // ponytail：应用主题变化时实时切换 xterm 配色
   useEffect(() => {
     if (termRef.current) {
       termRef.current.options.theme = theme === 'light' ? XTERM_LIGHT_THEME : XTERM_DARK_THEME
     }
   }, [theme])
 
-  // Refit on session change + sync PTY
+  // 会话变化时重新适配并同步 PTY
   useEffect(() => {
     if (fitRef.current && termRef.current) {
       setTimeout(() => {
@@ -218,7 +218,7 @@ export default forwardRef<TerminalHandle, TerminalProps>(function Terminal({ ses
     }
   }, [sessionId])
 
-  // Refit when tab becomes active (was hidden with display:none) + sync PTY
+  // 标签页变为活动状态时重新适配（之前通过 display:none 隐藏）并同步 PTY
   useEffect(() => {
     if (isActive && fitRef.current && termRef.current) {
       setTimeout(() => {

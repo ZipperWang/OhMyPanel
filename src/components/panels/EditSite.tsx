@@ -76,7 +76,7 @@ export default function EditSite({
   onSaved: () => void
   onError: (msg: string) => void
 }) {
-  // Convert space-separated domains to newline-separated for textarea display
+  // 将以空格分隔的域名转换为换行分隔，以便在文本框中显示
   const { t } = useTranslation()
   const [domains, setDomains] = useState(site.domains.split(' ').filter(Boolean).join('\n'))
   const [root, setRoot] = useState(site.root)
@@ -90,14 +90,14 @@ export default function EditSite({
   const [subdirs, setSubdirs] = useState<string[]>([])
   const autoDetectRef = useRef(true)
 
-  // Resizable config editor popup
+  // 可调整大小的配置编辑器弹窗
   const [configEditorOpen, setConfigEditorOpen] = useState(false)
   const [configEditorContent, setConfigEditorContent] = useState('')
   const [configEditorLoading, setConfigEditorLoading] = useState(false)
   const [configEditorSaving, setConfigEditorSaving] = useState(false)
   const [configEditorMaximized, setConfigEditorMaximized] = useState(false)
 
-  // Hotlink tab - initialize from site data
+  // 防盗链标签页：从站点数据初始化
   const [hotlinkEnabled, setHotlinkEnabled] = useState(site.hotlink_enabled || false)
   const [hotlinkExtensions, setHotlinkExtensions] = useState(
     site.hotlink_extensions || 'jpg,jpeg,gif,png,js,css'
@@ -112,7 +112,7 @@ export default function EditSite({
     site.hotlink_allow_empty_referer || false
   )
 
-  // Reverse Proxy tab
+  // 反向代理标签页
   const [proxyEnabled, setProxyEnabled] = useState(false)
   const [proxyPath, setProxyPath] = useState('/')
   const [proxyTarget, setProxyTarget] = useState('http://127.0.0.1:3000')
@@ -129,14 +129,14 @@ export default function EditSite({
         console.error('Failed to load PHP versions:', err)
         onError(`Failed to load PHP versions: ${err}`)
       })
-    // Load existing config to populate indexFiles and rewriteRules
+    // 加载现有配置以填充 indexFiles 和 rewriteRules
     invoke<string>('server_read_remote_file', { sessionId, path: site.config_path })
       .then(text => {
         const indexMatch = text.match(/^\s*index\s+([^;]+);/m)
         if (indexMatch) setIndexFiles(indexMatch[1].trim().split(/\s+/).join('\n'))
         const rewriteMatch = text.match(/# Rewrite rules\n([\s\S]*?)\n\s*location ~ \.php/)
         if (rewriteMatch) setRewriteRules(rewriteMatch[1].replace(/^    /gm, '').trim())
-        // Detect existing reverse proxy config
+        // 检测现有的反向代理配置
         const proxyMatch = text.match(/# Reverse Proxy Start\s*\n\s*location\s+(\S+)\s*\{\s*\n\s*proxy_pass\s+(\S+);/)
         if (proxyMatch) {
           setProxyEnabled(true)
@@ -149,13 +149,13 @@ export default function EditSite({
       .catch(() => {})
   }, [sessionId])
 
-  // Load subdirectories when root changes or dialog opens
+  // 根目录变化或弹窗打开时加载子目录
   useEffect(() => {
     if (!root.trim()) { setSubdirs([]); return }
     invoke<string[]>('server_list_subdirs', { sessionId, path: root.trim() })
       .then(dirs => {
         setSubdirs(dirs)
-        // Auto-detect common framework dirs when running_dir is default "/"
+        // running_dir 为默认值 "/" 时自动检测常见框架目录
         if (autoDetectRef.current && (site.running_dir === '/' || !site.running_dir)) {
           const common = ['public', 'www', 'web', 'html']
           const match = common.find(d => dirs.includes(d))
@@ -172,7 +172,7 @@ export default function EditSite({
       return
     }
     
-    // Convert formats
+    // 转换格式
     const domainsStr = domains.trim().split('\n').map(d => d.trim()).filter(Boolean).join(' ')
     const indexStr = indexFiles.trim().split('\n').map(f => f.trim()).filter(Boolean).join(' ')
     const allowedDomainsStr = hotlinkDomains.trim()
@@ -211,7 +211,7 @@ export default function EditSite({
 
   return (
     <div className="sites-panel edit-site-page">
-      {/* Header */}
+      {/* 页头 */}
       <div className="edit-site-header">
         <button className="back-btn" onClick={onBack}>← {t('common.back')}</button>
         <h2>{t('sites.editSite', { domain: site.domain })}</h2>
@@ -225,9 +225,9 @@ export default function EditSite({
         </div>
       </div>
 
-      {/* Content - Single Page with Cards */}
+      {/* 内容：带卡片的单页 */}
       <div className="edit-content">
-        {/* Card 1: Basic Settings */}
+        {/* 卡片 1：基本设置 */}
         <div className="sp-card">
           <div className="sp-card-title">{t('sites.basicSettings')}</div>
           
@@ -286,7 +286,7 @@ export default function EditSite({
           </div>
         </div>
 
-        {/* Card 2: Directory Settings */}
+        {/* 卡片 2：目录设置 */}
         <div className="sp-card">
           <div className="sp-card-title">{t('sites.directorySettings')}</div>
           
@@ -317,7 +317,7 @@ export default function EditSite({
           </div>
         </div>
 
-        {/* Card 3: Rewrite Rules */}
+        {/* 卡片 3：重写规则 */}
         <div className="sp-card">
           <div className="sp-card-title">{t('sites.rewriteRules')}</div>
           
@@ -347,7 +347,7 @@ export default function EditSite({
           />
         </div>
 
-        {/* Card 4: Hotlink Protection */}
+        {/* 卡片 4：防盗链 */}
         <div className="sp-card">
           <div className="sp-card-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span>{t('sites.hotlinkProtection')}</span>
@@ -403,7 +403,7 @@ export default function EditSite({
           </label>
         </div>
 
-        {/* Card 5: Reverse Proxy */}
+        {/* 卡片 5：反向代理 */}
         <div className="sp-card">
           <div className="sp-card-title">{t('sites.reverseProxy')}</div>
           
@@ -444,7 +444,7 @@ export default function EditSite({
         </div>
       </div>
 
-      {/* Footer actions */}
+      {/* 页脚操作 */}
       <div className="edit-footer">
         <button className="fb-dialog-btn" onClick={onBack} disabled={saving}>
           {t('common.cancel')}
@@ -454,7 +454,7 @@ export default function EditSite({
         </button>
       </div>
 
-      {/* Resizable config editor overlay */}
+      {/* 可调整大小的配置编辑器覆盖层 */}
       {configEditorOpen && (
         <div className="fb-dialog-overlay" style={{ zIndex: 1100 }}>
           <div

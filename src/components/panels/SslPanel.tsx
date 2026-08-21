@@ -38,7 +38,7 @@ export default function SslPanel({ sessionId }: SslPanelProps) {
       const result = await invoke<SiteInfo[]>('server_list_sites', { sessionId })
       setSites(result)
     } catch {
-      // ignore
+      // 忽略
     } finally {
       setLoading(false)
     }
@@ -46,7 +46,7 @@ export default function SslPanel({ sessionId }: SslPanelProps) {
 
   useEffect(() => { fetchSites() }, [fetchSites])
 
-  // Listen for ssl-install-progress events
+  // 监听 ssl-install-progress 事件
   useEffect(() => {
     if (!sessionId) return
     const unlisten = listen<{ sessionId: string; domain: string; line: string; status: string }>(
@@ -70,7 +70,7 @@ export default function SslPanel({ sessionId }: SslPanelProps) {
     return () => { unlisten.then(fn => fn()) }
   }, [sessionId])
 
-  // Listen for ssl-installed events to refresh site list
+  // 监听 ssl-installed 事件以刷新站点列表
   useEffect(() => {
     if (!sessionId) return
     const unlisten = listen<{ sessionId: string; domain: string }>(
@@ -84,7 +84,7 @@ export default function SslPanel({ sessionId }: SslPanelProps) {
     return () => { unlisten.then(fn => fn()) }
   }, [sessionId, fetchSites])
 
-  // Auto-scroll log to bottom
+  // 自动将日志滚动到底部
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
@@ -97,7 +97,7 @@ export default function SslPanel({ sessionId }: SslPanelProps) {
     }))
     try {
       await invoke<string>('server_setup_ssl', { sessionId, domain })
-      // Notify other panels to refresh their site lists
+      // 通知其他面板刷新站点列表
       await emit('ssl-installed', { sessionId, domain })
     } catch (e) {
       setLogs(prev => {
@@ -118,7 +118,7 @@ export default function SslPanel({ sessionId }: SslPanelProps) {
     return <div className="sp-empty">{t('ssl.connectToManage')}</div>
   }
 
-  // Find domain with active log
+  // 查找有活动日志的域名
   const activeLog = Object.values(logs).find(l => l.status === 'installing')
     || Object.values(logs).find(l => l.status !== 'idle')
 

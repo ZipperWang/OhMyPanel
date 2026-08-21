@@ -35,7 +35,7 @@ pub async fn ssh_connect(
             .map_err(|e| format!("Stored SSH host key is invalid: {}", e))
     })
     .transpose()?;
-    // ponytail: network operations without lock — only acquire briefly to insert session
+    // ponytail：网络操作不持有锁；仅在插入会话时短暂获取锁
     let session = SshManager::do_connect(
         session_id.clone(),
         host,
@@ -74,7 +74,7 @@ pub async fn ssh_input(
     session_id: &str,
     data: &str,
 ) -> Result<(), String> {
-    // ponytail: extract session quickly, release lock before network operations
+    // ponytail：快速提取会话，在网络操作前释放锁
     let mgr = ssh_mgr.lock().await;
     let _session = mgr.get_session(session_id)?;
     drop(mgr);
@@ -100,7 +100,7 @@ pub async fn ssh_disconnect(
     tunnel_mgr: tauri::State<'_, Arc<AsyncMutex<TunnelManager>>>,
     session_id: &str,
 ) -> Result<(), String> {
-    // ponytail: timeout on lock acquisition — if another op holds the lock for 3s, force disconnect locally
+    // ponytail：获取锁设置超时；如果其他操作持锁 3 秒，则在本地强制断开
     match tokio::time::timeout(std::time::Duration::from_secs(3), ssh_mgr.lock()).await {
         Ok(mgr) => {
             mgr.cache.clear_session(session_id);
@@ -112,7 +112,7 @@ pub async fn ssh_disconnect(
             let mgr = ssh_mgr.lock().await;
             mgr.remove_session(session_id);
             drop(mgr);
-            // Close all tunnels for this session
+            // 关闭此会话的所有隧道
             tunnel_mgr.lock().await.close_session_tunnels(session_id).await;
             Ok(())
         }
@@ -227,7 +227,7 @@ pub async fn ssh_upload(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>, 
 
 #[tauri::command]
 pub async fn ssh_upload_chunk(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>, session_id: &str, remote_path: &str, data: Vec<u8>, offset: u64) -> Result<(), String> {
-    // ponytail: release SshManager lock before I/O — uses cached SFTP session
+    // ponytail：在 I/O 前释放 SshManager 锁；使用缓存的 SFTP 会话
     let session = { let mgr = ssh_mgr.lock().await; mgr.get_session(session_id)? };
     let sftp = ssh::session_open_sftp(&session).await?;
     use russh_sftp::protocol::OpenFlags;
@@ -251,7 +251,7 @@ pub async fn ssh_sftp_reset(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>
 
 #[tauri::command]
 pub async fn ssh_upload_files_batch(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>, app: tauri::AppHandle, session_id: &str, files: Vec<(String, Vec<u8>)>) -> Result<u32, String> {
-    // ponytail: get session under lock, then release lock for all I/O
+    // ponytail：在锁内获取会话，然后为所有 I/O 操作释放锁
     let session = { let mgr = ssh_mgr.lock().await; mgr.get_session(session_id)? };
     let sftp = ssh::session_open_sftp(&session).await?;
     let semaphore = Arc::new(tokio::sync::Semaphore::new(3));
@@ -281,7 +281,7 @@ pub async fn ssh_upload_files_batch(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<Ssh
 
 #[tauri::command]
 pub async fn ssh_create_dirs_batch(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>, session_id: &str, paths: Vec<String>) -> Result<(), String> {
-    // ponytail: release lock before SSH exec
+    // ponytail：在执行 SSH 命令前释放锁
     let session = { let mgr = ssh_mgr.lock().await; mgr.get_session(session_id)? };
     if paths.is_empty() { return Ok(()); }
     let escaped: Vec<String> = paths.iter().map(|p| format!("'{}'", p.replace('\'', "'\\''"))).collect();
@@ -291,7 +291,7 @@ pub async fn ssh_create_dirs_batch(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshM
     Ok(())
 }
 
-// ponytail: execute arbitrary SSH command — used for tar extraction after batch upload
+// ponytail：执行任意 SSH 命令；用于批量上传后的 tar 解压
 #[tauri::command]
 pub async fn ssh_exec(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>, session_id: &str, command: &str) -> Result<(String, String, i32), String> {
     let session = { let mgr = ssh_mgr.lock().await; mgr.get_session(session_id)? };
@@ -321,9 +321,9 @@ pub async fn ssh_save_as_local(ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManag
         None => return Err("Save cancelled".to_string()),
     };
     let local_str = local_path.to_string();
-    // ponytail: grab session then release lock — don't hold global mutex during transfer
+    // ponytail：获取会话后释放锁；传输期间不持有全局互斥锁
     let mgr = ssh_mgr.lock().await; let session = mgr.get_session(session_id)?; drop(mgr);
-    // Create transfer control for pause/stop support
+    // 创建用于支持暂停或停止的传输控制
     let ctrl = Arc::new(ssh::TransferControl { paused: std::sync::atomic::AtomicBool::new(false), stopped: std::sync::atomic::AtomicBool::new(false) });
     { let mgr = ssh_mgr.lock().await; *mgr.transfer_ctrl.lock().unwrap() = Some(ctrl.clone()); }
     let result = ssh::session_stream_file_to_local(&session, remote_path, &local_str, &app, session_id, ctrl).await;
@@ -378,9 +378,9 @@ pub async fn ssh_reconnect(
     app: tauri::AppHandle,
     session_id: &str,
 ) -> Result<(), String> {
-    // Close all tunnels for this session (old connection is being dropped)
+    // 关闭此会话的所有隧道（旧连接即将被丢弃）
     tunnel_mgr.lock().await.close_session_tunnels(session_id).await;
-    // ponytail: reconnect modifies sessions map, needs mgr lock briefly for disconnect/connect
+    // ponytail：重连会修改 sessions 映射，因此断开或连接时需要短暂获取 mgr 锁
     let mgr = ssh_mgr.lock().await;
     mgr.reconnect(session_id, app).await
 }

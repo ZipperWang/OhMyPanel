@@ -43,7 +43,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
   const logEndRef = useRef<HTMLDivElement>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Config editor state
+  // 配置编辑器状态
   const [configEditorOpen, setConfigEditorOpen] = useState(false)
   const [configEditorContent, setConfigEditorContent] = useState('')
   const [configEditorLoading, setConfigEditorLoading] = useState(false)
@@ -52,9 +52,9 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
   const [configEditorMaximized, setConfigEditorMaximized] = useState(false)
   const [configEditorPath, setConfigEditorPath] = useState('')
 
-  // ponytail: all version selectors removed — system package manager handles versions
+  // ponytail：已移除所有版本选择器，由系统包管理器处理版本
 
-  // PHP version selection modal state
+  // PHP 版本选择弹窗状态
   const [phpVersionModalOpen, setPhpVersionModalOpen] = useState(false)
   const [sourceCompile] = useState(false)
   const [dockerSourceModal, setDockerSourceModal] = useState<SoftwareInfo | null>(null)
@@ -64,14 +64,14 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
   const [versionsLoading, setVersionsLoading] = useState(false)
   const [versionsError, setVersionsError] = useState('')
 
-  // MySQL version selection modal state
+  // MySQL 版本选择弹窗状态
   const [mysqlVersionModalOpen, setMysqlVersionModalOpen] = useState(false)
   const [availableMysqlVersions, setAvailableMysqlVersions] = useState<MysqlVariant[]>([])
   const [selectedMysqlVersion, setSelectedMysqlVersion] = useState('')
   const [mysqlVersionsLoading, setMysqlVersionsLoading] = useState(false)
   const [mysqlVersionsError, setMysqlVersionsError] = useState('')
 
-  // Package sources management state
+  // 软件包源管理状态
   const [sourcesModalOpen, setSourcesModalOpen] = useState(false)
   const [removableSources, setRemovableSources] = useState<string[]>([])
   const [selectedSources, setSelectedSources] = useState<string[]>([])
@@ -81,7 +81,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
   const [cleanLogs, setCleanLogs] = useState<string[]>([])
   const [cleanLogStatus, setCleanLogStatus] = useState<'running' | 'done' | 'error' | null>(null)
 
-  // Add source modal state
+  // 添加软件包源弹窗状态
   const [addSourceModalOpen, setAddSourceModalOpen] = useState(false)
   const [addSourceName, setAddSourceName] = useState('')
   const [addSourceUrl, setAddSourceUrl] = useState('')
@@ -89,7 +89,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
   const [addSourceLoading, setAddSourceLoading] = useState(false)
   const [addSourceError, setAddSourceError] = useState('')
 
-  // Custom software state
+  // 自定义软件状态
   const [customSoftware, setCustomSoftware] = useState<SoftwareInfo[]>([])
   const [addCustomModalOpen, setAddCustomModalOpen] = useState(false)
   const [addCustomName, setAddCustomName] = useState('')
@@ -105,13 +105,13 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
       const list = await invoke<SoftwareInfo[]>('custom_software_list', { sessionId })
       setCustomSoftware(list)
     } catch {
-      // ponytail: silently ignore — custom software is supplementary
+      // ponytail：静默忽略，自定义软件属于补充功能
     }
   }
 
   const loadSoftware = async () => {
     if (!sessionId) return
-    // ponytail: don't setState('loading') here — keep old data visible during reload to avoid flash
+    // ponytail：这里不设置 state 为 'loading'，重新加载期间保留旧数据以避免闪烁
     setError('')
     try {
       const list = await invoke<SoftwareInfo[]>('server_get_software_list', { sessionId })
@@ -124,7 +124,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
     loadCustomSoftware()
   }
 
-  // ponytail: polling function for installation recovery
+  // ponytail：用于恢复安装的轮询函数
   const startPolling = () => {
     if (pollingRef.current) return
     let pollErrors = 0
@@ -138,22 +138,22 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
           setLogs(lines)
         } else {
           if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
-          // ponytail: show final log when install completes
+          // ponytail：安装完成时显示最终日志
           if (result.log) {
             setLogs(result.log.split('\n').filter(l => l.trim()))
           }
-          setLogs(prev => [...prev, '✅ Installation process ended'])
+          setLogs(prev => [...prev, 'Installation process ended'])
           setLogStatus('done')
-          // ponytail: update actionLabel when recovery completes
+          // ponytail：恢复完成时更新 actionLabel
           const actionText = result.action === 'install' ? 'Installed' : 'Uninstalled'
           setActionLabel(result.displayName ? `${actionText} ${result.displayName}` : 'Completed')
-          // ponytail: don't call loadSoftware() here - let user click "Done - Refresh" button
+          // ponytail：这里不调用 loadSoftware()，让用户点击“完成 - 刷新”按钮
         }
       } catch {
         pollErrors++
         if (pollErrors >= 3) {
           if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
-          setLogs(prev => [...prev, '⚠️ Connection lost during recovery, please check manually'])
+          setLogs(prev => [...prev, 'Connection lost during recovery, please check manually'])
           setLogStatus('error')
           setActionLabel('Connection lost')
         }
@@ -163,7 +163,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
 
   useEffect(() => {
     if (!sessionId) return
-    // check for running installation before loading software list
+    // 加载软件列表前检查是否有正在运行的安装
     invoke<{ running: boolean; log: string; action: string; displayName: string }>('server_check_installation', { sessionId })
       .then(result => {
         if (result.running) {
@@ -173,7 +173,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
             setLogs([t('software.recoveringProgress')])
           }
           setLogStatus('running')
-          // ponytail: build actionLabel from recovered action/displayName info
+          // ponytail：根据恢复的 action/displayName 信息构建 actionLabel
           const actionText = result.action === 'install' ? 'Installing' : 'Uninstalling'
           setActionLabel(result.displayName ? `${actionText} ${result.displayName}...` : t('software.recoveringProgress'))
           setState('running')
@@ -188,7 +188,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
     }
   }, [sessionId])
 
-  // Listen for progress events
+  // 监听进度事件
   useEffect(() => {
     if (!sessionId) return
     const unlisten = listen<{ sessionId: string; line: string; status: string }>(
@@ -206,7 +206,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
     return () => { unlisten.then(fn => fn()) }
   }, [sessionId])
 
-  // Listen for raw terminal output
+  // 监听原始终端输出
   useEffect(() => {
     if (!sessionId) return
     const unlisten = listen<{ sessionId: string; rawOutput: string }>(
@@ -219,7 +219,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
     return () => { unlisten.then(fn => fn()) }
   }, [sessionId])
 
-  // Listen for sources action progress events
+  // 监听软件包源操作进度事件
   useEffect(() => {
     if (!sessionId) return
     const unlisten = listen<{ sessionId: string; line: string; status: string }>(
@@ -244,7 +244,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
   const handleAction = async (sw: SoftwareInfo, action: 'install' | 'uninstall', options = '') => {
     if (!sessionId) return
     let opts = options
-    // ponytail: options passed from caller (e.g. docker source, php version)
+    // ponytail：调用方传入的选项（例如 Docker 源、PHP 版本）
     setState('running')
     setLogs([`${action === 'install' ? 'Installing' : 'Uninstalling'} ${sw.display_name}...`])
     setLogStatus('running')
@@ -287,7 +287,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
       if (versions.length === 0) {
         setVersionsError(t('software.noVersionsAvailable'))
       } else {
-        setSelectedVersion(versions[versions.length - 1]) // default to latest
+        setSelectedVersion(versions[versions.length - 1]) // 默认选择最新版本
       }
     } catch (e) {
       setVersionsError(`${t('software.queryFailed')}: ${String(e)}`)
@@ -296,7 +296,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
     }
   }
 
-  // Load removable sources
+  // 加载可移除的软件包源
   const handleManageSourcesClick = async () => {
     if (!sessionId) return
     setSourcesLoading(true)
@@ -313,7 +313,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
     }
   }
 
-  // Remove selected sources
+  // 移除选中的软件包源
   const handleRemoveSelectedSources = async () => {
     if (!sessionId || selectedSources.length === 0) return
     try {
@@ -328,7 +328,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
     }
   }
 
-  // Add new source
+  // 添加新的软件包源
   const handleAddSource = async () => {
     if (!sessionId || !addSourceName.trim() || !addSourceUrl.trim()) return
     setAddSourceLoading(true)
@@ -351,7 +351,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
     }
   }
 
-  // Clean and update sources
+  // 清理并更新软件包源
   const handleCleanAndUpdateSources = async () => {
     if (!sessionId) return
     setCleaningSources(true)
@@ -370,7 +370,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
   const handleConfirmPHPInstall = async () => {
     if (!sessionId || !selectedVersion) return
     setPhpVersionModalOpen(false)
-    // ponytail: source compile mode passes "source:X.Y" as options
+    // ponytail：源码编译模式将 "source:X.Y" 作为 options 传递
     const opts = sourceCompile ? `source:${selectedVersion}` : selectedVersion
     setState('running')
     setLogs([`${sourceCompile ? t('software.compilingPHPSource', { version: selectedVersion }) : t('software.installingPHPVersion', { version: selectedVersion })}`])
@@ -403,7 +403,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
       if (versions.length === 0) {
         setMysqlVersionsError(t('software.noMysqlVersionsAvailable'))
       } else {
-        // Default to mariadb if available, otherwise first available
+        // 如果可用则默认选择 mariadb，否则选择第一个可用项
         const mariadb = versions.find(v => v.variant === 'mariadb')
         setSelectedMysqlVersion(mariadb ? mariadb.variant : versions[0].variant)
       }
@@ -496,7 +496,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
   }
 
   const getConfigPath = (sw: SoftwareInfo): string => {
-    // ponytail: config file paths for each software
+    // ponytail：各软件的配置文件路径
     switch (sw.name) {
       case 'nginx': return '/etc/nginx/nginx.conf'
       case 'mysql': return '/etc/mysql/my.cnf'
@@ -546,7 +546,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         content: configEditorContent,
       })
       setConfigEditorOpen(false)
-      // Reload software list to reflect changes
+      // 重新加载软件列表以反映变化
       setTimeout(loadSoftware, 500)
     } catch (e) {
       setError(String(e))
@@ -561,7 +561,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
 
   const categories = [
     { key: 'web', label: t('software.webServer') },
-    // ponytail: database category restored (only MySQL/MariaDB removed, Redis/PostgreSQL/Memcached kept)
+    // ponytail：恢复数据库分类（仅移除 MySQL/MariaDB，保留 Redis/PostgreSQL/Memcached）
     { key: 'database', label: t('software.database') },
     { key: 'runtime', label: t('software.runtime') },
     { key: 'tools', label: t('software.tools') },
@@ -603,7 +603,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* Running state - show logs */}
+      {/* 运行状态 - 显示日志 */}
       {state === 'running' && (
         <div className="sw-running">
           <div className="sw-running-header">
@@ -616,12 +616,12 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
           </div>
           <div className="sw-log-box">
             {logs.map((line, i) => {
-              // Determine log line type for styling
+              // 确定日志行类型以应用样式
               const isError = line.includes('ERROR') || line.includes('failed') || line.startsWith('E:') || line.includes('fatal')
               const isCommand = line.startsWith('Executing:') || line.startsWith('Script preview:')
-              const isSuccess = line.includes('ACTION_SUCCESS') || line.includes('completed successfully') || line.includes('✅')
+              const isSuccess = line.includes('ACTION_SUCCESS') || line.includes('completed successfully')
               const isSeparator = line.includes('━━━')
-              const isKeyError = line.trim().startsWith('🔍') || line.trim().startsWith('   ')
+              const isKeyError = line.startsWith('Key errors found') || line.startsWith('   ')
               const isPkgLock = line.includes('Waiting for package manager lock')
               
               let lineClass = 'sw-log-line'
@@ -640,7 +640,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
             <div ref={logEndRef} />
           </div>
           
-          {/* Raw terminal output collapsible section */}
+          {/* 原始终端输出折叠区域 */}
           {logStatus === 'error' && (
             <details className="sw-error-details">
               <summary className="sw-error-details-summary">
@@ -665,7 +665,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* Package Sources Management Card */}
+      {/* 软件包源管理卡片 */}
       {(state === 'ready' || state === 'error') && (
         <div className="sw-sources-card">
           <div className="sw-sources-header">
@@ -683,7 +683,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* Cleaning Sources Progress */}
+      {/* 清理软件包源进度 */}
       {cleaningSources && (
         <div className="sw-running" style={{ marginTop: '16px', marginBottom: '16px' }}>
           <div className="sw-running-header">
@@ -713,7 +713,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* Software grid */}
+      {/* 软件网格 */}
       {(state === 'ready' || state === 'error') && software.length > 0 && (
         <div className="sw-categories">
           {categories.map(cat => {
@@ -832,7 +832,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                       </div>
                     </div>
                   ))}
-                  {/* ponytail: Install PHP Version card removed */}
+                  {/* ponytail：已移除“安装 PHP 版本”卡片 */}
                 </div>
               </div>
             )
@@ -840,7 +840,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* Confirm dialog */}
+      {/* 确认对话框 */}
       {confirmAction && (
         <div className="sw-confirm-overlay" onClick={() => setConfirmAction(null)}>
           <div className="sw-confirm-dialog" onClick={e => e.stopPropagation()}>
@@ -872,7 +872,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* PHP Version Selection Modal */}
+      {/* PHP 版本选择弹窗 */}
       {phpVersionModalOpen && (
         <div className="sw-confirm-overlay" onClick={() => setPhpVersionModalOpen(false)}>
           <div className="sw-confirm-dialog" onClick={e => e.stopPropagation()}>
@@ -884,7 +884,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
               <div className="sw-confirm-warning" style={{ color: 'var(--red)' }}>{versionsError}</div>
             ) : (
               <>
-                {/* Install method toggle — ponytail: source compile hidden, package only */}
+                {/* 安装方式切换，ponytail：隐藏源码编译，仅支持软件包安装 */}
                 <div style={{ marginBottom: '12px', display: 'flex', gap: '8px' }}>
                   <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--green-bg)', background: 'rgba(35,134,54,0.1)', cursor: 'pointer' }}>
                     <input type="radio" name="phpInstallMethod" checked readOnly />
@@ -937,7 +937,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* MySQL Version Selection Modal */}
+      {/* MySQL 版本选择弹窗 */}
       {mysqlVersionModalOpen && (
         <div className="sw-confirm-overlay" onClick={() => setMysqlVersionModalOpen(false)}>
           <div className="sw-confirm-dialog" onClick={e => e.stopPropagation()}>
@@ -1005,7 +1005,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* Docker Source Selection Modal */}
+      {/* Docker 源选择弹窗 */}
       {dockerSourceModal && (
         <div className="sw-confirm-overlay" onClick={() => setDockerSourceModal(null)}>
           <div className="sw-confirm-dialog" onClick={e => e.stopPropagation()}>
@@ -1036,7 +1036,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* Manage Sources Modal */}
+      {/* 管理软件包源弹窗 */}
       {sourcesModalOpen && (
         <div className="sw-confirm-overlay" onClick={() => setSourcesModalOpen(false)}>
           <div className="sw-confirm-dialog" onClick={e => e.stopPropagation()}>
@@ -1105,7 +1105,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* Add Source Modal */}
+      {/* 添加软件包源弹窗 */}
       {addSourceModalOpen && (
         <div className="sw-confirm-overlay" onClick={() => setAddSourceModalOpen(false)}>
           <div className="sw-confirm-dialog" onClick={e => e.stopPropagation()}>
@@ -1180,7 +1180,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* Custom Software Confirm Dialog */}
+      {/* 自定义软件确认对话框 */}
       {customConfirmAction && (
         <div className="sw-confirm-overlay" onClick={() => setCustomConfirmAction(null)}>
           <div className="sw-confirm-dialog" onClick={e => e.stopPropagation()}>
@@ -1219,7 +1219,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* Add Custom Software Modal */}
+      {/* 添加自定义软件弹窗 */}
       {addCustomModalOpen && (
         <div className="sw-confirm-overlay" onClick={() => setAddCustomModalOpen(false)}>
           <div className="sw-confirm-dialog" onClick={e => e.stopPropagation()}>
@@ -1295,7 +1295,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
         </div>
       )}
 
-      {/* Apache Config Editor */}
+      {/* Apache 配置编辑器 */}
       {configEditorOpen && (
         <div className="fb-dialog-overlay" style={{ zIndex: 1100 }} onClick={() => setConfigEditorOpen(false)}>
           <div

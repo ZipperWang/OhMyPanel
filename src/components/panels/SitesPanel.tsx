@@ -44,19 +44,19 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
 
-  // Search
+  // 搜索
   const [searchQuery, setSearchQuery] = useState('')
 
-  // Delete dialog
+  // 删除对话框
   const [deleteTarget, setDeleteTarget] = useState<SiteInfo | null>(null)
   const [removeFiles, setRemoveFiles] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [confirmDomain, setConfirmDomain] = useState('')
 
-  // Edit target
+  // 编辑目标
   const [editTarget, setEditTarget] = useState<SiteInfo | null>(null)
 
-  // Progress logs for site creation (shared across views)
+  // 站点创建进度日志（在视图之间共享）
   const [progressLogs, setProgressLogs] = useState<string[]>([])
 
   const openEdit = (site: SiteInfo) => {
@@ -64,10 +64,10 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
     setView('edit')
   }
 
-  // Toggle toast notification
+  // 切换 Toast 通知
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  // ponytail: nginx status flag — true means not installed or not running
+  // ponytail：nginx 状态标志，true 表示未安装或未运行
   const [nginxDown, setNginxDown] = useState(false)
 
   const fetchSites = useCallback(async () => {
@@ -79,10 +79,10 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
         invoke<SiteInfo[]>('server_list_sites', { sessionId }),
         invoke<{ name: string; installed: boolean; running: boolean }[]>('server_get_software_list', { sessionId }),
       ])
-      // Sort by creation time descending (newest first), based on config file mtime
+      // 按创建时间倒序排列（最新的在前），依据配置文件 mtime
       list.sort((a, b) => b.created_at - a.created_at)
       setSites(list)
-      // ponytail: check nginx status — show banner if not installed or not running
+      // ponytail：检查 nginx 状态，未安装或未运行时显示横幅
       const nginx = softwareList.find(s => s.name.toLowerCase() === 'nginx')
       if (!nginx || !nginx.installed || !nginx.running) {
         setNginxDown(true)
@@ -96,12 +96,12 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
     }
   }, [sessionId, t])
 
-  // ponytail: fetch on mount, and refetch each time panel becomes visible
+  // ponytail：挂载时获取数据，并在面板每次变为可见时重新获取
   useEffect(() => {
     if (visible !== false) fetchSites()
   }, [visible, fetchSites])
 
-  // Listen for site creation progress events (always active)
+  // 监听站点创建进度事件（始终保持活动）
   useEffect(() => {
     if (!sessionId) return
     
@@ -119,7 +119,7 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
     }
   }, [sessionId])
 
-  // Listen for SSL installation events to refresh site list
+  // 监听 SSL 安装事件以刷新站点列表
   useEffect(() => {
     if (!sessionId) return
     
@@ -127,7 +127,7 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
       'ssl-installed',
       (event) => {
         if (event.payload.sessionId === sessionId) {
-          // Refresh the site list to update SSL status
+          // 刷新站点列表以更新 SSL 状态
           fetchSites()
         }
       }
@@ -141,7 +141,7 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
   const handleDelete = async () => {
     if (!deleteTarget || !sessionId) return
     
-    // Validate domain input (case-insensitive)
+    // 验证域名输入（不区分大小写）
     if (confirmDomain.trim().toLowerCase() !== deleteTarget.domain.toLowerCase()) {
       setError('输入的域名与目标域名不匹配')
       setTimeout(() => setError(''), 3000)
@@ -219,12 +219,12 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
 
       {error && <div className="svc-error">{error}</div>}
 
-      {/* Nginx not running warning banner */}
+      {/* Nginx 未运行警告横幅 */}
       {nginxDown && view === 'list' && (
         <ServiceUnavailable serviceName="Nginx" onNavigate={onNavigateToSoftware} />
       )}
 
-      {/* Edit page */}
+      {/* 编辑页面 */}
       {view === 'edit' && editTarget ? (
         <EditSite
           sessionId={sessionId!}
@@ -254,7 +254,6 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
             <div className="svc-loading">{t('sites.loadingSites')}</div>
           ) : sites.length === 0 ? (
             <div className="sites-empty">
-              <div className="sites-empty-icon">🌐</div>
               <p>{t('sites.noSites')}</p>
               <button className="svc-cfg-btn primary" onClick={() => setView('create')}>
                 {t('sites.createFirst')}
@@ -311,13 +310,13 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
                       {t('common.edit')}
                     </button>
                   </div>
-                  {/* Delete button - positioned at bottom right */}
+                  {/* 删除按钮，位于右下角 */}
                   <button
                     className="site-delete-btn"
                     onClick={() => { setDeleteTarget(site); setRemoveFiles(false) }}
-                    title="Delete site"
+                    title={t('common.delete')}
                   >
-                    🗑️
+                    {t('common.delete')}
                   </button>
                 </div>
               ))}
@@ -327,7 +326,7 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
         </>
       )}
 
-      {/* Delete confirmation dialog */}
+      {/* 删除确认对话框 */}
       {deleteTarget && (
         <div className="fb-dialog-overlay">
           <div className="fb-dialog fb-delete-site-dialog" onClick={(e) => e.stopPropagation()}>
@@ -340,21 +339,20 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
               title="关闭"
             >×</button>
             
-            {/* Warning header */}
+            {/* 警告页头 */}
             <div className="delete-warning-header">
-              <span className="warning-icon">️</span>
               <div className="warning-title">
                 <h3>{t('sites.deleteSiteTitle', { domain: deleteTarget.domain })}</h3>
                 <p>{t('sites.deleteWarning')}</p>
               </div>
             </div>
             
-            {/* Info box */}
+            {/* 信息框 */}
             <div className="delete-info-box">
               {t('sites.deleteInfo', { domain: deleteTarget.domain })}
             </div>
             
-            {/* Domain confirmation input */}
+            {/* 域名确认输入框 */}
             <div className="confirm-input-section">
               <label className="confirm-label">
                 {t('sites.typeDomainConfirm')}
@@ -369,12 +367,12 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
               />
               {confirmDomain.trim() && confirmDomain.trim().toLowerCase() !== deleteTarget.domain.toLowerCase() && (
                 <div className="input-error-msg">
-                  ⚠️ {t('sites.domainMismatch')}
+                  {t('sites.domainMismatch')}
                 </div>
               )}
             </div>
             
-            {/* Delete files option */}
+            {/* 删除文件选项 */}
             <label className="site-delete-files-option enhanced">
               <input
                 type="checkbox"
@@ -387,7 +385,7 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
               </div>
             </label>
             
-            {/* Action buttons */}
+            {/* 操作按钮 */}
             <div className="fb-dialog-actions">
               <button 
                 className="fb-dialog-btn cancel-btn"
@@ -411,7 +409,7 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
         </div>
       )}
 
-      {/* Toggle toast notification */}
+      {/* 切换 Toast 通知 */}
       {toast && (
         <div className={`toast-notification toast-${toast.type}`} onClick={() => setToast(null)}>
           <span className="toast-icon">{toast.type === 'success' ? '✓' : '✕'}</span>
@@ -443,7 +441,7 @@ function CreateSiteForm({
   const [useSsl, setUseSsl] = useState(false)
   const [creating, setCreating] = useState(false)
 
-  // Nginx install prompt dialog (unused, kept for future use)
+  // Nginx 安装提示对话框（未使用，为将来保留）
   const [_showNginxPrompt, _setShowNginxPrompt] = useState(false)
   const [createDb, setCreateDb] = useState(false)
   const [dbName, setDbName] = useState('')
@@ -473,7 +471,7 @@ function CreateSiteForm({
       return
     }
     
-    // Check if Nginx is installed before creating site
+    // 创建站点前检查是否已安装 Nginx
     try {
       const softwareList = await invoke<any[]>('server_get_software_list', { sessionId })
       const nginx = softwareList.find(s => s.name === 'nginx' || s.name === 'Nginx')
@@ -482,13 +480,13 @@ function CreateSiteForm({
         return
       }
     } catch (e) {
-      // If check fails, continue with creation (let backend handle it)
+      // 检查失败时继续创建（交由后端处理）
       console.error('Failed to check Nginx status:', e)
     }
     
     setCreating(true)
     try {
-      // Switch to progress view before starting creation
+      // 开始创建前切换到进度视图
       onViewProgress?.()
       
       const result = await invoke<string>('server_create_site', {
@@ -504,17 +502,17 @@ function CreateSiteForm({
         dbUser: createDb ? dbUser.trim() : '',
         dbPass: createDb ? dbPass : '',
       })
-      // Show result (might be partial success with SSL warning)
+      // 显示结果（可能是带 SSL 警告的部分成功）
       if (result.includes('but SSL') || result.includes('but database')) {
         onError(result)
       }
-      // Don't auto-jump, stay on progress page for user to review
+      // 不自动跳转，停留在进度页面供用户查看
     } catch (e) {
       const errMsg = String(e)
-      // Check if error is about nginx not installed
+      // 检查错误是否与 nginx 未安装有关
       if (errMsg.toLowerCase().includes('nginx') && errMsg.toLowerCase().includes('install')) {
         _setShowNginxPrompt(true)
-        // ponytail: Install LNMP removed, just show prompt without auto-navigate
+        // ponytail：已移除 LNMP 安装功能，仅显示提示，不自动导航
       } else {
         onError(errMsg)
       }
@@ -657,7 +655,7 @@ function CreateSiteForm({
   )
 }
 
-// Progress display page (similar to SoftwareRepo)
+// 进度显示页面（类似 SoftwareRepo）
 function CreateSiteProgress({
   logs,
   onBack,
@@ -672,12 +670,12 @@ function CreateSiteProgress({
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
 
-  // Show back button only when creation is complete or has error
+  // 仅在创建完成或发生错误时显示返回按钮
   const hasError = logs.some(line => line.includes('ERROR') || line.includes('failed'))
   const isComplete = logs.length > 0 && !hasError && logs.some(line => line.toLowerCase().includes('successfully') || line.toLowerCase().includes('completed'))
   const showBackButton = isComplete || hasError
 
-  // Check if a line should be displayed in red (error/warning messages)
+  // 检查一行是否应以红色显示（错误或警告消息）
   const isErrorLine = (line: string) => {
     return line.includes('ERROR') || 
            line.includes('failed') || 

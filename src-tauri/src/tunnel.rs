@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::ssh::{ForwardedTcpip, SshSession};
 
-/// Tunnel types supported
+/// 支持的隧道类型
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TunnelType {
@@ -18,7 +18,7 @@ pub enum TunnelType {
     Dynamic,
 }
 
-/// Tunnel configuration
+/// 隧道配置
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TunnelConfig {
     pub tunnel_type: TunnelType,
@@ -29,7 +29,7 @@ pub struct TunnelConfig {
     pub note: String,
 }
 
-/// Active tunnel info
+/// 活跃隧道信息
 #[derive(Debug)]
 pub struct ActiveTunnel {
     pub id: String,
@@ -39,7 +39,7 @@ pub struct ActiveTunnel {
     pub shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
-/// Tunnel info for frontend
+/// 提供给前端的隧道信息
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TunnelInfo {
     pub id: String,
@@ -54,7 +54,7 @@ pub struct TunnelInfo {
     pub note: String,
 }
 
-/// Structured tunnel error so the frontend can show a localized message.
+/// 结构化隧道错误，便于前端显示本地化消息。
 /// `code` is a stable key the UI maps to an i18n string; `target` is the host:port involved.
 pub struct TunnelError {
     pub code: String,
@@ -63,7 +63,7 @@ pub struct TunnelError {
 }
 
 impl TunnelError {
-    /// Map a russh channel-open failure to a translatable code.
+    /// 将 russh 打开通道失败映射为可翻译的错误代码。
     fn from_channel_open(e: &russh::Error, target: String) -> Self {
         let code = match e {
             russh::Error::ChannelOpenFailure(russh::ChannelOpenFailure::ConnectFailed) => {
@@ -81,7 +81,7 @@ impl TunnelError {
         }
     }
 
-    /// Build an error without a target host:port (used for SOCKS5 greeting failures).
+    /// 构建不带目标 host:port 的错误（用于 SOCKS5 握手失败）。
     fn plain(code: &str, raw: String) -> Self {
         Self {
             code: code.into(),
@@ -111,9 +111,9 @@ impl From<&str> for TunnelError {
     }
 }
 
-/// Manages SSH tunnels
+/// 管理 SSH 隧道
 pub struct TunnelManager {
-    /// Arc so spawned tunnel tasks can remove themselves on exit (no zombie entries).
+    /// 使用 Arc，以便生成的隧道任务退出时移除自身（避免留下僵尸条目）。
     tunnels: Arc<Mutex<HashMap<String, ActiveTunnel>>>,
 }
 
@@ -124,10 +124,9 @@ impl TunnelManager {
         }
     }
 
-    /// Create a new tunnel. `tunnel_id` is supplied by the caller so restored
-    /// tunnels keep the same persisted id. `created_at` is optional: pass
-    /// `Some(ts)` when restoring so the tunnel keeps its original position in
-    /// the list; pass `None` for brand-new tunnels.
+    /// 创建新隧道。`tunnel_id` 由调用方提供，以便恢复的隧道保留相同的持久化 ID。
+    /// `created_at` 是可选的：恢复隧道时传入 `Some(ts)`，使隧道在列表中的原始位置保持不变；
+    /// 新建隧道传入 `None`。
     pub async fn create_tunnel(
         &self,
         tunnel_id: String,
@@ -153,7 +152,7 @@ impl TunnelManager {
             shutdown_tx: Some(shutdown_tx),
         };
 
-        // Snapshot for spawned tasks: they remove their entry when exiting
+        // 为生成的任务创建快照：任务退出时会移除对应条目
         let tunnels_reg = self.tunnels.clone();
 
         match config.tunnel_type {
@@ -205,7 +204,7 @@ impl TunnelManager {
         Ok(tunnel_id)
     }
 
-    /// Start a local port forwarding tunnel (ssh -L)
+    /// 启动本地端口转发隧道（ssh -L）
     #[allow(clippy::too_many_arguments)]
     async fn start_local_tunnel(
         &self,
@@ -243,7 +242,7 @@ impl TunnelManager {
                                 let session_id = session_id.clone();
 
                                 tokio::spawn(async move {
-                                    // Open a direct-tcpip channel
+                                    // 打开 direct-tcpip 通道
                                     let handle = session.handle.lock().await;
                                     let channel = handle
                                         .channel_open_direct_tcpip(
@@ -302,7 +301,7 @@ impl TunnelManager {
                     }
                 }
             }
-            // Self-cleanup: remove entry so the frontend list stays accurate
+            // 自清理：移除条目，确保前端列表保持准确
             tunnels_reg.lock().await.remove(&tunnel_id);
             let _ = app_handle.emit("tunnel-status", serde_json::json!({
                 "tunnelId": tunnel_id,
@@ -314,7 +313,7 @@ impl TunnelManager {
         Ok(())
     }
 
-    /// Start a remote port forwarding tunnel (ssh -R)
+    /// 启动远程端口转发隧道（ssh -R）
     #[allow(clippy::too_many_arguments)]
     async fn start_remote_tunnel(
         &self,
@@ -326,7 +325,7 @@ impl TunnelManager {
         app_handle: AppHandle,
         tunnels_reg: Arc<Mutex<HashMap<String, ActiveTunnel>>>,
     ) -> Result<(), String> {
-        // Request the server to listen on the remote port
+        // 请求服务器监听远程端口
         let handle = session.handle.clone();
         let mut handle_guard = handle.lock().await;
         let mut bound_port = handle_guard
@@ -335,16 +334,15 @@ impl TunnelManager {
             .map_err(|e| format!("Remote forward request denied: {}", e))?;
         drop(handle_guard);
 
-        // russh returns 0 when the server confirms a specific requested port:
-        // RFC 4254 §7.1 — the SSH_MSG_REQUEST_SUCCESS reply carries no port
-        // number in that case, and russh maps it to 0. Fall back to the
-        // requested port so forwarded connections are routed to us correctly.
+        // 当服务器确认了指定的请求端口时，russh 会返回 0：
+        // RFC 4254 §7.1：此时 SSH_MSG_REQUEST_SUCCESS 响应不包含端口号，russh 会将其映射为 0。
+        // 回退使用请求的端口，确保转发连接能正确路由到我们这里。
         if bound_port == 0 {
             bound_port = config.remote_port as u32;
         }
 
-        // Register ourselves: the SshHandler routes server-side forwarded
-        // connections to us via this channel, keyed by the server port.
+        // 注册当前转发：SshHandler 通过此通道将服务器端的转发连接
+        // 路由到我们这里，并以服务器端口作为索引。
         let (fwd_tx, mut fwd_rx) = mpsc::unbounded_channel::<ForwardedTcpip>();
         session.forwarded_reg.lock().unwrap().insert(bound_port, fwd_tx);
 
@@ -368,7 +366,7 @@ impl TunnelManager {
                         let local_host = local_host.clone();
                         let session_id = session_id.clone();
                         tokio::spawn(async move {
-                            // Connect to the local service and splice both directions
+                            // 连接本地服务，并拼接两个方向的数据流
                             match TcpStream::connect(format!("{}:{}", local_host, local_port)).await {
                                 Ok(mut local) => {
                                     let mut ch = conn.channel.into_stream();
@@ -397,7 +395,7 @@ impl TunnelManager {
                     }
                 }
             }
-            // Unregister + cancel the forward request
+            // 取消注册并取消转发请求
             session.forwarded_reg.lock().unwrap().remove(&bound_port);
             let handle = session.handle.lock().await;
             let _ = handle.cancel_tcpip_forward(&remote_host, bound_port).await;
@@ -413,7 +411,7 @@ impl TunnelManager {
         Ok(())
     }
 
-    /// Start a dynamic (SOCKS5) tunnel (ssh -D)
+    /// 启动动态（SOCKS5）隧道（ssh -D）
     #[allow(clippy::too_many_arguments)]
     async fn start_dynamic_tunnel(
         &self,
@@ -485,22 +483,22 @@ impl TunnelManager {
         Ok(())
     }
 
-    /// SOCKS5 handshake + forward. Supports CONNECT with IPv4/domain/IPv6 targets.
-    /// ponytail: no-auth method only — matches typical SSH -D usage.
+    /// SOCKS5 握手并转发。支持使用 IPv4、域名和 IPv6 目标执行 CONNECT。
+    /// ponytail：仅支持无认证方法，与常见的 SSH -D 用法一致。
     async fn handle_socks5(mut tcp: TcpStream, session: SshSession) -> Result<(), TunnelError> {
         // --- greeting: VER NMETHODS METHODS... ---
-        // Read VER with a timeout: idle probes (connect-and-hang) can't pile up tasks.
+        // 读取 VER 并设置超时：空闲探测（连接后挂起）不能持续堆积任务。
         let mut ver = [0u8; 1];
         let read_ok = tokio::time::timeout(Duration::from_secs(10), tcp.read_exact(&mut ver))
             .await
             .map(|r| r.is_ok())
             .unwrap_or(false);
         if !read_ok {
-            // EOF/reset/idle: probe noise (port scanners, health checks) — close silently.
+            // EOF、重置或空闲：这是端口扫描器、健康检查等探测噪声，静默关闭。
             return Ok(());
         }
         if ver[0] != 0x05 {
-            // Classify the wrong-protocol traffic so the UI can give a targeted hint.
+            // 对错误协议流量进行分类，以便 UI 提供针对性的提示。
             let first = ver[0];
             return Err(match first {
                 0x04 => TunnelError::plain("socks4", "client used SOCKS4".into()),
@@ -519,13 +517,13 @@ impl TunnelManager {
         }
         let mut nm = [0u8; 1];
         if tcp.read_exact(&mut nm).await.is_err() {
-            // Half handshake (sent VER then disconnected) — also probe noise.
+            // 半握手（发送 VER 后断开）同样属于探测噪声。
             return Ok(());
         }
         let nmethods = nm[0] as usize;
         let mut methods = vec![0u8; nmethods];
         tcp.read_exact(&mut methods).await.map_err(|e| format!("methods: {}", e))?;
-        // Reply: no authentication
+        // 回复：无需身份验证
         tcp.write_all(&[0x05, 0x00]).await.map_err(|e| format!("reply: {}", e))?;
 
         // --- request: VER CMD RSV ATYP ADDR PORT ---
@@ -535,7 +533,7 @@ impl TunnelManager {
             return Err("Bad SOCKS5 version".into());
         }
         if req[1] != 0x01 {
-            // rep=0x07 (command not supported)
+            // rep=0x07（不支持的命令）
             let _ = tcp.write_all(&[0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await;
             return Err("Only CONNECT is supported".into());
         }
@@ -574,7 +572,7 @@ impl TunnelManager {
         let mut ch = match channel {
             Ok(ch) => ch.into_stream(),
             Err(e) => {
-                // Tell the SOCKS5 client: connection refused (matches ssh -D behavior)
+                // 告知 SOCKS5 客户端：连接被拒绝（与 ssh -D 的行为一致）
                 let _ = tcp.write_all(&[0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await;
                 return Err(TunnelError::from_channel_open(&e, format!("{}:{}", host, port)));
             }
@@ -589,7 +587,7 @@ impl TunnelManager {
         Self::forward_bidirectional(&mut tcp, &mut ch).await.map_err(Into::into)
     }
 
-    /// Forward data bidirectionally between TCP stream and SSH channel
+    /// 在 TCP 流和 SSH 通道之间双向转发数据
     async fn forward_bidirectional<S1, S2>(
         tcp: &mut S1,
         ssh: &mut S2,
@@ -635,7 +633,7 @@ impl TunnelManager {
         Ok(())
     }
 
-    /// Close a tunnel
+    /// 关闭隧道
     pub async fn close_tunnel(&self, tunnel_id: &str) -> Result<(), String> {
         if let Some(mut tunnel) = self.tunnels.lock().await.remove(tunnel_id) {
             if let Some(tx) = tunnel.shutdown_tx.take() {
@@ -645,7 +643,7 @@ impl TunnelManager {
         Ok(())
     }
 
-    /// Close all tunnels for a session
+    /// 关闭会话的所有隧道
     pub async fn close_session_tunnels(&self, session_id: &str) {
         let mut tunnels = self.tunnels.lock().await;
         let to_remove: Vec<String> = tunnels
@@ -662,7 +660,7 @@ impl TunnelManager {
         }
     }
 
-    /// List all active tunnels
+    /// 列出所有活跃隧道
     pub async fn list_tunnels(&self) -> Vec<TunnelInfo> {
         self.tunnels
             .lock()
@@ -687,7 +685,7 @@ impl TunnelManager {
             .collect()
     }
 
-    /// Get tunnel by ID
+    /// 按 ID 获取隧道
     pub async fn get_tunnel(&self, tunnel_id: &str) -> Option<TunnelInfo> {
         self.tunnels
             .lock()
@@ -711,8 +709,8 @@ impl TunnelManager {
             })
     }
 
-    /// Update the note of an active tunnel in memory. No-op when the tunnel is
-    /// not running (stopped): the caller still persists the change to the DB.
+    /// 仅更新内存中活跃隧道的备注。隧道未运行（已停止）时不执行任何操作；
+    /// 调用方仍会将更改持久化到数据库。
     pub async fn update_note(&self, tunnel_id: &str, note: String) -> Result<(), String> {
         let mut tunnels = self.tunnels.lock().await;
         if let Some(tunnel) = tunnels.get_mut(tunnel_id) {

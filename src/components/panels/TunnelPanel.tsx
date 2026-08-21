@@ -208,7 +208,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
     })
     const unlistenError = listen<TunnelErrorPayload>('tunnel-error', (event) => {
       const { code, target, error, sessionId: errSessionId } = event.payload
-      // Ignore errors from tunnels belonging to other server connections
+      // 忽略属于其他服务器连接的隧道错误
       if (errSessionId && errSessionId !== sessionId) return
       if (code === 'connect_failed' && target) {
         setError(t('tunnel.errors.connectFailed', { target }))
@@ -501,7 +501,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
 
   return (
     <div className="panel-container">
-      {/* Header */}
+      {/* 页头 */}
       <div className="panel-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <h2>{t('tunnel.title')}</h2>
@@ -521,7 +521,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
         </div>
       </div>
 
-      {/* Messages */}
+      {/* 消息 */}
       {msg && (
         <div className="alert alert-success">{msg}</div>
       )}
@@ -529,7 +529,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
         <div className="alert alert-error">{error}</div>
       )}
 
-      {/* What is a tunnel — plain-language intro */}
+      {/* 什么是隧道：通俗介绍 */}
       <div style={{
         background: 'var(--bg)',
         border: '1px solid var(--border)',
@@ -538,11 +538,11 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
         marginBottom: '16px',
       }}>
         <p style={{ fontSize: '13px', color: 'var(--text)', margin: '0 0 10px 0', lineHeight: 1.6 }}>
-          💡 {t('tunnel.whatIs')}
+          {t('tunnel.whatIs')}
         </p>
       </div>
 
-      {/* Quick Actions */}
+      {/* 快速操作 */}
       <div className="toolbar">
         <span style={{ fontSize: '13px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
           {t('tunnel.quickActions')}
@@ -558,7 +558,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
         ))}
       </div>
 
-      {/* Tunnel Table */}
+      {/* 隧道表格 */}
       <div className="table-wrapper">
         <table className="data-table">
           <thead>
@@ -767,7 +767,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
         </table>
       </div>
 
-      {/* Batch actions — bottom-left of the list, always visible, grey until selection */}
+      {/* 批量操作，位于列表左下角，始终可见，未选择时显示为灰色 */}
       <div style={{ display: 'flex', justifyContent: 'flex-start', gap: '8px', marginTop: '12px' }}>
         <button
           className="btn-secondary"
@@ -805,7 +805,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
         </button>
       </div>
 
-      {/* Create Dialog */}
+      {/* 创建对话框 */}
       {showCreate && (
         <div className="modal-overlay">
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -816,7 +816,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
             >×</button>
             <h3>{t('tunnel.create')}</h3>
 
-            {/* Tunnel Type */}
+            {/* 隧道类型 */}
             <div className="form-group">
               <div style={{ display: 'flex', gap: '6px' }}>
                 {(['local', 'remote', 'dynamic'] as TunnelType[]).map(type => (
@@ -848,7 +848,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
               </div>
             </div>
 
-            {/* Local Settings */}
+            {/* 本地设置 */}
             <div className="form-row">
               <div className="form-group">
                 <label>{t('tunnel.localHost')}:</label>
@@ -874,7 +874,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
               </div>
             </div>
 
-            {/* Remote Settings */}
+            {/* 远程设置 */}
             {tunnelType !== 'dynamic' && (
               <div className="form-row">
                 <div className="form-group">
@@ -902,12 +902,12 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
               </div>
             )}
 
-            {/* GatewayPorts — public access check for server forwarding */}
+            {/* GatewayPorts：服务器转发的公网访问检查 */}
             {tunnelType === 'remote' && (
               <div className="form-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '4px' }}>
                   <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text)' }}>
-                    🌐 {t('tunnel.gatewayPortsDialogTitle')}
+                    {t('tunnel.gatewayPortsDialogTitle')}
                   </span>
                 </div>
 
@@ -956,7 +956,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
                     borderRadius: '6px', padding: '10px 12px', flexWrap: 'wrap',
                   }}>
                     <span style={{ fontSize: '12px', color: 'var(--red)', lineHeight: 1.6, minWidth: 0 }}>
-                      ⚠ {t('tunnel.gatewayPortsDialogOffWarn')}{' '}
+                      {t('tunnel.gatewayPortsDialogOffWarn')}{' '}
                       <span
                         role="link"
                         style={{ color: 'var(--accent)', cursor: 'pointer', textDecoration: 'underline', whiteSpace: 'nowrap' }}
@@ -986,7 +986,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
               </div>
             )}
 
-            {/* Inline validation hints */}
+            {/* 内联验证提示 */}
             {currentForm.localPort && !isValidPort(currentForm.localPort) && (
               <div style={{ color: 'var(--red)', fontSize: '12px' }}>{t('tunnel.invalidPort')}</div>
             )}
@@ -994,7 +994,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
               <div style={{ color: 'var(--yellow)', fontSize: '12px' }}>{t('tunnel.portInUse')}</div>
             )}
 
-            {/* Note */}
+            {/* 备注 */}
             <div className="form-group">
               <label>{t('tunnel.note')}:</label>
               <input
@@ -1007,7 +1007,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
               />
             </div>
 
-            {/* Description */}
+            {/* 描述 */}
             <div style={{
               fontSize: '12px',
               color: 'var(--text-muted)',
@@ -1044,7 +1044,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
         </div>
       )}
 
-      {/* GatewayPorts Reconnect Confirmation Dialog */}
+      {/* GatewayPorts 重连确认对话框 */}
       {showReconnectConfirm && (
         <div className="modal-overlay" onClick={() => !reconnecting && setShowReconnectConfirm(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -1090,7 +1090,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
         </div>
       )}
 
-      {/* Delete Confirmation Dialog */}
+      {/* 删除确认对话框 */}
       {deleteTarget && (
         <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -1153,7 +1153,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
         </div>
       )}
 
-      {/* Batch Delete Confirmation Dialog */}
+      {/* 批量删除确认对话框 */}
       {deleteBatchTarget && (
         <div className="modal-overlay" onClick={() => setDeleteBatchTarget(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
