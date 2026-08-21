@@ -77,7 +77,7 @@
     "serviceUnavailable": "{{name}} が未インストールまたは停止しています。ソフトウェアリポジトリでインストールまたは起動してください。"
   },
   "welcome": {
-    "title": "LeePanel へようこそ",
+    "title": "OhMyPanel へようこそ",
     "subtitle": "強力な SSH サーバー管理アシスタント",
     "secureConnections": "セキュア接続",
     "fileManagement": "ファイル管理",
@@ -494,7 +494,7 @@
     "connectToView": "サーバーに接続してダッシュボードを表示",
     "loadingSystem": "システム情報を読み込み中...",
     "cores": "コア",
-    "welcome": "LeePanel へようこそ"
+    "welcome": "OhMyPanel へようこそ"
   },
   "database": {
     "title": "データベース管理",
@@ -743,7 +743,7 @@
     "updateReadyTitle": "更新準備完了",
     "updateInstalled": "v{{version}} がインストールされました。後でアプリを再起動して更新を適用してください。",
     "updateTimedOut": "更新確認がタイムアウトしました。後でもう一度お試しください。",
-    "updateManualDownload": "自動更新できない場合は、公式サイト https://www.LeePanel.com から最新バージョンをダウンロードしてください。",
+    "updateManualDownload": "自動更新できない場合は、公式サイト https://github.com/ZipperWang/OhMyPanel/releases から最新バージョンをダウンロードしてください。",
     "fetchingVersion": "バージョン情報を取得中...",
     "clearingProxy": "プロキシをクリアして再試行中...",
     "updateFailedHint": "更新に失敗した場合：",
@@ -1013,16 +1013,16 @@
     "mysqlVersionInfo": "Available version: {{version}}"
   },
   "about": {
-    "title": "LeePanel について",
-    "line1": "LeePanel — 無料オープンソース、次世代 Linux サーバー管理パネル。",
+    "title": "OhMyPanel について",
+    "line1": "OhMyPanel — 無料オープンソース、次世代 Linux サーバー管理パネル。",
     "line2": "従来の Linux/VPS 管理パネルは頻繁にセキュリティ脆弱性に悩まされ、サーバー管理者を苦しめてきました。",
-    "line3": "LeePanelはこの問題を根本的に解決するために生まれました。",
+    "line3": "OhMyPanelはこの問題を根本的に解決するために生まれました。",
     "line4": "️ サーバー側コードゼロ — すべての操作はローカルマシンからの SSH コマンドで実行されます。サーバーにパネルコードをインストールせず、余分なポートを公開せず、パネル自身のセキュリティリスクを根絶します。",
     "line5": "Tauri 2 + React で構築された軽量クロスプラットフォームデスクトップアプリで、単一のネイティブクライアントで管理：SSH ターミナル & SFTP ファイル管理、Nginx / MySQL/MariaDB / PHP / Redis / Docker、ファイアウォール / 無料 SSL 証明書。",
     "line6": "インストーラーわずか 6 MB — 軽量で柔軟！従来のブラウザベースパネルを完全に置き換えます。",
     "line7": "ご意見やご要望は",
     "github": "GitHub Discussions まで",
-    "line8": "公式サイト: https://www.LeePanel.com"
+    "line8": "公式サイト: https://github.com/ZipperWang/OhMyPanel"
   },
   "logs": {
     "title": "サイトログ",

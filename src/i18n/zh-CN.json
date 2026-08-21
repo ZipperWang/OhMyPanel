@@ -77,7 +77,7 @@
     "serviceUnavailable": "{{name}} 未安装或已停止，请前往软件仓库页面安装或开启。"
   },
   "welcome": {
-    "title": "欢迎使用 LeePanel",
+    "title": "欢迎使用 OhMyPanel",
     "subtitle": "您强大的 SSH 服务器管理助手",
     "secureConnections": "安全连接",
     "fileManagement": "文件管理",
@@ -501,7 +501,7 @@
     "connectToView": "连接服务器以查看仪表盘",
     "loadingSystem": "加载系统信息中...",
     "cores": "核",
-    "welcome": "欢迎使用 LeePanel"
+    "welcome": "欢迎使用 OhMyPanel"
   },
   "database": {
     "title": "数据库管理",
@@ -750,7 +750,7 @@
     "updateReadyTitle": "更新就绪",
     "updateInstalled": "v{{version}} 已安装。请稍后重启应用以应用更新。",
     "updateTimedOut": "检查更新超时，请稍后重试。",
-    "updateManualDownload": "如果无法自动更新，请到官网 https://www.LeePanel.com 下载最新版本。",
+    "updateManualDownload": "如果无法自动更新，请到官网 https://github.com/ZipperWang/OhMyPanel/releases 下载最新版本。",
     "fetchingVersion": "正在获取版本信息...",
     "clearingProxy": "正在清除代理并重试...",
     "updateFailedHint": "如果更新失败：",
@@ -1042,16 +1042,16 @@
     "installMore": "安装更多"
   },
   "about": {
-    "title": "关于 LeePanel",
-    "line1": "LeePanel — 免费开源，下一代 Linux 服务器管理面板。",
+    "title": "关于 OhMyPanel",
+    "line1": "OhMyPanel — 免费开源，下一代 Linux 服务器管理面板。",
     "line2": "传统 Linux/VPS 管理面板频繁曝出安全漏洞，令服务器管理员苦不堪言。",
-    "line3": "LeePanel 为此而生。",
+    "line3": "OhMyPanel 为此而生。",
     "line4": "🛡️ 零服务端代码 — 所有操作均通过本地 SSH 命令完成，服务器上**不安装**任何面板代码，**不暴露**多余端口，从根源消除面板自身的安全风险。",
     "line5": "基于 Tauri 2 + React 构建的轻量跨平台桌面应用，以单一原生客户端统一管理：SSH 终端 & SFTP 文件管理、Nginx / MySQL/MariaDB / PHP / Redis / Docker、防火墙 / 免费 SSL 证书。",
     "line6": "安装包最小仅 6 MB 起，灵活小巧！彻底取代传统浏览器面板。",
     "line7": "使用过程中如有任何建议或意见，欢迎前往",
     "github": "GitHub Discussions 交流反馈",
-    "line8": " 官网: https://www.LeePanel.com"
+    "line8": " 官网: https://github.com/ZipperWang/OhMyPanel"
   },
   "logs": {
     "title": "站点日志",

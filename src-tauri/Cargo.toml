@@ -1,10 +1,10 @@
 [package]
 name = "ohmypanel"
 version = "1.0.21"
-description = "LeePanel - SSH Server Management Tool"
-authors = ["you"]
-license = ""
-repository = ""
+description = "OhMyPanel - SSH server management tool"
+authors = ["OhMyPanel contributors"]
+license = "MIT"
+repository = "https://github.com/ZipperWang/OhMyPanel"
 edition = "2021"
 rust-version = "1.77.2"
 

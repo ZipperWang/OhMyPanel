@@ -1,12 +1,12 @@
-# LeePanel
+# OhMyPanel
 
-<p align="center"><img src="public/app-icon.png" alt="LeePanel Logo" width="128" height="128"></p>
+<p align="center"><img src="public/app-icon.png" alt="OhMyPanel Logo" width="128" height="128"></p>
 
 <p align="center">
-  <a href="https://github.com/gna1280072/LeePanel/stargazers"><img src="https://img.shields.io/github/stars/gna1280072/LeePanel?style=flat-square" alt="Stars"></a>
-  <a href="https://github.com/gna1280072/LeePanel/releases"><img src="https://img.shields.io/github/v/release/gna1280072/LeePanel?style=flat-square" alt="Release"></a>
-  <a href="https://github.com/gna1280072/LeePanel/releases"><img src="https://img.shields.io/github/downloads/gna1280072/LeePanel/total?style=flat-square" alt="Downloads"></a>
-  <a href="https://github.com/gna1280072/LeePanel/blob/main/LICENSE"><img src="https://img.shields.io/github/license/gna1280072/LeePanel?style=flat-square" alt="License"></a>
+  <a href="https://github.com/ZipperWang/OhMyPanel/stargazers"><img src="https://img.shields.io/github/stars/ZipperWang/OhMyPanel?style=flat-square" alt="Stars"></a>
+  <a href="https://github.com/ZipperWang/OhMyPanel/releases"><img src="https://img.shields.io/github/v/release/ZipperWang/OhMyPanel?style=flat-square" alt="Release"></a>
+  <a href="https://github.com/ZipperWang/OhMyPanel/releases"><img src="https://img.shields.io/github/downloads/ZipperWang/OhMyPanel/total?style=flat-square" alt="Downloads"></a>
+  <a href="https://github.com/ZipperWang/OhMyPanel/blob/main/LICENSE"><img src="https://img.shields.io/github/license/ZipperWang/OhMyPanel?style=flat-square" alt="License"></a>
   <a href="https://linux.do"><img src="https://img.shields.io/badge/Linux%20DO-Community-30363D?style=flat-square&logo=linux" alt="Linux DO"></a>
 </p>
 
@@ -19,15 +19,15 @@
   <img src="https://img.shields.io/badge/Server-Ubuntu%20%7C%20Debian-E95420?style=flat-square&logo=ubuntu" alt="Server">
 </p>
 
-[中文文档](README.zh-CN.md) | [ Download](https://github.com/gna1280072/LeePanel/releases)
+[中文文档](README.zh-CN.md) | [ Download](https://github.com/ZipperWang/OhMyPanel/releases)
 
-LeePanel — Free and open-source, the next-generation Linux server management panel.
+OhMyPanel — Free and open-source, the next-generation Linux server management panel.
 
-LeePanel 是一款开源的Linux服务器管理面板桌面端软件，所有操作通过本地 SSH 完成、服务器上零安装零残留，从根本上消除了传统web面板的安全风险。
+OhMyPanel 是一款开源的Linux服务器管理面板桌面端软件，所有操作通过本地 SSH 完成、服务器上零安装零残留，从根本上消除了传统web面板的安全风险。
 
 Traditional Linux/VPS control panels frequently suffer from security vulnerabilities, causing endless headaches for server administrators.
 
-**LeePanel was built to solve this once and for all.**
+**OhMyPanel was built to solve this once and for all.**
 
 > 🛡️ **Zero server-side code** — All operations are performed via SSH commands from your local machine. **No** panel code installed on the server, **no** extra ports exposed, eliminating the panel's own security risks at the root.
 
@@ -39,14 +39,14 @@ A lightweight cross-platform desktop app built with Tauri 2 + React, providing a
 
 Installer as small as **6 MB** — lightweight and flexible! Completely replacing traditional browser-based panels.
 
-If you have any suggestions or feedback, feel free to share them in [GitHub Discussions](https://github.com/gna1280072/LeePanel/discussions).
+If you have any suggestions or feedback, feel free to share them in [GitHub Discussions](https://github.com/ZipperWang/OhMyPanel/discussions).
 
-🌐 Website: https://www.LeePanel.com
+🌐 Project home: https://github.com/ZipperWang/OhMyPanel
 
  
-## 💡 Why LeePanel?
+## 💡 Why OhMyPanel?
 
-| Dimension | Traditional Web Panel ❌ | LeePanel ✅ |
+| Dimension | Traditional Web Panel ❌ | OhMyPanel ✅ |
 |-----------|--------------------------|-------------|
 | Deployment | Installs and runs panel code on the server, consuming resources | Runs entirely on your desktop, nothing installed on the server |
 | Port Exposure | Opens ports 8888/8080 to the internet | Only your existing SSH port is used |
@@ -75,12 +75,12 @@ If you have any suggestions or feedback, feel free to share them in [GitHub Disc
 
 | Platform | Download |
 |----------|----------|
-| Windows  | [Download for Windows](https://github.com/gna1280072/LeePanel/releases) |
-| macOS    | [Download for macOS](https://github.com/gna1280072/LeePanel/releases) |
-| Linux    | [Download for Linux](https://github.com/gna1280072/LeePanel/releases) |
+| Windows  | [Download for Windows](https://github.com/ZipperWang/OhMyPanel/releases) |
+| macOS    | [Download for macOS](https://github.com/ZipperWang/OhMyPanel/releases) |
+| Linux    | [Download for Linux](https://github.com/ZipperWang/OhMyPanel/releases) |
 
 <p align="center">
-  <a href="https://github.com/gna1280072/LeePanel/releases">
+  <a href="https://github.com/ZipperWang/OhMyPanel/releases">
     <img src="https://img.shields.io/badge/Download-Latest%20Version-2da44e?style=for-the-badge&logo=github" alt="Download Latest">
   </a>
 </p>
@@ -216,5 +216,7 @@ npm run tauri build
 ```
 
 ##  License
+
+OhMyPanel is an independent fork of [LeePanel](https://github.com/gna1280072/LeePanel). The original copyright and permission notice are preserved in accordance with the MIT License.
 
 MIT License. See [LICENSE](LICENSE) for details.

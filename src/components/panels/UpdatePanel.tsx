@@ -116,7 +116,7 @@ export default function UpdatePanel() {
               {message}
               {timedOut && (() => {
                 const text = t('settings.updateManualDownload')
-                const url = 'https://www.LeePanel.com'
+                const url = 'https://github.com/ZipperWang/OhMyPanel/releases'
                 const idx = text.indexOf(url)
                 return (
                   <div style={{ marginTop: 4 }}>
@@ -132,7 +132,7 @@ export default function UpdatePanel() {
       <div style={{ marginTop: 16, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.8 }}>
         <div style={{ fontWeight: 600, color: 'var(--text-strong)', marginBottom: 4 }}>{t('settings.updateFailedHint')}</div>
         <div>1、{t('settings.updateFailedProxyHint')}</div>
-        <div>2、{t('settings.updateFailedManualHint')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://www.LeePanel.com') }} style={{ color: 'var(--accent)' }}>https://www.LeePanel.com</a></div>
+        <div>2、{t('settings.updateFailedManualHint')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://github.com/ZipperWang/OhMyPanel/releases') }} style={{ color: 'var(--accent)' }}>https://github.com/ZipperWang/OhMyPanel/releases</a></div>
       </div>
     </div>
   )

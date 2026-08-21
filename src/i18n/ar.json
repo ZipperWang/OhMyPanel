@@ -77,7 +77,7 @@
     "serviceUnavailable": "{{name}} غير مثبت أو متوقف. يرجى الذهاب إلى مستودع البرمجيات لتثبيته أو تشغيله."
   },
   "welcome": {
-    "title": "مرحباً بك في LeePanel",
+    "title": "مرحباً بك في OhMyPanel",
     "subtitle": "مساعدك القوي لإدارة خوادم SSH",
     "secureConnections": "اتصالات آمنة",
     "fileManagement": "إدارة الملفات",
@@ -494,7 +494,7 @@
     "connectToView": "اتصل بخادم لعرض لوحة التحكم",
     "loadingSystem": "تحميل معلومات النظام...",
     "cores": "أنوية",
-    "welcome": "مرحبًا بك في LeePanel"
+    "welcome": "مرحبًا بك في OhMyPanel"
   },
   "database": {
     "title": "إدارة قواعد البيانات",
@@ -743,7 +743,7 @@
     "updateReadyTitle": "التحديث جاهز",
     "updateInstalled": "تم تثبيت v{{version}}. أعد تشغيل التطبيق لاحقًا لتطبيق التحديث.",
     "updateTimedOut": "انتهت مهلة التحقق من التحديث، يرجى المحاولة لاحقًا.",
-    "updateManualDownload": "إذا تعذر التحديث التلقائي، يرجى تنزيل أحدث إصدار من https://www.LeePanel.com.",
+    "updateManualDownload": "إذا تعذر التحديث التلقائي، يرجى تنزيل أحدث إصدار من https://github.com/ZipperWang/OhMyPanel/releases.",
     "fetchingVersion": "جارٍ الحصول على معلومات الإصدار...",
     "clearingProxy": "جارٍ مسح الوكيل وإعادة المحاولة...",
     "updateFailedHint": "إذا فشل التحديث:",
@@ -1013,16 +1013,16 @@
     "mysqlVersionInfo": "Available version: {{version}}"
   },
   "about": {
-    "title": "حول LeePanel",
-    "line1": "LeePanel — لوحة إدارة خوادم Linux من الجيل التالي، مجانية ومفتوحة المصدر.",
+    "title": "حول OhMyPanel",
+    "line1": "OhMyPanel — لوحة إدارة خوادم Linux من الجيل التالي، مجانية ومفتوحة المصدر.",
     "line2": "لوحات إدارة Linux/VPS التقليدية تعاني غالبًا من ثغرات أمنية، مما يسبب صداعًا لمديري الخوادم.",
-    "line3": "تم بناء LeePanel لحل هذه المشكلة مرة واحدة وإلى الأبد.",
+    "line3": "تم بناء OhMyPanel لحل هذه المشكلة مرة واحدة وإلى الأبد.",
     "line4": "️ صفر كود على الخادم — جميع العمليات تُنفَّذ عبر أوامر SSH من جهازك المحلي. لا كود لوحة على الخادم، لا منافذ إضافية مكشوفة، القضاء على مخاطر أمان اللوحة من الجذر.",
     "line5": "تطبيق سطح مكتب خفيف متعدد المنصات مبني بـ Tauri 2 + React، يوفر عميلاً أصيلاً واحداً لإدارة: طرفية SSH وإدارة ملفات SFTP، Nginx / MySQL/MariaDB / PHP / Redis / Docker، جدار حماية / شهادات SSL مجانية.",
     "line6": "المثبت بحجم 6 MB فقط — خفيف ومرن! يحل محل اللوحات التقليدية القائمة على المتصفح بالكامل.",
     "line7": "إذا كان لديك أي اقتراحات أو ملاحظات، لا تتردد في مشاركتها في",
     "github": "GitHub Discussions",
-    "line8": "الموقع: https://www.LeePanel.com"
+    "line8": "الموقع: https://github.com/ZipperWang/OhMyPanel"
   },
   "logs": {
     "title": "سجلات الموقع",

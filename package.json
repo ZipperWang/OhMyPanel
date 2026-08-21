@@ -1,7 +1,17 @@
 {
-  "name": "leepanel",
+  "name": "ohmypanel",
   "private": true,
   "version": "1.0.21",
+  "description": "OhMyPanel - SSH server management tool",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZipperWang/OhMyPanel.git"
+  },
+  "homepage": "https://github.com/ZipperWang/OhMyPanel",
+  "bugs": {
+    "url": "https://github.com/ZipperWang/OhMyPanel/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

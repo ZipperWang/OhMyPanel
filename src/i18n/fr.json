@@ -77,7 +77,7 @@
     "serviceUnavailable": "{{name}} n'est pas installé ou est arrêté. Veuillez aller au dépôt de logiciels pour l'installer ou le démarrer."
   },
   "welcome": {
-    "title": "Bienvenue sur LeePanel",
+    "title": "Bienvenue sur OhMyPanel",
     "subtitle": "Votre puissant assistant de gestion de serveur SSH",
     "secureConnections": "Connexions sécurisées",
     "fileManagement": "Gestion de fichiers",
@@ -494,7 +494,7 @@
     "connectToView": "Connectez-vous à un serveur pour voir le tableau de bord",
     "loadingSystem": "Chargement des informations système...",
     "cores": "cœurs",
-    "welcome": "Bienvenue sur LeePanel"
+    "welcome": "Bienvenue sur OhMyPanel"
   },
   "database": {
     "title": "Gestion de base de données",
@@ -743,7 +743,7 @@
     "updateReadyTitle": "Mise à jour prête",
     "updateInstalled": "v{{version}} installé. Redémarrez l'application plus tard pour appliquer la mise à jour.",
     "updateTimedOut": "La vérification des mises à jour a expiré, veuillez réessayer plus tard.",
-    "updateManualDownload": "Si la mise à jour automatique échoue, veuillez télécharger la dernière version sur https://www.LeePanel.com.",
+    "updateManualDownload": "Si la mise à jour automatique échoue, veuillez télécharger la dernière version sur https://github.com/ZipperWang/OhMyPanel/releases.",
     "fetchingVersion": "Récupération des informations de version...",
     "clearingProxy": "Suppression du proxy et nouvelle tentative...",
     "updateFailedHint": "Si la mise à jour échoue :",
@@ -1013,16 +1013,16 @@
     "mysqlVersionInfo": "Available version: {{version}}"
   },
   "about": {
-    "title": "À propos de LeePanel",
-    "line1": "LeePanel — Gratuit et open-source, le panneau de gestion de serveurs Linux nouvelle génération.",
+    "title": "À propos de OhMyPanel",
+    "line1": "OhMyPanel — Gratuit et open-source, le panneau de gestion de serveurs Linux nouvelle génération.",
     "line2": "Les panneaux traditionnels de gestion Linux/VPS souffrent fréquemment de vulnérabilités de sécurité, causant des maux de tête aux administrateurs de serveurs.",
-    "line3": "LeePanel a été créé pour résoudre ce problème une fois pour toutes.",
+    "line3": "OhMyPanel a été créé pour résoudre ce problème une fois pour toutes.",
     "line4": "️ Zéro code côté serveur — Toutes les opérations sont effectuées via des commandes SSH depuis votre machine locale. Aucun code de panneau installé sur le serveur, aucun port supplémentaire exposé, éliminant les risques de sécurité du panneau à la racine.",
     "line5": "Une application de bureau multiplateforme légère construite avec Tauri 2 + React, fournissant un seul client natif pour gérer : Terminal SSH & Gestion de fichiers SFTP, Nginx / MySQL/MariaDB / PHP / Redis / Docker, Pare-feu / Certificats SSL gratuits.",
     "line6": "Installateur de seulement 6 Mo — léger et flexible ! Remplace complètement les panneaux traditionnels basés sur navigateur.",
     "line7": "Si vous avez des suggestions ou des retours, n'hésitez pas à les partager sur",
     "github": "GitHub Discussions",
-    "line8": "Site web : https://www.LeePanel.com"
+    "line8": "Site web : https://github.com/ZipperWang/OhMyPanel"
   },
   "logs": {
     "title": "Journaux du site",

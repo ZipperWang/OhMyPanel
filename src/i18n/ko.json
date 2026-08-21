@@ -77,7 +77,7 @@
     "serviceUnavailable": "{{name}}이(가) 설치되지 않았거나 중지되었습니다. 소프트웨어 저장소에서 설치하거나 시작하세요."
   },
   "welcome": {
-    "title": "LeePanel에 오신 것을 환영합니다",
+    "title": "OhMyPanel에 오신 것을 환영합니다",
     "subtitle": "강력한 SSH 서버 관리 도우미",
     "secureConnections": "안전한 연결",
     "fileManagement": "파일 관리",
@@ -494,7 +494,7 @@
     "connectToView": "대시보드를 보려면 서버에 연결하세요",
     "loadingSystem": "시스템 정보 로딩 중...",
     "cores": "코어",
-    "welcome": "LeePanel에 오신 것을 환영합니다"
+    "welcome": "OhMyPanel에 오신 것을 환영합니다"
   },
   "database": {
     "title": "데이터베이스 관리",
@@ -743,7 +743,7 @@
     "updateReadyTitle": "업데이트 준비 완료",
     "updateInstalled": "v{{version}} 설치됨. 나중에 앱을 다시 시작하여 업데이트를 적용하세요.",
     "updateTimedOut": "업데이트 확인 시간 초과. 나중에 다시 시도하세요.",
-    "updateManualDownload": "자동 업데이트가 실패하면 https://www.LeePanel.com에서 최신 버전을 다운로드하세요.",
+    "updateManualDownload": "자동 업데이트가 실패하면 https://github.com/ZipperWang/OhMyPanel/releases에서 최신 버전을 다운로드하세요.",
     "fetchingVersion": "버전 정보를 가져오는 중...",
     "clearingProxy": "프록시를 제거하고 재시도하는 중...",
     "updateFailedHint": "업데이트에 실패한 경우:",
@@ -1013,16 +1013,16 @@
     "mysqlVersionInfo": "Available version: {{version}}"
   },
   "about": {
-    "title": "LeePanel 소개",
-    "line1": "LeePanel — 무료 오소스, 차세대 Linux 서버 관리 패널.",
+    "title": "OhMyPanel 소개",
+    "line1": "OhMyPanel — 무료 오소스, 차세대 Linux 서버 관리 패널.",
     "line2": "전통적인 Linux/VPS 관리 패널은 빈번히 보안 취약점에 시달리며, 서버 관리자들을 곤란하게 만들고 있습니다.",
-    "line3": "LeePanel은 이 문제를 근본적으로 해결하기 위해 탄생했습니다.",
+    "line3": "OhMyPanel은 이 문제를 근본적으로 해결하기 위해 탄생했습니다.",
     "line4": "️ 서버측 코드 제로 — 모든 작업은 로컬 머신의 SSH 명령으로 수행됩니다. 서버에 패널 코드를 설치하지 않고, 추가 포트를 노출하지 않으며, 패널 자체의 보안 리스크를 근원에서 제거합니다.",
     "line5": "Tauri 2 + React로 구축된 경량 크로스 플랫폼 데스크톱 앱으로, 단일 네이티브 클라이언트에서 관리: SSH 터미널 & SFTP 파일 관리, Nginx / MySQL/MariaDB / PHP / Redis / Docker, 방화벽 / 무료 SSL 인증서.",
     "line6": "인스톨러わずか 6 MB — 가볍고 유연합니다! 전통적인 브라우저 기반 패널을 완전히 대체합니다.",
     "line7": "의견이나 제안이 있으시면",
     "github": "GitHub Discussions에 공유해 주세요",
-    "line8": "공식 웹사이트: https://www.LeePanel.com"
+    "line8": "공식 웹사이트: https://github.com/ZipperWang/OhMyPanel"
   },
   "logs": {
     "title": "사이트 로그",

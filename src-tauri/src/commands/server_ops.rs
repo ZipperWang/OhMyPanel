@@ -931,13 +931,13 @@ pub async fn server_check_installation(
     // ponytail: check if login shell has active child processes (install script/tee)
     let (pid_out, _, _) = ssh::session_exec_with_output(
         &session,
-        "test -f /tmp/leepanel-install.pid && pgrep -P $(cat /tmp/leepanel-install.pid) >/dev/null 2>&1 && test -f /tmp/leepanel-install.log && test \"$(find /tmp/leepanel-install.log -mmin -5 2>/dev/null)\" && echo RUNNING || (rm -f /tmp/leepanel-install.pid /tmp/leepanel-install.info; echo IDLE)",
+        "test -f /tmp/ohmypanel-install.pid && pgrep -P $(cat /tmp/ohmypanel-install.pid) >/dev/null 2>&1 && test -f /tmp/ohmypanel-install.log && test \"$(find /tmp/ohmypanel-install.log -mmin -5 2>/dev/null)\" && echo RUNNING || (rm -f /tmp/ohmypanel-install.pid /tmp/ohmypanel-install.info; echo IDLE)",
         8,
     ).await?;
     let running = pid_out.trim().contains("RUNNING");
-    let log = ssh::session_exec_with_output(&session, "cat /tmp/leepanel-install.log 2>/dev/null || true", 10)
+    let log = ssh::session_exec_with_output(&session, "cat /tmp/ohmypanel-install.log 2>/dev/null || true", 10)
         .await.map(|(out, _, _)| out).unwrap_or_default();
-    let info = ssh::session_exec_with_output(&session, "cat /tmp/leepanel-install.info 2>/dev/null || true", 5)
+    let info = ssh::session_exec_with_output(&session, "cat /tmp/ohmypanel-install.info 2>/dev/null || true", 5)
         .await.map(|(out, _, _)| out.trim().to_string()).unwrap_or_default();
     let (action, display_name) = if let Some((a, s)) = info.split_once(':') {
         (a.to_string(), s.to_string())

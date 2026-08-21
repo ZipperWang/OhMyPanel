@@ -171,7 +171,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
         </button>
       </div>
 
-      {/* About LeePanel Card */}
+      {/* About OhMyPanel Card */}
       <div className="sp-card">
         <div className="sp-card-title">{t('about.title')}</div>
         <div className="sp-about-content">
@@ -182,7 +182,7 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
             <p>{t('about.line4')}</p>
             <p>{t('about.line5')}</p>
             <p>{t('about.line6')}</p>
-            <p>{t('about.line7')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://github.com/gna1280072/LeePanel/discussions') }}>{t('about.github')}</a></p>
+            <p>{t('about.line7')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://github.com/ZipperWang/OhMyPanel/discussions') }}>{t('about.github')}</a></p>
             <p>{t('about.line8')}</p>
           </div>
         </div>
