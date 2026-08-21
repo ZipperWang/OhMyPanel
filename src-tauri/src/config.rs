@@ -186,7 +186,7 @@ pub struct Settings {
     pub command_timeout_minutes: u32,
     #[serde(default = "default_upload_workers")]
     pub upload_workers: u32,
-    // ponytail: ui theme — 'dark' (default) or 'light'
+    // ponytail: ui theme — 'light' (default) or 'dark'
     #[serde(default = "default_theme")]
     pub theme: String,
 }
@@ -198,7 +198,7 @@ fn default_cache_ttl() -> u32 { 24 }
 fn default_cache_max_files() -> u32 { 500 }
 fn default_command_timeout() -> u32 { 30 }
 fn default_upload_workers() -> u32 { 3 }
-fn default_theme() -> String { "dark".to_string() }
+fn default_theme() -> String { "light".to_string() }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -212,7 +212,7 @@ impl Default for Settings {
             cache_enabled: true,
             command_timeout_minutes: 30,
             upload_workers: 3,
-            theme: "dark".to_string(),
+            theme: "light".to_string(),
         }
     }
 }
@@ -393,6 +393,7 @@ mod tests {
         assert_eq!(s.reconnect_interval, 5);
         assert_eq!(s.command_timeout_minutes, 30);
         assert_eq!(s.upload_workers, 3);
+        assert_eq!(s.theme, "light");
     }
 
     #[test]
@@ -408,7 +409,7 @@ mod tests {
             cache_enabled: false,
             command_timeout_minutes: 60,
             upload_workers: 5,
-            theme: "light".to_string(),
+            theme: "dark".to_string(),
         };
         SettingsManager::save(&conn, &s).unwrap();
         let loaded = SettingsManager::load(&conn);
@@ -416,7 +417,7 @@ mod tests {
         assert_eq!(loaded.reconnect_interval, 10);
         assert_eq!(loaded.cache_ttl_hours, 48);
         assert_eq!(loaded.upload_workers, 5);
-        assert_eq!(loaded.theme, "light");
+        assert_eq!(loaded.theme, "dark");
     }
 
     #[test]
@@ -424,5 +425,6 @@ mod tests {
         let s = Settings::default();
         assert!(s.auto_reconnect);
         assert_eq!(s.cache_max_files, 500);
+        assert_eq!(s.theme, "light");
     }
 }

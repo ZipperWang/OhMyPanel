@@ -18,7 +18,7 @@ export interface TerminalHandle {
   clear: () => void
 }
 
-// GitHub Dark palette (matches the app's default theme)
+// GitHub Dark palette
 const XTERM_DARK_THEME = {
   background: '#0d1117',
   foreground: '#c9d1d9',
@@ -66,7 +66,7 @@ const XTERM_LIGHT_THEME = {
   brightWhite: '#ffffff',
 }
 
-export default forwardRef<TerminalHandle, TerminalProps>(function Terminal({ sessionId, isActive, theme = 'dark' }, ref) {
+export default forwardRef<TerminalHandle, TerminalProps>(function Terminal({ sessionId, isActive, theme = 'light' }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<XTerminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)

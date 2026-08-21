@@ -489,7 +489,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
           className="lang-toggle-btn"
           onClick={() => setLangDropdownOpen(!langDropdownOpen)}
         >
-          🌐 Language ▾
+          🌐 {t('sidebar.language')} ▾
         </button>
         {langDropdownOpen && (
           <div className="lang-dropdown">

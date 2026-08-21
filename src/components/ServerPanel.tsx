@@ -217,7 +217,7 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
       <div className="sp-content">
         {/* Terminal always mounted to preserve SSH session */}
         <div style={{ display: activeSection === 'terminal' ? 'block' : 'none', height: '100%' }}>
-          <Terminal ref={termRef} sessionId={sessionId} isActive={activeSection === 'terminal'} theme={appSettings?.theme || 'dark'} />
+          <Terminal ref={termRef} sessionId={sessionId} isActive={activeSection === 'terminal'} theme={appSettings?.theme || 'light'} />
         </div>
         {/* Files always mounted to preserve state and avoid reload flash */}
         <div style={{ display: activeSection === 'files' ? 'block' : 'none', height: '100%' }}>

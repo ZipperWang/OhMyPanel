@@ -112,12 +112,12 @@ function App() {
 
   // Settings
   const [settings, setSettings] = useState<Settings>({
-    auto_reconnect: true, reconnect_interval: 5, max_reconnect_attempts: 10, close_tab_on_disconnect: false, cache_ttl_hours: 24, cache_max_files: 500, cache_enabled: true, command_timeout_minutes: 30, upload_workers: 3, theme: 'dark'
+    auto_reconnect: true, reconnect_interval: 5, max_reconnect_attempts: 10, close_tab_on_disconnect: false, cache_ttl_hours: 24, cache_max_files: 500, cache_enabled: true, command_timeout_minutes: 30, upload_workers: 3, theme: 'light'
   })
 
   // Apply theme to <html data-theme> whenever it changes (also covers initial load)
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', settings.theme || 'dark')
+    document.documentElement.setAttribute('data-theme', settings.theme || 'light')
   }, [settings.theme])
   // ponytail: per-session reconnect state — each server reconnects independently
   // ponytail: Map value stores { name, attempt } so the reconnect bar renders without toast flicker
