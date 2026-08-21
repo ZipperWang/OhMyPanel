@@ -755,7 +755,7 @@
     "clearingProxy": "Clearing proxy and retrying...",
     "updateFailedHint": "If update fails:",
     "updateFailedProxyHint": "If your computer uses a proxy, try enabling or disabling it, then retry;",
-    "updateFailedManualHint": "Download the latest version manually from our website:",
+    "updateFailedManualHint": "Download the latest version manually from GitHub Releases:",
     "systemInfo": "System Info",
     "lastBoot": "Last Boot Time",
     "uptime": "Uptime",
@@ -1050,8 +1050,7 @@
     "line5": "A lightweight cross-platform desktop app built with Tauri 2 + React, providing a single native client to manage: SSH Terminal & SFTP File Management, Nginx / MySQL/MariaDB / PHP / Redis / Docker, Firewall / Free SSL Certificates.",
     "line6": "Installer as small as 6 MB — lightweight and flexible! Completely replacing traditional browser-based panels.",
     "line7": "If you have any suggestions or feedback, feel free to share them in",
-    "github": "GitHub Discussions",
-    "line8": "Website: https://github.com/ZipperWang/OhMyPanel"
+    "github": "GitHub Discussions"
   },
   "logs": {
     "title": "Site Logs",

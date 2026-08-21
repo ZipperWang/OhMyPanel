@@ -183,7 +183,6 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
             <p>{t('about.line5')}</p>
             <p>{t('about.line6')}</p>
             <p>{t('about.line7')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://github.com/ZipperWang/OhMyPanel/discussions') }}>{t('about.github')}</a></p>
-            <p>{t('about.line8')}</p>
           </div>
         </div>
       </div>

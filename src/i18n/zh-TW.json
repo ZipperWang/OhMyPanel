@@ -750,12 +750,12 @@
     "updateReadyTitle": "更新就緒",
     "updateInstalled": "v{{version}} 已安裝。請稍後重啟應用以套用更新。",
     "updateTimedOut": "檢查更新超時，請稍後重試。",
-    "updateManualDownload": "如果無法自動更新，請到官網 https://github.com/ZipperWang/OhMyPanel/releases 下載最新版本。",
+    "updateManualDownload": "如果無法自動更新，請到 GitHub Releases https://github.com/ZipperWang/OhMyPanel/releases 下載最新版本。",
     "fetchingVersion": "正在取得版本資訊...",
     "clearingProxy": "正在清除代理並重試...",
     "updateFailedHint": "如果更新失敗：",
     "updateFailedProxyHint": "如果您的電腦使用代理，請嘗試開啟或關閉代理，然後重試；",
-    "updateFailedManualHint": "到我們的官網手工下載最新版：",
+    "updateFailedManualHint": "前往 GitHub Releases 手動下載最新版：",
     "systemInfo": "系統資訊",
     "lastBoot": "上次啟動時間",
     "uptime": "執行時間",
@@ -1050,8 +1050,7 @@
     "line5": "基於 Tauri 2 + React 構建的輕量跨平台桌面應用，以單一原生客戶端統一管理：SSH 終端 & SFTP 檔案管理、Nginx / MySQL/MariaDB / PHP / Redis / Docker、防火牆 / 免費 SSL 憑證。",
     "line6": "安裝包最小僅 6 MB 起，靈活小巧！徹底取代傳統瀏覽器面板。",
     "line7": "使用過程中如有任何建議或意見，歡迎前往",
-    "github": "GitHub Discussions 交流反饋",
-    "line8": " 官網: https://github.com/ZipperWang/OhMyPanel"
+    "github": "GitHub Discussions 交流反饋"
   },
   "logs": {
     "title": "站點日誌",

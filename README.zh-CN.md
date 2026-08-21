@@ -39,9 +39,6 @@ OhMyPanel — 免费开源，下一代 Linux 服务器管理面板软件。
 
 使用过程中如有任何建议或意见，欢迎前往 [GitHub Discussions](https://github.com/ZipperWang/OhMyPanel/discussions) 交流反馈。
 
-🌐 项目主页: https://github.com/ZipperWang/OhMyPanel
-
-
 ## 💡 为什么选择 OhMyPanel？
 
 | 维度 | 传统 Web 面板 ❌ | OhMyPanel ✅ |

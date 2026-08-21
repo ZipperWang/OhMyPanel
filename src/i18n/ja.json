@@ -743,12 +743,12 @@
     "updateReadyTitle": "更新準備完了",
     "updateInstalled": "v{{version}} がインストールされました。後でアプリを再起動して更新を適用してください。",
     "updateTimedOut": "更新確認がタイムアウトしました。後でもう一度お試しください。",
-    "updateManualDownload": "自動更新できない場合は、公式サイト https://github.com/ZipperWang/OhMyPanel/releases から最新バージョンをダウンロードしてください。",
+    "updateManualDownload": "自動更新できない場合は、GitHub Releases https://github.com/ZipperWang/OhMyPanel/releases から最新バージョンをダウンロードしてください。",
     "fetchingVersion": "バージョン情報を取得中...",
     "clearingProxy": "プロキシをクリアして再試行中...",
     "updateFailedHint": "更新に失敗した場合：",
     "updateFailedProxyHint": "お使いのコンピュータがプロキシを使用している場合は、有効または無効にしてから再試行してください；",
-    "updateFailedManualHint": "公式サイトから最新版を手動でダウンロードしてください：",
+    "updateFailedManualHint": "GitHub Releases から最新版を手動でダウンロードしてください：",
     "systemInfo": "システム情報",
     "lastBoot": "最終起動日時",
     "uptime": "稼働時間",
@@ -1021,8 +1021,7 @@
     "line5": "Tauri 2 + React で構築された軽量クロスプラットフォームデスクトップアプリで、単一のネイティブクライアントで管理：SSH ターミナル & SFTP ファイル管理、Nginx / MySQL/MariaDB / PHP / Redis / Docker、ファイアウォール / 無料 SSL 証明書。",
     "line6": "インストーラーわずか 6 MB — 軽量で柔軟！従来のブラウザベースパネルを完全に置き換えます。",
     "line7": "ご意見やご要望は",
-    "github": "GitHub Discussions まで",
-    "line8": "公式サイト: https://github.com/ZipperWang/OhMyPanel"
+    "github": "GitHub Discussions まで"
   },
   "logs": {
     "title": "サイトログ",

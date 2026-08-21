@@ -748,7 +748,7 @@
     "clearingProxy": "جارٍ مسح الوكيل وإعادة المحاولة...",
     "updateFailedHint": "إذا فشل التحديث:",
     "updateFailedProxyHint": "إذا كان جهازك يستخدم وكيلًا، حاول تفعيله أو تعطيله ثم أعد المحاولة؛",
-    "updateFailedManualHint": "قم بتنزيل أحدث إصدار يدويًا من موقعنا:",
+    "updateFailedManualHint": "قم بتنزيل أحدث إصدار يدويًا من GitHub Releases:",
     "systemInfo": "معلومات النظام",
     "lastBoot": "آخر إقلاع",
     "uptime": "وقت التشغيل",
@@ -1021,8 +1021,7 @@
     "line5": "تطبيق سطح مكتب خفيف متعدد المنصات مبني بـ Tauri 2 + React، يوفر عميلاً أصيلاً واحداً لإدارة: طرفية SSH وإدارة ملفات SFTP، Nginx / MySQL/MariaDB / PHP / Redis / Docker، جدار حماية / شهادات SSL مجانية.",
     "line6": "المثبت بحجم 6 MB فقط — خفيف ومرن! يحل محل اللوحات التقليدية القائمة على المتصفح بالكامل.",
     "line7": "إذا كان لديك أي اقتراحات أو ملاحظات، لا تتردد في مشاركتها في",
-    "github": "GitHub Discussions",
-    "line8": "الموقع: https://github.com/ZipperWang/OhMyPanel"
+    "github": "GitHub Discussions"
   },
   "logs": {
     "title": "سجلات الموقع",

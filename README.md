@@ -41,9 +41,6 @@ Installer as small as **6 MB** — lightweight and flexible! Completely replacin
 
 If you have any suggestions or feedback, feel free to share them in [GitHub Discussions](https://github.com/ZipperWang/OhMyPanel/discussions).
 
-🌐 Project home: https://github.com/ZipperWang/OhMyPanel
-
- 
 ## 💡 Why OhMyPanel?
 
 | Dimension | Traditional Web Panel ❌ | OhMyPanel ✅ |
