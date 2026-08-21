@@ -1,0 +1,250 @@
+diff --git a/src/i18n/ar.json b/src/i18n/ar.json
+index 4721f2f..5564784 100644
+--- a/src/i18n/ar.json
++++ b/src/i18n/ar.json
+@@ -77,7 +77,7 @@
+     "serviceUnavailable": "{{name}} غير مثبت أو متوقف. يرجى الذهاب إلى مستودع البرمجيات لتثبيته أو تشغيله."
+   },
+   "welcome": {
+-    "title": "مرحباً بك في LeePanel",
++    "title": "مرحباً بك في OhMyPanel",
+     "subtitle": "مساعدك القوي لإدارة خوادم SSH",
+     "secureConnections": "اتصالات آمنة",
+     "fileManagement": "إدارة الملفات",
+@@ -250,7 +250,14 @@
+       "socks4": "أرسل العميل حركة SOCKS4 (البايت الأول 0x04). بدّل بروتوكول الوكيل إلى SOCKS5 — استخدم البادئة socks5:// (بعض التطبيقات تتعامل مع socks:// كـ SOCKS4)",
+       "httpProxy": "أرسل العميل حركة وكيل HTTP. بدّل نوع الوكيل إلى SOCKS5. ملاحظة: إعدادات الوكيل النظامية في ويندوز لا تدعم SOCKS5 — اضبط socks5://127.0.0.1:المنفذ داخل المتصفح أو التطبيق",
+       "badGreeting": "بيانات اتصال غير معروفة ({{detail}}). تأكد من أن نوع وكيل العميل هو SOCKS5"
+-    }
++    },
++    "reconnectLater": "Reconnect later",
++    "reconnectDone": "Reconnected. GatewayPorts is active — recreate your server-forwarding tunnels.",
++    "reconnectManualHint": "GatewayPorts enabled — please disconnect and reconnect the server manually for it to take effect.",
++    "reconnectFailed": "Reconnect failed: {{error}}",
++    "reconnectHintDisable": "GatewayPorts is now disabled but requires a reconnect to take effect. Reconnecting briefly interrupts this session (terminal, file transfers, existing tunnels). Reconnect now?",
++    "reconnectDoneDisable": "Reconnected. GatewayPorts is disabled — server forwards will only accept 127.0.0.1.",
++    "reconnectManualHintDisable": "GatewayPorts disabled — please disconnect and reconnect the server manually for it to take effect."
+   },
+   "dockerPanel": {
+     "selectAll": "تحديد الكل",
+@@ -494,7 +501,7 @@
+     "connectToView": "اتصل بخادم لعرض لوحة التحكم",
+     "loadingSystem": "تحميل معلومات النظام...",
+     "cores": "أنوية",
+-    "welcome": "مرحبًا بك في LeePanel"
++    "welcome": "مرحبًا بك في OhMyPanel"
+   },
+   "database": {
+     "title": "إدارة قواعد البيانات",
+@@ -743,7 +750,7 @@
+     "updateReadyTitle": "التحديث جاهز",
+     "updateInstalled": "تم تثبيت v{{version}}. أعد تشغيل التطبيق لاحقًا لتطبيق التحديث.",
+     "updateTimedOut": "انتهت مهلة التحقق من التحديث، يرجى المحاولة لاحقًا.",
+-    "updateManualDownload": "إذا تعذر التحديث التلقائي، يرجى تنزيل أحدث إصدار من https://www.LeePanel.com.",
++    "updateManualDownload": "إذا تعذر التحديث التلقائي، يرجى تنزيل أحدث إصدار من https://github.com/ZipperWang/OhMyPanel/releases.",
+     "fetchingVersion": "جارٍ الحصول على معلومات الإصدار...",
+     "clearingProxy": "جارٍ مسح الوكيل وإعادة المحاولة...",
+     "updateFailedHint": "إذا فشل التحديث:",
+@@ -850,7 +857,29 @@
+     "disabledHint": "جدار الحماية مُعطَّل. فعّله لإدارة القواعد.",
+     "enableFirewall": "تفعيل جدار الحماية",
+     "disableFirewall": "تعطيل جدار الحماية",
+-    "sshPortAutoOpened": "تم السماح بمنفذ SSH {{port}} تلقائياً لمنع قطع الاتصال."
++    "sshPortAutoOpened": "تم السماح بمنفذ SSH {{port}} تلقائياً لمنع قطع الاتصال.",
++    "statsTotal": "Total Rules",
++    "quickTitle": "Quick Ports",
++    "quickHint": "Click a card to open / close a common service port",
++    "searchPlaceholder": "Search port / protocol / source...",
++    "allActions": "All actions",
++    "copied": "Copied to clipboard",
++    "copyAll": "Copy All",
++    "copyRule": "Copy",
++    "copiedAll": "All rules copied to clipboard",
++    "noMatch": "No matching rules",
++    "sourceLabel": "Source IP",
++    "sourcePlaceholder": "Empty = any, e.g. 1.2.3.4 or 10.0.0.0/8",
++    "viewRaw": "Raw rule",
++    "clearAll": "Clear Rules",
++    "clearAllTitle": "Clear All Rules",
++    "clearAllMsg": "This will delete all {{count}} firewall rules. This cannot be undone. Continue?",
++    "clearAllConfirm": "Confirm Clear",
++    "cleared": "All rules cleared",
++    "portOpened": "Port {{port}} opened",
++    "portClosed": "Port {{port}} rule removed",
++    "portOpenTitle": "Port {{port}} is open, click to remove",
++    "portClosedTitle": "Port {{port}} is closed, click to open"
+   },
+   "port": {
+     "title": "المنافذ",
+@@ -1013,16 +1042,16 @@
+     "mysqlVersionInfo": "Available version: {{version}}"
+   },
+   "about": {
+-    "title": "حول LeePanel",
+-    "line1": "LeePanel — لوحة إدارة خوادم Linux من الجيل التالي، مجانية ومفتوحة المصدر.",
++    "title": "حول OhMyPanel",
++    "line1": "OhMyPanel — لوحة إدارة خوادم Linux من الجيل التالي، مجانية ومفتوحة المصدر.",
+     "line2": "لوحات إدارة Linux/VPS التقليدية تعاني غالبًا من ثغرات أمنية، مما يسبب صداعًا لمديري الخوادم.",
+-    "line3": "تم بناء LeePanel لحل هذه المشكلة مرة واحدة وإلى الأبد.",
++    "line3": "تم بناء OhMyPanel لحل هذه المشكلة مرة واحدة وإلى الأبد.",
+     "line4": "️ صفر كود على الخادم — جميع العمليات تُنفَّذ عبر أوامر SSH من جهازك المحلي. لا كود لوحة على الخادم، لا منافذ إضافية مكشوفة، القضاء على مخاطر أمان اللوحة من الجذر.",
+     "line5": "تطبيق سطح مكتب خفيف متعدد المنصات مبني بـ Tauri 2 + React، يوفر عميلاً أصيلاً واحداً لإدارة: طرفية SSH وإدارة ملفات SFTP، Nginx / MySQL/MariaDB / PHP / Redis / Docker، جدار حماية / شهادات SSL مجانية.",
+     "line6": "المثبت بحجم 6 MB فقط — خفيف ومرن! يحل محل اللوحات التقليدية القائمة على المتصفح بالكامل.",
+     "line7": "إذا كان لديك أي اقتراحات أو ملاحظات، لا تتردد في مشاركتها في",
+     "github": "GitHub Discussions",
+-    "line8": "الموقع: https://www.LeePanel.com"
++    "line8": "الموقع: https://github.com/ZipperWang/OhMyPanel/releases"
+   },
+   "logs": {
+     "title": "سجلات الموقع",
+diff --git a/src/i18n/de.json b/src/i18n/de.json
+index 55e2fc0..73fc1d2 100644
+--- a/src/i18n/de.json
++++ b/src/i18n/de.json
+@@ -77,7 +77,7 @@
+     "serviceUnavailable": "{{name}} ist nicht installiert oder gestoppt. Bitte im Software-Repository installieren oder starten."
+   },
+   "welcome": {
+-    "title": "Willkommen bei LeePanel",
++    "title": "Willkommen bei OhMyPanel",
+     "subtitle": "Ihr leistungsstarker SSH-Server-Verwaltungsassistent",
+     "secureConnections": "Sichere Verbindungen",
+     "fileManagement": "Dateiverwaltung",
+@@ -250,7 +250,14 @@
+       "socks4": "Der Client hat SOCKS4-Datenverkehr gesendet (erstes Byte 0x04). Stellen Sie das Proxy-Protokoll auf SOCKS5 um — verwenden Sie das Präfix socks5:// (manche Apps behandeln socks:// als SOCKS4)",
+       "httpProxy": "Der Client hat HTTP-Proxy-Datenverkehr gesendet. Stellen Sie den Proxy-Typ auf SOCKS5 um. Hinweis: Die Windows-Systemproxyeinstellungen unterstützen kein SOCKS5 — konfigurieren Sie socks5://127.0.0.1:Port im Browser bzw. in der App",
+       "badGreeting": "Nicht erkennbare Verbindungsdaten ({{detail}}). Stellen Sie sicher, dass der Client-Proxy-Typ SOCKS5 ist"
+-    }
++    },
++    "reconnectLater": "Reconnect later",
++    "reconnectDone": "Reconnected. GatewayPorts is active — recreate your server-forwarding tunnels.",
++    "reconnectManualHint": "GatewayPorts enabled — please disconnect and reconnect the server manually for it to take effect.",
++    "reconnectFailed": "Reconnect failed: {{error}}",
++    "reconnectHintDisable": "GatewayPorts is now disabled but requires a reconnect to take effect. Reconnecting briefly interrupts this session (terminal, file transfers, existing tunnels). Reconnect now?",
++    "reconnectDoneDisable": "Reconnected. GatewayPorts is disabled — server forwards will only accept 127.0.0.1.",
++    "reconnectManualHintDisable": "GatewayPorts disabled — please disconnect and reconnect the server manually for it to take effect."
+   },
+   "dockerPanel": {
+     "selectAll": "Alle auswählen",
+@@ -494,7 +501,7 @@
+     "connectToView": "Mit einem Server verbinden, um Dashboard anzuzeigen",
+     "loadingSystem": "Systeminformationen werden geladen...",
+     "cores": "Kerne",
+-    "welcome": "Willkommen bei LeePanel"
++    "welcome": "Willkommen bei OhMyPanel"
+   },
+   "database": {
+     "title": "Datenbankverwaltung",
+@@ -743,7 +750,7 @@
+     "updateReadyTitle": "Update bereit",
+     "updateInstalled": "v{{version}} installiert. Starten Sie die App später neu, um das Update anzuwenden.",
+     "updateTimedOut": "Update-Prüfung hat zu lange gedauert. Bitte versuchen Sie es später erneut.",
+-    "updateManualDownload": "Falls das automatische Update fehlschlägt, laden Sie die neueste Version von https://www.LeePanel.com herunter.",
++    "updateManualDownload": "Falls das automatische Update fehlschlägt, laden Sie die neueste Version von https://github.com/ZipperWang/OhMyPanel/releases herunter.",
+     "fetchingVersion": "Versionsinformationen werden abgerufen...",
+     "clearingProxy": "Proxy wird gelöscht und erneut versucht...",
+     "updateFailedHint": "Wenn das Update fehlschlägt:",
+@@ -850,7 +857,29 @@
+     "disabledHint": "Firewall ist deaktiviert. Aktivieren Sie sie, um Regeln zu verwalten.",
+     "enableFirewall": "Firewall aktivieren",
+     "disableFirewall": "Firewall deaktivieren",
+-    "sshPortAutoOpened": "SSH-Port {{port}} wurde automatisch erlaubt, um Verbindungsabbruch zu verhindern."
++    "sshPortAutoOpened": "SSH-Port {{port}} wurde automatisch erlaubt, um Verbindungsabbruch zu verhindern.",
++    "statsTotal": "Total Rules",
++    "quickTitle": "Quick Ports",
++    "quickHint": "Click a card to open / close a common service port",
++    "searchPlaceholder": "Search port / protocol / source...",
++    "allActions": "All actions",
++    "copied": "Copied to clipboard",
++    "copyAll": "Copy All",
++    "copyRule": "Copy",
++    "copiedAll": "All rules copied to clipboard",
++    "noMatch": "No matching rules",
++    "sourceLabel": "Source IP",
++    "sourcePlaceholder": "Empty = any, e.g. 1.2.3.4 or 10.0.0.0/8",
++    "viewRaw": "Raw rule",
++    "clearAll": "Clear Rules",
++    "clearAllTitle": "Clear All Rules",
++    "clearAllMsg": "This will delete all {{count}} firewall rules. This cannot be undone. Continue?",
++    "clearAllConfirm": "Confirm Clear",
++    "cleared": "All rules cleared",
++    "portOpened": "Port {{port}} opened",
++    "portClosed": "Port {{port}} rule removed",
++    "portOpenTitle": "Port {{port}} is open, click to remove",
++    "portClosedTitle": "Port {{port}} is closed, click to open"
+   },
+   "port": {
+     "title": "Ports",
+@@ -1013,16 +1042,16 @@
+     "mysqlVersionInfo": "Available version: {{version}}"
+   },
+   "about": {
+-    "title": "Über LeePanel",
+-    "line1": "LeePanel — Kostenlos und Open-Source, die nächste Generation des Linux-Server-Management-Panels.",
++    "title": "Über OhMyPanel",
++    "line1": "OhMyPanel — Kostenlos und Open-Source, die nächste Generation des Linux-Server-Management-Panels.",
+     "line2": "Traditionelle Linux/VPS-Management-Panels leiden häufig an Sicherheitslücken, was Server-Administratoren endlose Kopfschmerzen bereitet.",
+-    "line3": "LeePanel wurde entwickelt, um dieses Problem ein für alle Mal zu lösen.",
++    "line3": "OhMyPanel wurde entwickelt, um dieses Problem ein für alle Mal zu lösen.",
+     "line4": "🛡️ Null Server-seitiger Code — Alle Operationen werden über SSH-Befehle von Ihrem lokalen Rechner ausgeführt. Kein Panel-Code auf dem Server installiert, keine zusätzlichen Ports geöffnet, wodurch das Sicherheitsrisiko des Panels an der Wurzel beseitigt wird.",
+     "line5": "Eine leichte plattformübergreifende Desktop-App, gebaut mit Tauri 2 + React, die einen einzigen nativen Client bietet zur Verwaltung von: SSH-Terminal & SFTP-Dateiverwaltung, Nginx / MySQL/MariaDB / PHP / Redis / Docker, Firewall / Kostenlose SSL-Zertifikate.",
+     "line6": "Installer nur 6 MB klein — leicht und flexibel! Ersetzt traditionelle browserbasierte Panels vollständig.",
+     "line7": "Wenn Sie Vorschläge oder Feedback haben, teilen Sie diese gerne in",
+     "github": "GitHub Discussions mit",
+-    "line8": "Website: https://www.LeePanel.com"
++    "line8": "Website: https://github.com/ZipperWang/OhMyPanel/releases"
+   },
+   "logs": {
+     "title": "Site-Protokolle",
+diff --git a/src/i18n/en.json b/src/i18n/en.json
+index a67cfd3..05f808b 100644
+--- a/src/i18n/en.json
++++ b/src/i18n/en.json
+@@ -77,7 +77,7 @@
+     "serviceUnavailable": "{{name}} is not installed or has stopped. Please go to Software Repository to install or start it."
+   },
+   "welcome": {
+-    "title": "Welcome to LeePanel",
++    "title": "Welcome to OhMyPanel",
+     "subtitle": "Your powerful SSH server management companion",
+     "secureConnections": "Secure Connections",
+     "fileManagement": "File Management",
+@@ -501,7 +501,7 @@
+     "connectToView": "Connect to a server to view dashboard",
+     "loadingSystem": "Loading system information...",
+     "cores": "cores",
+-    "welcome": "Welcome to LeePanel"
++    "welcome": "Welcome to OhMyPanel"
+   },
+   "database": {
+     "title": "Database Management",
+@@ -750,7 +750,7 @@
+     "updateReadyTitle": "Update Ready",
+     "updateInstalled": "v{{version}} installed. Restart the app later to apply the update.",
+     "updateTimedOut": "Update check timed out, please try again later.",
+-    "updateManualDownload": "If automatic update fails, please download the latest version from https://www.LeePanel.com.",
++    "updateManualDownload": "If automatic update fails, please download the latest version from https://github.com/ZipperWang/OhMyPanel/releases.",
+     "fetchingVersion": "Fetching version info...",
+     "clearingProxy": "Clearing proxy and retrying...",
+     "updateFailedHint": "If update fails:",
+@@ -1042,16 +1042,16 @@
+     "installMore": "Install More"
+   },
+   "about": {
+-    "title": "About LeePanel",
+-    "line1": "LeePanel — Free and open-source, the next-generation Linux server management panel.",
++    "title": "About OhMyPanel",
++    "line1": "OhMyPanel — Free and open-source, the next-generation Linux server management panel.",
+     "line2": "Traditional Linux/VPS management panels frequently suffer from security vulnerabilities, causing endless headaches for server administrators.",
+-    "line3": "LeePanel was built to solve this once and for all.",
++    "line3": "OhMyPanel was built to solve this once and for all.",
+     "line4": "🛡️ Zero server-side code — All operations are performed via SSH commands from your local machine. No panel code installed on the server, no extra ports exposed, eliminating the panel's own security risks at the root.",
+     "line5": "A lightweight cross-platform desktop app built with Tauri 2 + React, providing a single native client to manage: SSH Terminal & SFTP File Management, Nginx / MySQL/MariaDB / PHP / Redis / Docker, Firewall / Free SSL Certificates.",
+     "line6": "Installer as small as 6 MB — lightweight and flexible! Completely replacing traditional browser-based panels.",
+     "line7": "If you have any suggestions or feedback, feel free to share them in",
+     "github": "GitHub Discussions",
+-    "line8": "Website: https://www.LeePanel.com"
++    "line8": "Website: https://github.com/ZipperWang/OhMyPanel/releases"
+   },
+   "logs": {
+     "title": "Site Logs",
