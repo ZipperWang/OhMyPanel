@@ -276,6 +276,14 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
     return favorites.includes(path)
   }, [favorites])
 
+  const toggleFavorite = useCallback((path: string) => {
+    if (isFavorite(path)) {
+      removeFavorite(path)
+    } else {
+      addFavorite(path)
+    }
+  }, [addFavorite, isFavorite, removeFavorite])
+
   const navigateTo = useCallback(async (path: string, forceRefresh?: boolean) => {
     if (!sessionId) return
     setSearchQuery('')
@@ -1651,36 +1659,28 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
             }}
             onFocus={() => setPathInputValue(currentPath)}
           />
-          <button
-            className="fb-btn fb-btn-go"
-            onMouseDown={(e) => {
-              e.preventDefault() // 防止输入框失去焦点
-              handleGoToPath()
-            }}
-            title={t('files.go')}
-          >
-            {t('files.go')} ➜
-          </button>
-          <div style={{ width: '1px', height: '20px', background: 'var(--border)', margin: '0 18px' }} />
-          <div style={{ position: 'relative' }} ref={favoritesDropdownRef}>
+          <div className="fb-bookmarks" ref={favoritesDropdownRef}>
             <button
               className="fb-btn fb-btn-favorites"
               onClick={() => setShowFavoritesDropdown(!showFavoritesDropdown)}
               title={t('files.favorites')}
+              aria-expanded={showFavoritesDropdown}
+              aria-haspopup="menu"
             >
-                  {t('files.favorites')}
+              {t('files.favorites')}
             </button>
             {showFavoritesDropdown && (
-              <div className="fb-favorites-dropdown">
+              <div className="fb-favorites-dropdown" role="menu">
                 {favorites.length === 0 ? (
                   <div className="fb-favorite-empty">
                     {t('files.noFavorites')}
                   </div>
                 ) : (
-                  favorites.map((path, idx) => (
+                  favorites.map((path) => (
                     <div
-                      key={idx}
+                      key={path}
                       className="fb-favorite-item"
+                      role="menuitem"
                       onClick={() => {
                         navigateTo(path)
                         setShowFavoritesDropdown(false)
@@ -1882,13 +1882,18 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         >
           {contextMenu.entry.isDir ? (
             <>
-            <div className="fb-context-item" onClick={() => {
-              const newPath = currentPath === '/' ? `/${contextMenu.entry.name}` : `${currentPath}/${contextMenu.entry.name}`
-              navigateTo(newPath)
-              setContextMenu(null)
-            }}>
-              {t('files.open')}
-            </div>
+              <div className="fb-context-item" onClick={() => {
+                navigateTo(resolvePath(contextMenu.entry))
+                setContextMenu(null)
+              }}>
+                {t('files.open')}
+              </div>
+              <div className="fb-context-item" onClick={() => {
+                toggleFavorite(resolvePath(contextMenu.entry))
+                setContextMenu(null)
+              }}>
+                {isFavorite(resolvePath(contextMenu.entry)) ? t('files.removeFromFavorites') : t('files.addToFavorites')}
+              </div>
             </>
           ) : (
             <div className="fb-context-item" onClick={() => {
@@ -2017,7 +2022,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
           </div>
           <div className="fb-context-divider" />
           <div className="fb-context-item" onClick={() => {
-            addFavorite(currentPath)
+            toggleFavorite(currentPath)
             setBgContextMenu(null)
           }}>
             {isFavorite(currentPath) ? t('files.removeFromFavorites') : t('files.addToFavorites')}
