@@ -12,6 +12,7 @@ export interface TerminalDimensions {
 
 export interface TerminalSessionTabModel {
   id: string
+  configId: string
   name: string
   username: string
   host: string

@@ -1,6 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
 import { open as openExternal } from '@tauri-apps/plugin-shell'
 import { useTranslation } from 'react-i18next'
 import { Terminal as XTerminal } from '@xterm/xterm'
@@ -14,6 +13,7 @@ import TerminalCommandPalette from './TerminalCommandPalette'
 import TerminalContextMenu, { type TerminalContextMenuItem } from './TerminalContextMenu'
 import TerminalConnectionOverlay from './TerminalConnectionOverlay'
 import { getPasteGuard, type TerminalAction } from './terminalActions'
+import { subscribeTerminalOutput } from './terminalOutputBroker'
 import { ompTerminalTheme, terminalCssVariables, terminalSearchDecorations } from './terminalTheme'
 import type { TerminalConnectionState, TerminalDimensions } from './types'
 
@@ -27,6 +27,7 @@ interface TerminalViewportProps {
   onCancelReconnect?: () => void
   onCloseSession?: () => void
   onNewSession?: () => void
+  onDuplicateSession?: () => void
   onCloseOtherSessions?: () => void
   onNextSession?: () => void
   onPreviousSession?: () => void
@@ -83,6 +84,7 @@ export default forwardRef<TerminalHandle, TerminalViewportProps>(function Termin
   onCancelReconnect,
   onCloseSession,
   onNewSession,
+  onDuplicateSession,
   onCloseOtherSessions,
   onNextSession,
   onPreviousSession,
@@ -129,6 +131,7 @@ export default forwardRef<TerminalHandle, TerminalViewportProps>(function Termin
     onCancelReconnect,
     onCloseSession,
     onNewSession,
+    onDuplicateSession,
     onCloseOtherSessions,
     onNextSession,
     onPreviousSession,
@@ -141,6 +144,7 @@ export default forwardRef<TerminalHandle, TerminalViewportProps>(function Termin
     onCancelReconnect,
     onCloseSession,
     onNewSession,
+    onDuplicateSession,
     onCloseOtherSessions,
     onNextSession,
     onPreviousSession,
@@ -402,19 +406,9 @@ export default forwardRef<TerminalHandle, TerminalViewportProps>(function Termin
     host.addEventListener('paste', pasteHandler, true)
     const resizeObserver = new ResizeObserver(() => fitTerminal(false))
     resizeObserver.observe(host)
-    let disposed = false
-    const unlistenOutput = listen<{ sessionId: string; data: string }>('ssh-output', event => {
-      if (disposed) return
-      const sid = sidRef.current
-      if (!sid || event.payload.sessionId !== sid) return
-      term.write(event.payload.data)
-      if (!activeRef.current) callbackRef.current.onBackgroundOutput?.()
-    })
     fitTerminal(true)
 
     return () => {
-      disposed = true
-      void unlistenOutput.then(unlisten => unlisten()).catch(() => {})
       resizeObserver.disconnect()
       host.removeEventListener('paste', pasteHandler, true)
       inputDisposable.dispose()
@@ -427,6 +421,16 @@ export default forwardRef<TerminalHandle, TerminalViewportProps>(function Termin
       searchAddonRef.current = null
     }
   }, [fitTerminal, syncPtySize])
+
+  useEffect(() => {
+    if (!sessionId) return
+    return subscribeTerminalOutput(sessionId, data => {
+      const term = termRef.current
+      if (!term) return
+      term.write(data)
+      if (!activeRef.current) callbackRef.current.onBackgroundOutput?.()
+    })
+  }, [sessionId])
 
   useEffect(() => {
     if (!isActive) return
@@ -516,6 +520,7 @@ export default forwardRef<TerminalHandle, TerminalViewportProps>(function Termin
 
   const actions = useMemo<TerminalAction[]>(() => [
     { id: 'new-session', label: t('terminal.actions.newSession'), shortcut: 'Ctrl+Shift+T', disabled: !onNewSession, restoreTerminalFocus: false, run: () => onNewSession?.() },
+    { id: 'duplicate-session', label: t('terminal.actions.duplicateCurrent'), disabled: !onDuplicateSession, restoreTerminalFocus: false, run: () => onDuplicateSession?.() },
     { id: 'reconnect', label: t('terminal.actions.reconnectCurrent'), disabled: !onReconnect || connectionState.kind === 'connecting' || connectionState.kind === 'reconnecting', run: () => onReconnect?.() },
     { id: 'close-session', label: t('terminal.actions.closeCurrent'), shortcut: 'Ctrl+Shift+W', disabled: !onCloseSession, run: () => onCloseSession?.() },
     { id: 'close-other-sessions', label: t('terminal.actions.closeOthers'), disabled: !onCloseOtherSessions, run: () => onCloseOtherSessions?.() },
@@ -532,7 +537,7 @@ export default forwardRef<TerminalHandle, TerminalViewportProps>(function Termin
     { id: 'fullscreen', label: isFullscreen ? t('terminal.actions.exitFullscreen') : t('terminal.actions.enterFullscreen'), shortcut: 'Alt+Enter', run: toggleFullscreen },
     { id: 'connection-settings', label: t('terminal.actions.connectionSettings'), disabled: !onOpenConnectionSettings, restoreTerminalFocus: false, run: () => onOpenConnectionSettings?.() },
     { id: 'connection-details', label: t('terminal.actions.connectionDetails'), restoreTerminalFocus: false, run: () => setDetailsOpen(true) },
-  ], [changeFontSize, clearScreen, clearScrollback, connectionState.kind, copySelection, isFullscreen, onCloseOtherSessions, onCloseSession, onNewSession, onNextSession, onOpenConnectionSettings, onPreviousSession, onReconnect, openSearch, pasteFromClipboard, selectionAvailable, sessionId, t, toggleFullscreen])
+  ], [changeFontSize, clearScreen, clearScrollback, connectionState.kind, copySelection, isFullscreen, onCloseOtherSessions, onCloseSession, onDuplicateSession, onNewSession, onNextSession, onOpenConnectionSettings, onPreviousSession, onReconnect, openSearch, pasteFromClipboard, selectionAvailable, sessionId, t, toggleFullscreen])
 
   const contextItems = useMemo<TerminalContextMenuItem[]>(() => [
     { id: 'copy', label: t('common.copy'), disabled: !selectionAvailable, onSelect: copySelection },

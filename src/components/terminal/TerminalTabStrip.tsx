@@ -24,6 +24,13 @@ export default function TerminalTabStrip({ sessions, activeId, commandAvailable,
   const [loading, setLoading] = useState(false)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const activeIndex = sessions.findIndex(session => session.id === activeId)
+
+  const activateRelative = (offset: number) => {
+    if (sessions.length < 2) return
+    const index = activeIndex < 0 ? 0 : activeIndex
+    onActivate(sessions[(index + offset + sessions.length) % sessions.length].id)
+  }
 
   useEffect(() => {
     if (!menuOpen) return
@@ -50,6 +57,7 @@ export default function TerminalTabStrip({ sessions, activeId, commandAvailable,
 
   return (
     <div className="terminal-tab-strip" style={terminalCssVariables}>
+      <button className="terminal-tab-mobile-nav previous" onClick={() => activateRelative(-1)} disabled={sessions.length < 2} title={t('terminal.actions.previousSession')} aria-label={t('terminal.actions.previousSession')}>‹</button>
       <div className="terminal-tab-list" role="tablist">
         {sessions.map(session => (
           <TerminalTab
@@ -66,6 +74,7 @@ export default function TerminalTabStrip({ sessions, activeId, commandAvailable,
           />
         ))}
       </div>
+      <button className="terminal-tab-mobile-nav next" onClick={() => activateRelative(1)} disabled={sessions.length < 2} title={t('terminal.actions.nextSession')} aria-label={t('terminal.actions.nextSession')}>›</button>
       <button className="terminal-strip-button add" onClick={onNewSession} title={t('terminal.actions.newSession')} aria-label={t('terminal.actions.newSession')}>+</button>
       <div className="terminal-session-menu-wrap" ref={menuRef}>
         <button className={`terminal-strip-button ${menuOpen ? 'active' : ''}`} onClick={toggleMenu} title={t('terminal.tabs.sessionMenu')} aria-label={t('terminal.tabs.sessionMenu')}>⌄</button>
@@ -75,7 +84,7 @@ export default function TerminalTabStrip({ sessions, activeId, commandAvailable,
             {loading && <div className="terminal-session-menu-empty">…</div>}
             {!loading && savedConnections.length === 0 && <div className="terminal-session-menu-empty">{t('terminal.tabs.noRecentSessions')}</div>}
             {!loading && savedConnections.map(connection => {
-              const active = sessions.some(session => session.id === connection.id)
+              const active = sessions.some(session => session.configId === connection.id && session.state.kind === 'connected')
               return (
                 <button key={connection.id} onClick={() => { setMenuOpen(false); onConnect(connection) }}>
                   <span className={`terminal-menu-status ${active ? 'connected' : ''}`} />

@@ -1,5 +1,6 @@
 export type TerminalActionId =
   | 'new-session'
+  | 'duplicate-session'
   | 'close-session'
   | 'close-other-sessions'
   | 'next-session'

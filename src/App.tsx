@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, type CSSProperties, type RefCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { check, type Update } from '@tauri-apps/plugin-updater'
@@ -7,7 +7,9 @@ import Sidebar from './components/Sidebar'
 import ServerPanel, { type PanelSection } from './components/ServerPanel'
 import type { TerminalHandle } from './components/Terminal'
 import TerminalTabStrip from './components/terminal/TerminalTabStrip'
+import TerminalWorkspace from './components/terminal/TerminalWorkspace'
 import { parseConnectionHost } from './components/terminal/terminalActions'
+import { clearTerminalOutput, ensureTerminalOutputBroker } from './components/terminal/terminalOutputBroker'
 import type { TerminalConnectionState, TerminalDimensions, TerminalSavedConnection, TerminalSessionTabModel } from './components/terminal/types'
 import './App.css'
 
@@ -56,12 +58,17 @@ interface Settings {
 }
 
 interface ActiveSession {
+  tabId: string
   configId: string
   sessionId: string | null
   name: string
   hostKey: string
   username: string
   initialSection: PanelSection
+}
+
+function createTabId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 interface HostKeyVerification {
@@ -101,15 +108,17 @@ function App() {
   const { t } = useTranslation()
   // ponytail：多会话模式：sessions 数组加活动标签页，后端已支持 N 个并发 SSH 连接
   const [sessions, setSessions] = useState<ActiveSession[]>([])
-  const [activeConfigId, setActiveConfigId] = useState<string | null>(null)
+  const [activeTabId, setActiveTabId] = useState<string | null>(null)
   // ponytail：跟踪哪些会话拥有活动 SSH 连接（与标签页是否存在解耦）
-  const [connectedConfigIds, setConnectedConfigIds] = useState<Set<string>>(new Set())
-  const [connectingServerId, setConnectingServerId] = useState<string | null>(null)
+  const [connectedTabIds, setConnectedTabIds] = useState<Set<string>>(new Set())
+  const [connectingTabIds, setConnectingTabIds] = useState<Set<string>>(new Set())
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
   const [showWelcome, setShowWelcome] = useState(false)
   const termRefMap = useRef(new Map<string, TerminalHandle | null>())
+  const termRefCallbacks = useRef(new Map<string, RefCallback<TerminalHandle>>())
   const activeTermRef = useRef<TerminalHandle | null>(null)
+  const activeTabIdRef = useRef<string | null>(null)
   const [errorDialog, setErrorDialog] = useState<{ visible: boolean; message: string; type: 'auth' | 'network' | 'connection' | 'other' } | null>(null)
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null)
   const [connectionErrors, setConnectionErrors] = useState<Map<string, { type: 'auth' | 'network' | 'connection' | 'other'; message: string }>>(new Map())
@@ -135,12 +144,11 @@ function App() {
   const reconnectAttemptRef = useRef(new Map<string, number>())
   const reconnectTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const reconnectGenerationRef = useRef(new Map<string, number>())
-  const connectingIdsRef = useRef(new Set<string>())
+  const connectingTabIdsRef = useRef(new Set<string>())
   const autoReconnectRef = useRef(true)
   // ponytail：为 close_tab_on_disconnect 保存 ref，避免 useEffect 处理器使用过期闭包
   const closeTabOnDisconnectRef = useRef(false)
   const manualDisconnectSessionsRef = useRef(new Set<string>())
-  const replacingSessionsRef = useRef(new Set<string>())
   // ponytail：主动发起正常重启的会话，在断开时跳过自动重连
   const normalRebootSessionsRef = useRef(new Set<string>())
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0)
@@ -149,84 +157,99 @@ function App() {
 
   sessionsRef.current = sessions
   settingsRef.current = settings
+  activeTabIdRef.current = activeTabId
 
-  const activeSession = sessions.find(s => s.configId === activeConfigId) || null
+  const activeSession = sessions.find(s => s.tabId === activeTabId) || null
   const activeSessionId = activeSession?.sessionId ?? null
-  const activePanelSection = activeConfigId
-    ? sessionSections.get(activeConfigId) || activeSession?.initialSection || 'dashboard'
+  const activePanelSection = activeTabId
+    ? sessionSections.get(activeTabId) || activeSession?.initialSection || 'dashboard'
     : 'dashboard'
   // ponytail：活动标签页已断开且未重连，显示持久提示
-  const isDisconnected = activeConfigId
-    ? !connectedConfigIds.has(activeConfigId) &&
-      !reconnectingSessions.has(activeConfigId) &&
-      !connectingIdsRef.current.has(activeConfigId) &&
-      connectingServerId !== activeConfigId
+  const isDisconnected = activeTabId
+    ? !connectedTabIds.has(activeTabId) &&
+      !reconnectingSessions.has(activeTabId) &&
+      !connectingTabIdsRef.current.has(activeTabId)
     : false
 
-  const markDisconnected = (configId: string) => {
-    setConnectedConfigIds(prev => { const s = new Set(prev); s.delete(configId); return s })
+  const markDisconnected = (tabId: string) => {
+    setConnectedTabIds(prev => { const s = new Set(prev); s.delete(tabId); return s })
   }
 
-  const clearReconnectState = (configId: string) => {
-    const timer = reconnectTimersRef.current.get(configId)
+  const clearReconnectState = (tabId: string) => {
+    const timer = reconnectTimersRef.current.get(tabId)
     if (timer) clearTimeout(timer)
-    reconnectTimersRef.current.delete(configId)
-    reconnectingActiveRef.current.delete(configId)
-    reconnectAttemptRef.current.delete(configId)
+    reconnectTimersRef.current.delete(tabId)
+    reconnectingActiveRef.current.delete(tabId)
+    reconnectAttemptRef.current.delete(tabId)
     setReconnectingSessions(prev => {
-      if (!prev.has(configId)) return prev
+      if (!prev.has(tabId)) return prev
       const next = new Map(prev)
-      next.delete(configId)
+      next.delete(tabId)
       return next
     })
   }
 
-  const handleDisconnectAction = (configId: string) => {
-    if (closeTabOnDisconnectRef.current) removeSession(configId)
-    else markDisconnected(configId)
+  const handleDisconnectAction = (tabId: string) => {
+    if (closeTabOnDisconnectRef.current) removeSession(tabId)
+    else markDisconnected(tabId)
   }
 
-  const removeSession = (configId: string) => {
-    clearReconnectState(configId)
-    connectingIdsRef.current.delete(configId)
-    termRefMap.current.delete(configId)
+  const removeSession = (tabId: string) => {
+    clearReconnectState(tabId)
+    connectingTabIdsRef.current.delete(tabId)
+    setConnectingTabIds(prev => { const next = new Set(prev); next.delete(tabId); return next })
+    termRefMap.current.delete(tabId)
+    termRefCallbacks.current.delete(tabId)
     const current = sessionsRef.current
-    const removedIndex = current.findIndex(session => session.configId === configId)
-    const remaining = current.filter(session => session.configId !== configId)
+    const removedIndex = current.findIndex(session => session.tabId === tabId)
+    const removedSession = current[removedIndex]
+    if (removedSession?.sessionId) clearTerminalOutput(removedSession.sessionId)
+    const remaining = current.filter(session => session.tabId !== tabId)
     sessionsRef.current = remaining
     setSessions(remaining)
-    setConnectedConfigIds(prev => { const s = new Set(prev); s.delete(configId); return s })
-    setActiveConfigId(prev => {
-      if (prev !== configId) return prev
+    setConnectedTabIds(prev => { const s = new Set(prev); s.delete(tabId); return s })
+    setActiveTabId(prev => {
+      if (prev !== tabId) return prev
       if (remaining.length === 0) return null
-      return remaining[Math.min(Math.max(removedIndex, 0), remaining.length - 1)].configId
+      return remaining[Math.min(Math.max(removedIndex, 0), remaining.length - 1)].tabId
     })
-    setConnectionErrors(prev => { const next = new Map(prev); next.delete(configId); return next })
-    setSessionSections(prev => { const next = new Map(prev); next.delete(configId); return next })
-    setTerminalDimensions(prev => { const next = new Map(prev); next.delete(configId); return next })
-    setUnreadSessions(prev => { const next = new Set(prev); next.delete(configId); return next })
+    setConnectionErrors(prev => { const next = new Map(prev); next.delete(tabId); return next })
+    setSessionSections(prev => { const next = new Map(prev); next.delete(tabId); return next })
+    setTerminalDimensions(prev => { const next = new Map(prev); next.delete(tabId); return next })
+    setUnreadSessions(prev => { const next = new Set(prev); next.delete(tabId); return next })
   }
 
-  const closeSession = (configId: string) => {
-    const session = sessionsRef.current.find(item => item.configId === configId)
+  const closeSession = (tabId: string) => {
+    const session = sessionsRef.current.find(item => item.tabId === tabId)
     if (session?.sessionId) {
-      manualDisconnectSessionsRef.current.add(session.sessionId)
       invoke('ssh_disconnect', { sessionId: session.sessionId }).catch(() => {})
     }
-    removeSession(configId)
+    removeSession(tabId)
+  }
+
+  const getTerminalRef = (tabId: string): RefCallback<TerminalHandle> => {
+    const existing = termRefCallbacks.current.get(tabId)
+    if (existing) return existing
+    const callback: RefCallback<TerminalHandle> = handle => {
+      if (handle) termRefMap.current.set(tabId, handle)
+      else termRefMap.current.delete(tabId)
+      if (activeTabIdRef.current === tabId) activeTermRef.current = handle
+    }
+    termRefCallbacks.current.set(tabId, callback)
+    return callback
   }
 
   useEffect(() => {
-    activeTermRef.current = activeConfigId ? (termRefMap.current.get(activeConfigId) ?? null) : null
-    if (activeConfigId) {
+    activeTermRef.current = activeTabId ? (termRefMap.current.get(activeTabId) ?? null) : null
+    if (activeTabId) {
       setUnreadSessions(prev => {
-        if (!prev.has(activeConfigId)) return prev
+        if (!prev.has(activeTabId)) return prev
         const next = new Set(prev)
-        next.delete(activeConfigId)
+        next.delete(activeTabId)
         return next
       })
     }
-  }, [activeConfigId])
+  }, [activeTabId])
 
   // 可拖动分隔线
   const [sidebarWidth, setSidebarWidth] = useState(240)
@@ -236,20 +259,28 @@ function App() {
   useEffect(() => {
     const handleDisconnectRequest = (e: Event) => {
       const configId = (e as CustomEvent).detail?.configId
-      const sess = sessionsRef.current.find(s => s.configId === configId)
-      if (!sess) return
-      if (!sess.sessionId) {
-        handleDisconnectAction(configId)
-        return
+      const matchingSessions = sessionsRef.current.filter(session => session.configId === configId)
+      for (const session of matchingSessions) {
+        clearReconnectState(session.tabId)
+        connectingTabIdsRef.current.delete(session.tabId)
+        setConnectingTabIds(previous => {
+          const next = new Set(previous)
+          next.delete(session.tabId)
+          return next
+        })
+        if (!session.sessionId) {
+          handleDisconnectAction(session.tabId)
+          continue
+        }
+        manualDisconnectSessionsRef.current.add(session.sessionId)
+        Promise.race([
+          invoke('ssh_disconnect', { sessionId: session.sessionId }).catch(() => {}),
+          new Promise<void>(resolve => setTimeout(resolve, 3000)),
+        ]).then(() => {
+          handleDisconnectAction(session.tabId)
+          setTimeout(() => manualDisconnectSessionsRef.current.delete(session.sessionId!), 10_000)
+        })
       }
-      manualDisconnectSessionsRef.current.add(sess.sessionId)
-      const doRemove = () => {
-        handleDisconnectAction(configId)
-      }
-      Promise.race([
-        invoke('ssh_disconnect', { sessionId: sess.sessionId }).catch(() => {}),
-        new Promise<void>(resolve => setTimeout(resolve, 3000)),
-      ]).then(doRemove)
     }
     window.addEventListener('sidebar-disconnect', handleDisconnectRequest)
     return () => window.removeEventListener('sidebar-disconnect', handleDisconnectRequest)
@@ -664,74 +695,71 @@ function App() {
 
   const startReconnect = (session: ActiveSession, delayMs: number) => {
     const sid = session.sessionId
-    if (!sid || reconnectingActiveRef.current.get(session.configId)) return
-    const generation = (reconnectGenerationRef.current.get(session.configId) ?? 0) + 1
-    reconnectGenerationRef.current.set(session.configId, generation)
-    reconnectingActiveRef.current.set(session.configId, true)
-    reconnectAttemptRef.current.set(session.configId, 0)
-    markDisconnected(session.configId)
-    setConnectionErrors(prev => { const next = new Map(prev); next.delete(session.configId); return next })
-    setReconnectingSessions(prev => new Map(prev).set(session.configId, { name: session.name, attempt: 0 }))
+    if (!sid || reconnectingActiveRef.current.get(session.tabId)) return
+    const generation = (reconnectGenerationRef.current.get(session.tabId) ?? 0) + 1
+    reconnectGenerationRef.current.set(session.tabId, generation)
+    reconnectingActiveRef.current.set(session.tabId, true)
+    reconnectAttemptRef.current.set(session.tabId, 0)
+    markDisconnected(session.tabId)
+    setConnectionErrors(prev => { const next = new Map(prev); next.delete(session.tabId); return next })
+    setReconnectingSessions(prev => new Map(prev).set(session.tabId, { name: session.name, attempt: 0 }))
 
     const attemptReconnect = async () => {
-      if (!reconnectingActiveRef.current.get(session.configId) || reconnectGenerationRef.current.get(session.configId) !== generation) return
+      if (!reconnectingActiveRef.current.get(session.tabId) || reconnectGenerationRef.current.get(session.tabId) !== generation) return
       const currentSettings = settingsRef.current
-      const attempt = (reconnectAttemptRef.current.get(session.configId) ?? 0) + 1
-      reconnectAttemptRef.current.set(session.configId, attempt)
-      setReconnectingSessions(prev => new Map(prev).set(session.configId, { name: session.name, attempt }))
+      const attempt = (reconnectAttemptRef.current.get(session.tabId) ?? 0) + 1
+      reconnectAttemptRef.current.set(session.tabId, attempt)
+      setReconnectingSessions(prev => new Map(prev).set(session.tabId, { name: session.name, attempt }))
       try {
         await invoke('ssh_reconnect', { sessionId: sid })
-        if (!reconnectingActiveRef.current.get(session.configId) || reconnectGenerationRef.current.get(session.configId) !== generation) {
+        if (!reconnectingActiveRef.current.get(session.tabId) || reconnectGenerationRef.current.get(session.tabId) !== generation) {
           manualDisconnectSessionsRef.current.add(sid)
           await invoke('ssh_disconnect', { sessionId: sid }).catch(() => {})
+          setTimeout(() => manualDisconnectSessionsRef.current.delete(sid), 10_000)
           return
         }
-        clearReconnectState(session.configId)
-        setConnectedConfigIds(prev => new Set(prev).add(session.configId))
+        clearReconnectState(session.tabId)
+        setConnectedTabIds(prev => new Set(prev).add(session.tabId))
         showToast(`[${session.name}] ${t('common.reconnectSuccess', { attempt })}`)
       } catch {
-        if (!reconnectingActiveRef.current.get(session.configId) || reconnectGenerationRef.current.get(session.configId) !== generation) return
+        if (!reconnectingActiveRef.current.get(session.tabId) || reconnectGenerationRef.current.get(session.tabId) !== generation) return
         if (attempt >= currentSettings.max_reconnect_attempts) {
-          clearReconnectState(session.configId)
+          clearReconnectState(session.tabId)
           showToast(`[${session.name}] ${t('common.reconnectFailed', { max: currentSettings.max_reconnect_attempts })}`)
-          handleDisconnectAction(session.configId)
+          handleDisconnectAction(session.tabId)
           return
         }
         const timer = setTimeout(attemptReconnect, currentSettings.reconnect_interval * 1000)
-        reconnectTimersRef.current.set(session.configId, timer)
+        reconnectTimersRef.current.set(session.tabId, timer)
       }
     }
 
     const timer = setTimeout(attemptReconnect, delayMs)
-    reconnectTimersRef.current.set(session.configId, timer)
+    reconnectTimersRef.current.set(session.tabId, timer)
   }
 
   useEffect(() => {
     const unlisten = listen<{ sessionId: string; reason: string }>('ssh-disconnected', event => {
       const sid = event.payload.sessionId
       const sess = sessionsRef.current.find(s => s.sessionId === sid)
-      if (!sess) return
-      markDisconnected(sess.configId)
-      if (replacingSessionsRef.current.has(sid)) {
-        replacingSessionsRef.current.delete(sid)
-        return
-      }
       if (manualDisconnectSessionsRef.current.has(sid)) {
         manualDisconnectSessionsRef.current.delete(sid)
-        handleDisconnectAction(sess.configId)
+        if (sess) handleDisconnectAction(sess.tabId)
         return
       }
+      if (!sess) return
+      markDisconnected(sess.tabId)
       if (normalRebootSessionsRef.current.has(sid)) {
         normalRebootSessionsRef.current.delete(sid)
         showToast(`ℹ [${sess.name}] ${t('common.normalRebootHint')}`)
-        handleDisconnectAction(sess.configId)
+        handleDisconnectAction(sess.tabId)
         return
       }
       if (autoReconnectRef.current) {
         startReconnect(sess, settingsRef.current.reconnect_interval * 1000)
       } else if (!autoReconnectRef.current) {
         showToast(`[${sess.name}] ${t('common.connectionLost')}`)
-        handleDisconnectAction(sess.configId)
+        handleDisconnectAction(sess.tabId)
       }
     })
     return () => { unlisten.then((fn) => fn()) }
@@ -787,56 +815,54 @@ function App() {
     return { type: 'other', message: errorMsg }
   }
 
-  const handleSelectConnection = (conn: SidebarConnection) => {
-    handleDirectConnect(conn)
-  }
-
-  const handleDirectConnect = useCallback(async (conn: SidebarConnection, forceReconnect = false) => {
-    const existing = sessionsRef.current.find(s => s.configId === conn.id)
-    const isConnected = existing !== undefined && connectedConfigIds.has(conn.id)
-    if (isConnected && !forceReconnect) {
-      setActiveConfigId(conn.id)
+  const handleDirectConnect = useCallback(async (conn: SidebarConnection, replaceTabId?: string) => {
+    const existing = replaceTabId ? sessionsRef.current.find(session => session.tabId === replaceTabId) : undefined
+    const tabId = existing?.tabId ?? createTabId()
+    if (connectingTabIdsRef.current.has(tabId)) {
+      setActiveTabId(tabId)
       return
     }
-    if (connectingIdsRef.current.has(conn.id)) {
-      setActiveConfigId(conn.id)
-      return
-    }
-    if (isConnected && existing?.sessionId) {
-      replacingSessionsRef.current.add(existing.sessionId)
-      await invoke('ssh_disconnect', { sessionId: existing.sessionId }).catch(() => {})
-      markDisconnected(conn.id)
-    }
-
     const doConnect = async (username: string, password?: string, keyPath?: string) => {
-      connectingIdsRef.current.add(conn.id)
-      setConnectingServerId(conn.id)
+      connectingTabIdsRef.current.add(tabId)
+      setConnectingTabIds(prev => new Set(prev).add(tabId))
       setError('')
       const hostKey = `${conn.host}_${conn.port}`
       const panelKey = `lastPanel_${username}@${hostKey}`
       const estCols = Math.max(80, Math.floor((window.innerWidth - (sidebarVisible ? sidebarWidth + 10 : 40) - 20) / 8.4))
       const estRows = Math.max(24, Math.floor((window.innerHeight - 100) / 17))
       try {
+        clearReconnectState(tabId)
+        if (existing?.sessionId) {
+          const current = sessionsRef.current.map(session => session.tabId === tabId ? { ...session, sessionId: null } : session)
+          sessionsRef.current = current
+          setSessions(current)
+          markDisconnected(tabId)
+          await invoke('ssh_disconnect', { sessionId: existing.sessionId }).catch(() => {})
+          clearTerminalOutput(existing.sessionId)
+        }
         const savedPanelValue = await invoke<string>('ui_state_get', { key: panelKey }).catch(() => '')
+        if (!connectingTabIdsRef.current.has(tabId)) return
         const savedPanel = (savedPanelValue || 'dashboard') as PanelSection
         const placeholder: ActiveSession = {
+          tabId,
           configId: conn.id,
-          sessionId: existing?.sessionId ?? null,
+          sessionId: null,
           name: conn.name || conn.host,
           hostKey,
           username,
           initialSection: existing?.initialSection ?? savedPanel,
         }
         setSessions(prev => {
-          const next = prev.some(session => session.configId === conn.id)
-            ? prev.map(session => session.configId === conn.id ? { ...session, name: placeholder.name, hostKey, username } : session)
+          const next = prev.some(session => session.tabId === tabId)
+            ? prev.map(session => session.tabId === tabId ? placeholder : session)
             : [...prev, placeholder]
           sessionsRef.current = next
           return next
         })
-        setSessionSections(prev => prev.has(conn.id) ? prev : new Map(prev).set(conn.id, placeholder.initialSection))
-        setConnectionErrors(prev => { const next = new Map(prev); next.delete(conn.id); return next })
-        setActiveConfigId(conn.id)
+        setSessionSections(prev => prev.has(tabId) ? prev : new Map(prev).set(tabId, placeholder.initialSection))
+        setConnectionErrors(prev => { const next = new Map(prev); next.delete(tabId); return next })
+        setActiveTabId(tabId)
+        await ensureTerminalOutputBroker()
         let sid = ''
         let hostKeyUpdates = 0
         while (!sid) {
@@ -885,20 +911,20 @@ function App() {
             hostKeyUpdates += 1
           }
         }
-        if (!connectingIdsRef.current.has(conn.id) || !sessionsRef.current.some(session => session.configId === conn.id)) {
+        if (!connectingTabIdsRef.current.has(tabId) || !sessionsRef.current.some(session => session.tabId === tabId)) {
           await invoke('ssh_disconnect', { sessionId: sid }).catch(() => {})
+          clearTerminalOutput(sid)
           return
         }
         setSessions(prev => {
-          const next = prev.map(session => session.configId === conn.id
+          const next = prev.map(session => session.tabId === tabId
             ? { ...session, sessionId: sid, name: conn.name || conn.host, hostKey, username }
             : session)
           sessionsRef.current = next
           return next
         })
-        setConnectedConfigIds(prev => new Set(prev).add(conn.id))
-        setActiveConfigId(conn.id)
-        setConnectionErrors(prev => { const next = new Map(prev); next.delete(conn.id); return next })
+        setConnectedTabIds(prev => new Set(prev).add(tabId))
+        setConnectionErrors(prev => { const next = new Map(prev); next.delete(tabId); return next })
         const WELCOME_INTERVAL = 6 * 60 * 60 * 1000
         const lastShown = Number(localStorage.getItem('welcome_last_shown') || 0)
         if (Date.now() - lastShown >= WELCOME_INTERVAL) {
@@ -909,13 +935,13 @@ function App() {
       } catch (e) {
         const msg = String(e)
         const { type, message } = classifyError(msg)
-        if (connectingIdsRef.current.has(conn.id)) {
-          setConnectionErrors(prev => new Map(prev).set(conn.id, { type, message }))
-          setErrorDialog({ visible: true, message, type })
+        if (connectingTabIdsRef.current.has(tabId)) {
+          setConnectionErrors(prev => new Map(prev).set(tabId, { type, message }))
+          if (activeTabIdRef.current === tabId) setErrorDialog({ visible: true, message, type })
         }
       } finally {
-        connectingIdsRef.current.delete(conn.id)
-        setConnectingServerId(current => current === conn.id ? null : current)
+        connectingTabIdsRef.current.delete(tabId)
+        setConnectingTabIds(prev => { const next = new Set(prev); next.delete(tabId); return next })
       }
     }
 
@@ -935,13 +961,32 @@ function App() {
     }
 
     void doConnect(conn.username, password, keyPath)
-  }, [connectedConfigIds, sidebarVisible, sidebarWidth])
+  }, [sidebarVisible, sidebarWidth])
+
+  const handleSelectConnection = (conn: SidebarConnection) => {
+    const existing = sessionsRef.current.find(session => session.tabId === activeTabIdRef.current && session.configId === conn.id)
+      ?? sessionsRef.current.find(session => session.configId === conn.id && connectedTabIds.has(session.tabId))
+      ?? sessionsRef.current.find(session => session.configId === conn.id)
+    if (existing) {
+      setActiveTabId(existing.tabId)
+      return
+    }
+    void handleDirectConnect(conn)
+  }
+
+  const handleSidebarConnect = (conn: SidebarConnection) => {
+    const reusable = sessionsRef.current.find(session => session.configId === conn.id && !connectedTabIds.has(session.tabId) && !connectingTabIdsRef.current.has(session.tabId))
+    void handleDirectConnect(conn, reusable?.tabId)
+  }
 
   // 监听来自侧边栏的 reconnect-after-edit 事件（连接按钮）
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail
-      if (detail?.conn) void handleDirectConnect(detail.conn, true)
+      if (!detail?.conn) return
+      const target = sessionsRef.current.find(session => session.tabId === activeTabIdRef.current && session.configId === detail.conn.id)
+        ?? sessionsRef.current.find(session => session.configId === detail.conn.id)
+      void handleDirectConnect(detail.conn, target?.tabId)
     }
     window.addEventListener('sidebar-reconnect-after-edit', handler)
     return () => window.removeEventListener('sidebar-reconnect-after-edit', handler)
@@ -957,50 +1002,66 @@ function App() {
     setEditConnectionRequest({ id: configId, requestId: Date.now() })
   }
 
-  const cancelReconnect = (configId: string) => {
-    reconnectGenerationRef.current.set(configId, (reconnectGenerationRef.current.get(configId) ?? 0) + 1)
-    clearReconnectState(configId)
-    markDisconnected(configId)
+  const cancelReconnect = (tabId: string) => {
+    reconnectGenerationRef.current.set(tabId, (reconnectGenerationRef.current.get(tabId) ?? 0) + 1)
+    clearReconnectState(tabId)
+    markDisconnected(tabId)
   }
 
-  const reconnectSession = async (configId: string) => {
-    cancelReconnect(configId)
+  const reconnectSession = async (tabId: string) => {
+    const session = sessionsRef.current.find(item => item.tabId === tabId)
+    if (!session) return
+    cancelReconnect(tabId)
     setConnectionErrors(prev => {
-      if (!prev.has(configId)) return prev
+      if (!prev.has(tabId)) return prev
       const next = new Map(prev)
-      next.delete(configId)
+      next.delete(tabId)
       return next
     })
     try {
       const connections = await invoke<TerminalSavedConnection[]>('config_list')
-      const connection = connections.find(item => item.id === configId)
+      const connection = connections.find(item => item.id === session.configId)
       if (!connection) throw new Error(t('terminal.connection.configurationMissing'))
-      handleDirectConnect(connection)
+      await handleDirectConnect(connection, tabId)
     } catch (reconnectError) {
       const message = String(reconnectError)
-      setConnectionErrors(prev => new Map(prev).set(configId, { type: 'connection', message }))
+      setConnectionErrors(prev => new Map(prev).set(tabId, { type: 'connection', message }))
       setErrorDialog({ visible: true, message, type: 'connection' })
     }
   }
 
-  const closeOtherSessions = (configId: string) => {
+  const duplicateSession = async (tabId: string) => {
+    const session = sessionsRef.current.find(item => item.tabId === tabId)
+    if (!session) return
+    try {
+      const connections = await invoke<TerminalSavedConnection[]>('config_list')
+      const connection = connections.find(item => item.id === session.configId)
+      if (!connection) throw new Error(t('terminal.connection.configurationMissing'))
+      await handleDirectConnect(connection)
+    } catch (duplicateError) {
+      const message = String(duplicateError)
+      setErrorDialog({ visible: true, message, type: 'connection' })
+    }
+  }
+
+  const closeOtherSessions = (tabId: string) => {
     for (const session of [...sessionsRef.current]) {
-      if (session.configId !== configId) closeSession(session.configId)
+      if (session.tabId !== tabId) closeSession(session.tabId)
     }
   }
 
   const activateRelativeSession = (offset: number) => {
     const current = sessionsRef.current
     if (current.length < 2) return
-    const index = current.findIndex(session => session.configId === activeConfigId)
+    const index = current.findIndex(session => session.tabId === activeTabId)
     const nextIndex = (Math.max(index, 0) + offset + current.length) % current.length
-    setActiveConfigId(current[nextIndex].configId)
+    setActiveTabId(current[nextIndex].tabId)
   }
 
   const reorderSessions = (fromId: string, toId: string) => {
     const current = sessionsRef.current
-    const fromIndex = current.findIndex(session => session.configId === fromId)
-    const toIndex = current.findIndex(session => session.configId === toId)
+    const fromIndex = current.findIndex(session => session.tabId === fromId)
+    const toIndex = current.findIndex(session => session.tabId === toId)
     if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
     const next = [...current]
     const [moved] = next.splice(fromIndex, 1)
@@ -1009,85 +1070,96 @@ function App() {
     setSessions(next)
   }
 
-  const updateSessionSection = (configId: string, section: PanelSection) => {
+  const updateSessionSection = (tabId: string, section: PanelSection) => {
     setSessionSections(prev => {
-      if (prev.get(configId) === section) return prev
-      return new Map(prev).set(configId, section)
+      if (prev.get(tabId) === section) return prev
+      return new Map(prev).set(tabId, section)
     })
   }
 
-  const updateTerminalDimensions = (configId: string, dimensions: TerminalDimensions) => {
+  const updateTerminalDimensions = (tabId: string, dimensions: TerminalDimensions) => {
     setTerminalDimensions(prev => {
-      const current = prev.get(configId)
+      const current = prev.get(tabId)
       if (current?.cols === dimensions.cols && current.rows === dimensions.rows) return prev
-      return new Map(prev).set(configId, dimensions)
+      return new Map(prev).set(tabId, dimensions)
     })
   }
 
-  const markTerminalBackgroundOutput = (configId: string) => {
-    if (configId === activeConfigId && activePanelSection === 'terminal') return
-    setUnreadSessions(prev => prev.has(configId) ? prev : new Set(prev).add(configId))
+  const markTerminalBackgroundOutput = (tabId: string) => {
+    if (tabId === activeTabId && activePanelSection === 'terminal') return
+    setUnreadSessions(prev => prev.has(tabId) ? prev : new Set(prev).add(tabId))
   }
 
-  const getConnectionState = (configId: string): TerminalConnectionState => {
-    const reconnecting = reconnectingSessions.get(configId)
+  const getConnectionState = (tabId: string): TerminalConnectionState => {
+    const reconnecting = reconnectingSessions.get(tabId)
     if (reconnecting) return { kind: 'reconnecting', attempt: reconnecting.attempt, max: settings.max_reconnect_attempts }
-    if (connectingIdsRef.current.has(configId) || connectingServerId === configId) return { kind: 'connecting' }
-    if (connectedConfigIds.has(configId)) return { kind: 'connected' }
-    const connectionError = connectionErrors.get(configId)
+    if (connectingTabIdsRef.current.has(tabId)) return { kind: 'connecting' }
+    if (connectedTabIds.has(tabId)) return { kind: 'connected' }
+    const connectionError = connectionErrors.get(tabId)
     if (connectionError?.type === 'auth') return { kind: 'authentication-failed', message: connectionError.message }
     return { kind: 'disconnected', reason: connectionError?.message }
   }
 
+  const sessionCountByConfig = sessions.reduce((counts, session) => {
+    counts.set(session.configId, (counts.get(session.configId) ?? 0) + 1)
+    return counts
+  }, new Map<string, number>())
+  const sessionIndexByConfig = new Map<string, number>()
   const terminalTabs: TerminalSessionTabModel[] = sessions.map(session => {
     const endpoint = parseConnectionHost(session.hostKey)
+    const index = (sessionIndexByConfig.get(session.configId) ?? 0) + 1
+    sessionIndexByConfig.set(session.configId, index)
+    const name = (sessionCountByConfig.get(session.configId) ?? 0) > 1 ? `${session.name} · ${index}` : session.name
     return {
-      id: session.configId,
-      name: session.name,
+      id: session.tabId,
+      configId: session.configId,
+      name,
       username: session.username,
       host: endpoint.host,
       port: endpoint.port,
-      state: getConnectionState(session.configId),
-      dimensions: terminalDimensions.get(session.configId),
-      hasUnread: unreadSessions.has(session.configId),
+      state: getConnectionState(session.tabId),
+      dimensions: terminalDimensions.get(session.tabId),
+      hasUnread: unreadSessions.has(session.tabId),
     }
   })
 
   const terminalTabStrip = sessions.length > 0 ? (
     <TerminalTabStrip
       sessions={terminalTabs}
-      activeId={activeConfigId}
+      activeId={activeTabId}
       commandAvailable={activePanelSection === 'terminal'}
-      onActivate={setActiveConfigId}
+      onActivate={setActiveTabId}
       onClose={closeSession}
       onNewSession={requestNewSession}
-      onConnect={handleDirectConnect}
+      onConnect={connection => void handleDirectConnect(connection)}
       onOpenCommandPalette={() => activeTermRef.current?.openCommandPalette()}
       onReorder={reorderSessions}
     />
   ) : undefined
 
   const terminalOwnsConnectionStatus = activePanelSection === 'terminal' && activeSession !== null
+  const connectedServerIds = Array.from(new Set(sessions.filter(session => connectedTabIds.has(session.tabId)).map(session => session.configId)))
+  const connectingServerIds = Array.from(new Set(sessions.filter(session => connectingTabIds.has(session.tabId) || reconnectingSessions.has(session.tabId)).map(session => session.configId)))
   const showTopBar = Boolean(
     error ||
     pendingUpdate ||
-    (!terminalOwnsConnectionStatus && (reconnectingSessions.has(activeConfigId || '') || toast || isDisconnected))
+    (!terminalOwnsConnectionStatus && (reconnectingSessions.has(activeTabId || '') || toast || isDisconnected))
   )
 
   return (
     <div className="app">
       {sidebarVisible && (
         <>
-          <div style={{ width: sidebarWidth, minWidth: sidebarWidth, flexShrink: 0, display: 'flex', position: 'relative' }}>
+          <div className="sidebar-shell" style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
             <Sidebar
               onSelect={handleSelectConnection}
-              onConnect={handleDirectConnect}
+              onConnect={handleSidebarConnect}
               onNew={() => {}}
               onCreateConnection={handleCreateConnection}
               refreshKey={sidebarRefreshKey}
-              connectedIds={Array.from(connectedConfigIds)}
-              connectingServerId={connectingServerId}
-              activeConfigId={activeConfigId}
+              connectedIds={connectedServerIds}
+              connectingIds={connectingServerIds}
+              activeConfigId={activeSession?.configId ?? null}
               newConnectionRequestId={newConnectionRequestId}
               editConnectionRequest={editConnectionRequest}
               onNewConnectionRequestHandled={requestId => setNewConnectionRequestId(current => current === requestId ? 0 : current)}
@@ -1120,16 +1192,16 @@ function App() {
       <div className="main-area">
         {showTopBar && <div className="top-bar">
           {error && <div className="error-bar">{error}</div>}
-          {!terminalOwnsConnectionStatus && activeConfigId && reconnectingSessions.has(activeConfigId) && (() => {
-            const info = reconnectingSessions.get(activeConfigId)!
+          {!terminalOwnsConnectionStatus && activeTabId && reconnectingSessions.has(activeTabId) && (() => {
+            const info = reconnectingSessions.get(activeTabId)!
             return (
               <div className="toast-bar">
                 <span>↻ [{info.name}] {t('common.reconnectAttempt', { attempt: info.attempt, max: settings.max_reconnect_attempts })}</span>
-                <button className="toast-stop-btn" onClick={() => cancelReconnect(activeConfigId)}>{t('common.stop')}</button>
+                <button className="toast-stop-btn" onClick={() => cancelReconnect(activeTabId)}>{t('common.stop')}</button>
               </div>
             )
           })()}
-          {!terminalOwnsConnectionStatus && toast && !reconnectingSessions.has(activeConfigId || '') && !isDisconnected && (
+          {!terminalOwnsConnectionStatus && toast && !reconnectingSessions.has(activeTabId || '') && !isDisconnected && (
             <div className="toast-bar">
               <span>{toast}</span>
             </div>
@@ -1156,48 +1228,47 @@ function App() {
             </div>
           </div>
         )}
-        <div className="split-container" ref={splitContainerRef}>
-          <div className="split-full">
-            {sessions.map(s => (
-              <div key={s.configId} className={`server-session ${s.configId === activeConfigId ? 'active' : ''}`}>
+        <TerminalWorkspace terminalMode={activePanelSection === 'terminal'} tabStrip={terminalTabStrip}>
+          <div className="split-container" ref={splitContainerRef}>
+            <div className="split-full">
+              {sessions.map(s => (
+              <div key={s.tabId} className={`server-session ${s.tabId === activeTabId ? 'active' : ''}`}>
                 <ServerPanel
                   sessionId={s.sessionId}
                   connHost={s.hostKey}
                   connUsername={s.username}
                   initialSection={s.initialSection}
-                  jumpToPath={s.configId === activeConfigId ? jumpToPath : null}
+                  jumpToPath={s.tabId === activeTabId ? jumpToPath : null}
                   setJumpToPath={setJumpToPath}
-                  termRef={{
-                    get current() { return termRefMap.current.get(s.configId) ?? null },
-                    set current(h: TerminalHandle | null) { termRefMap.current.set(s.configId, h); if (s.configId === activeConfigId) activeTermRef.current = h }
-                  }}
+                  termRef={getTerminalRef(s.tabId)}
                   onStartUpload={handleStartUpload}
                   onUploadComplete={uploadCompleteRef}
                   appSettings={settings}
                   onToggleAutoReconnect={toggleAutoReconnect}
                   onUpdateSettings={handleUpdateSettings}
                   onShowToast={showToast}
-                  isSessionActive={s.configId === activeConfigId}
-                  terminalTabStrip={s.configId === activeConfigId ? terminalTabStrip : undefined}
-                  connectionState={getConnectionState(s.configId)}
-                  onReconnect={() => void reconnectSession(s.configId)}
-                  onCancelReconnect={() => cancelReconnect(s.configId)}
-                  onCloseSession={() => closeSession(s.configId)}
+                  isSessionActive={s.tabId === activeTabId}
+                  connectionState={getConnectionState(s.tabId)}
+                  onReconnect={() => void reconnectSession(s.tabId)}
+                  onCancelReconnect={() => cancelReconnect(s.tabId)}
+                  onCloseSession={() => closeSession(s.tabId)}
                   onNewSession={requestNewSession}
-                  onCloseOtherSessions={() => closeOtherSessions(s.configId)}
+                  onDuplicateSession={() => void duplicateSession(s.tabId)}
+                  onCloseOtherSessions={() => closeOtherSessions(s.tabId)}
                   onNextSession={() => activateRelativeSession(1)}
                   onPreviousSession={() => activateRelativeSession(-1)}
                   onEditConnection={() => requestEditConnection(s.configId)}
-                  onSectionChange={section => updateSessionSection(s.configId, section)}
-                  onTerminalDimensionsChange={dimensions => updateTerminalDimensions(s.configId, dimensions)}
-                  onTerminalBackgroundOutput={() => markTerminalBackgroundOutput(s.configId)}
+                  onSectionChange={section => updateSessionSection(s.tabId, section)}
+                  onTerminalDimensionsChange={dimensions => updateTerminalDimensions(s.tabId, dimensions)}
+                  onTerminalBackgroundOutput={() => markTerminalBackgroundOutput(s.tabId)}
                 />
               </div>
-            ))}
-            {/* ponytail：没有会话时仍显示导航，仪表盘和讨论区可点击，其他项禁用 */}
-            {sessions.length === 0 && <ServerPanel sessionId={null} onShowToast={showToast} />}
+              ))}
+              {/* ponytail：没有会话时仍显示导航，仪表盘和讨论区可点击，其他项禁用 */}
+              {sessions.length === 0 && <ServerPanel sessionId={null} onShowToast={showToast} />}
+            </div>
           </div>
-        </div>
+        </TerminalWorkspace>
       </div>
 
 

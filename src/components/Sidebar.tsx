@@ -33,7 +33,7 @@ interface SidebarProps {
   onCreateConnection: (data: NewConnectionData) => Promise<void>
   refreshKey?: number
   connectedIds?: string[]
-  connectingServerId?: string | null
+  connectingIds?: string[]
   activeConfigId?: string | null
   newConnectionRequestId?: number
   editConnectionRequest?: { id: string; requestId: number } | null
@@ -47,7 +47,7 @@ interface ContextMenu {
   conn: Connection
 }
 
-export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection, refreshKey, connectedIds, connectingServerId, activeConfigId, newConnectionRequestId = 0, editConnectionRequest, onNewConnectionRequestHandled, onEditConnectionRequestHandled }: SidebarProps) {
+export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection, refreshKey, connectedIds, connectingIds, activeConfigId, newConnectionRequestId = 0, editConnectionRequest, onNewConnectionRequestHandled, onEditConnectionRequestHandled }: SidebarProps) {
   const { t, i18n } = useTranslation()
   const [connections, setConnections] = useState<Connection[]>([])
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
@@ -295,6 +295,8 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
         )}
         {connections.map((conn) => {
           const isConnected = connectedIds?.includes(conn.id) ?? false
+          const isConnecting = connectingIds?.includes(conn.id) ?? false
+          const showConnecting = isConnecting && !isConnected
           return (
             <div
               key={conn.id}
@@ -321,9 +323,9 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
                     }
                   }}
                   title={isConnected ? t('common.disconnect') : t('common.connect')}
-                  disabled={connectingServerId === conn.id}
+                  disabled={showConnecting}
                 >
-                  {connectingServerId === conn.id ? t('common.connecting') : (isConnected ? t('common.disconnect') : t('common.connect'))}
+                  {showConnecting ? t('common.connecting') : (isConnected ? t('common.disconnect') : t('common.connect'))}
                 </button>
                 <button
                   className="btn-edit"

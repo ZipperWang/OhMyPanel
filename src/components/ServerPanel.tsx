@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useRef, useCallback, type Ref } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
 import { open } from '@tauri-apps/plugin-shell'
@@ -24,7 +24,6 @@ import DockerPanel from './panels/DockerPanel'
 import TunnelPanel from './panels/TunnelPanel'
 import Terminal from './Terminal'
 import type { TerminalHandle } from './Terminal'
-import TerminalWorkspace from './terminal/TerminalWorkspace'
 import { parseConnectionHost } from './terminal/terminalActions'
 import type { TerminalConnectionState, TerminalDimensions } from './terminal/types'
 import FileBrowser, { type FileBrowserHandle } from './FileBrowser'
@@ -51,7 +50,7 @@ interface ServerPanelProps {
   initialSection?: PanelSection
   jumpToPath?: string | null
   setJumpToPath?: (path: string | null) => void
-  termRef?: React.RefObject<TerminalHandle | null>
+  termRef?: Ref<TerminalHandle>
   onStartUpload?: (files: { file: File; fileName: string; remotePath: string }[]) => void
   onUploadComplete?: React.MutableRefObject<(() => void) | null>
   appSettings?: AppSettings
@@ -59,12 +58,12 @@ interface ServerPanelProps {
   onUpdateSettings?: (settings: Partial<AppSettings>) => Promise<void>
   onShowToast?: (msg: string) => void
   isSessionActive?: boolean
-  terminalTabStrip?: ReactNode
   connectionState?: TerminalConnectionState
   onReconnect?: () => void
   onCancelReconnect?: () => void
   onCloseSession?: () => void
   onNewSession?: () => void
+  onDuplicateSession?: () => void
   onCloseOtherSessions?: () => void
   onNextSession?: () => void
   onPreviousSession?: () => void
@@ -97,9 +96,16 @@ const NAV_ITEMS: { key: PanelSection; labelKey: string }[] = [
 
 const isPanelSection = (section: string): section is PanelSection => NAV_ITEMS.some(item => item.key === section)
 
-export default function ServerPanel({ sessionId, connHost, connUsername, initialSection = 'dashboard', jumpToPath, setJumpToPath, termRef, onStartUpload, onUploadComplete, appSettings, onToggleAutoReconnect, onUpdateSettings, onShowToast, isSessionActive = true, terminalTabStrip, connectionState, onReconnect, onCancelReconnect, onCloseSession, onNewSession, onCloseOtherSessions, onNextSession, onPreviousSession, onEditConnection, onSectionChange, onTerminalDimensionsChange, onTerminalBackgroundOutput }: ServerPanelProps) {
+export default function ServerPanel({ sessionId, connHost, connUsername, initialSection = 'dashboard', jumpToPath, setJumpToPath, termRef, onStartUpload, onUploadComplete, appSettings, onToggleAutoReconnect, onUpdateSettings, onShowToast, isSessionActive = true, connectionState, onReconnect, onCancelReconnect, onCloseSession, onNewSession, onDuplicateSession, onCloseOtherSessions, onNextSession, onPreviousSession, onEditConnection, onSectionChange, onTerminalDimensionsChange, onTerminalBackgroundOutput }: ServerPanelProps) {
   const { t } = useTranslation()
+  const terminalHandleRef = useRef<TerminalHandle | null>(null)
+  const setTerminalHandle = useCallback((handle: TerminalHandle | null) => {
+    terminalHandleRef.current = handle
+    if (typeof termRef === 'function') termRef(handle)
+    else if (termRef) termRef.current = handle
+  }, [termRef])
   const [activeSection, setActiveSectionRaw] = useState<PanelSection>(() => isPanelSection(initialSection) ? initialSection : 'dashboard')
+  const [mountedSections, setMountedSections] = useState<Set<PanelSection>>(() => new Set(['terminal', isPanelSection(initialSection) ? initialSection : 'dashboard']))
   const cdHereRef = useRef<string | null>(null)
   const fileBrowserRef = useRef<FileBrowserHandle | null>(null)
   const onSectionChangeRef = useRef(onSectionChange)
@@ -116,6 +122,7 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
   useEffect(() => {
     if (isPanelSection(initialSection)) {
       setActiveSectionRaw(initialSection)
+      setMountedSections(previous => previous.has(initialSection) ? previous : new Set(previous).add(initialSection))
     }
   }, [initialSection])
 
@@ -124,6 +131,7 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
   }, [activeSection])
 
   const setActiveSection = useCallback((key: PanelSection) => {
+    setMountedSections(previous => previous.has(key) ? previous : new Set(previous).add(key))
     setActiveSectionRaw(key)
     if (panelKey) {
       sectionPersistenceRef.current = sectionPersistenceRef.current
@@ -152,7 +160,7 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
     if (activeSection === 'terminal' && cdHereRef.current) {
       const path = cdHereRef.current
       cdHereRef.current = null
-      setTimeout(() => termRef?.current?.sendCommand(`cd '${path}'`), 200)
+      setTimeout(() => terminalHandleRef.current?.sendCommand(`cd '${path}'`), 200)
     }
   }, [activeSection]) // eslint-disable-line
 
@@ -252,11 +260,10 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
           </button>
         ))}
       </nav>
-      <TerminalWorkspace terminalMode={activeSection === 'terminal'} tabStrip={terminalTabStrip}>
       <div className={`sp-content ${activeSection === 'terminal' ? 'terminal-page' : ''}`}>
         <div className={`terminal-panel-slot ${activeSection === 'terminal' ? 'active' : ''}`}>
           <Terminal
-            ref={termRef}
+            ref={setTerminalHandle}
             sessionId={sessionId}
             isActive={isSessionActive && activeSection === 'terminal'}
             connectionState={connectionState}
@@ -266,6 +273,7 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
             onCancelReconnect={onCancelReconnect}
             onCloseSession={onCloseSession}
             onNewSession={onNewSession}
+            onDuplicateSession={onDuplicateSession}
             onCloseOtherSessions={onCloseOtherSessions}
             onNextSession={onNextSession}
             onPreviousSession={onPreviousSession}
@@ -274,25 +282,20 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
             onBackgroundOutput={onTerminalBackgroundOutput}
           />
         </div>
-        {/* 始终挂载文件面板以保留状态并避免重新加载闪烁 */}
-        <div style={{ display: activeSection === 'files' ? 'block' : 'none', height: '100%' }}>
+        {mountedSections.has('files') && <div style={{ display: activeSection === 'files' ? 'block' : 'none', height: '100%' }}>
           <FileBrowser sessionId={sessionId} connHost={connHost} jumpToPath={jumpToPath} ref={fileBrowserRef} onCdHere={handleCdHere} onStartUpload={onStartUpload} onNavigateToSoftware={() => setActiveSection('software')} />
-        </div>
-        {/* 始终挂载站点面板以保留列表状态 */}
-        <div style={{ display: activeSection === 'sites' ? 'block' : 'none', height: '100%' }}>
+        </div>}
+        {mountedSections.has('sites') && <div style={{ display: activeSection === 'sites' ? 'block' : 'none', height: '100%' }}>
           <SitesPanel sessionId={sessionId} onOpenFolder={handleInternalOpenFolder} visible={activeSection === 'sites'} onNavigateToSoftware={() => setActiveSection('software')} />
-        </div>
-        {/* 始终挂载软件面板以保留安装进度状态 */}
-        <div style={{ display: activeSection === 'software' ? 'block' : 'none', height: '100%' }}>
+        </div>}
+        {mountedSections.has('software') && <div style={{ display: activeSection === 'software' ? 'block' : 'none', height: '100%' }}>
           <SoftwareRepo sessionId={sessionId} />
-        </div>
-        {/* 始终挂载更新面板以保留更新状态 */}
-        <div style={{ display: activeSection === 'update' ? 'block' : 'none', height: '100%' }}>
+        </div>}
+        {mountedSections.has('update') && <div style={{ display: activeSection === 'update' ? 'block' : 'none', height: '100%' }}>
           <UpdatePanel />
-        </div>
+        </div>}
         {activeSection !== 'terminal' && activeSection !== 'files' && activeSection !== 'sites' && activeSection !== 'software' && activeSection !== 'update' && renderContent()}
       </div>
-      </TerminalWorkspace>
     </div>
   )
 }
