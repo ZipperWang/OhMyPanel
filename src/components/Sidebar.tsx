@@ -47,6 +47,9 @@ interface ContextMenu {
   conn: Connection
 }
 
+const authUsesPassword = (authType: string) => authType === 'password' || authType === 'managed_key_password'
+const authUsesKey = (authType: string) => authType === 'key' || authType === 'managed_key' || authType === 'managed_key_password'
+
 export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection, refreshKey, connectedIds, connectingIds, activeConfigId, newConnectionRequestId = 0, editConnectionRequest, onNewConnectionRequestHandled, onEditConnectionRequestHandled }: SidebarProps) {
   const { t, i18n } = useTranslation()
   const [connections, setConnections] = useState<Connection[]>([])
@@ -150,9 +153,10 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
   }, [langDropdownOpen])
 
   const handleDelete = async (id: string) => {
-    await invoke('config_delete', { id })
+    const result = await invoke<{ remoteKeyRevoked: boolean; warning?: string }>('config_delete', { id })
     setConfirmDelete(null)
     await loadConnections()
+    if (result.warning) window.alert(result.warning)
   }
 
   const handleSaveEdit = async () => {
@@ -426,13 +430,15 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
                 </div>
                 <div className="form-group medium-width">
                   <label>{t('sidebar.authType')}</label>
-                  <select className="sidebar-edit-input" value={editing.auth_type} onChange={(e) => setEditing({ ...editing, auth_type: e.target.value, key_path: e.target.value === 'key' ? editing.key_path : undefined, password: e.target.value === 'password' ? editing.password : undefined })}>
+                  <select className="sidebar-edit-input" value={editing.auth_type} onChange={(e) => setEditing({ ...editing, auth_type: e.target.value, key_path: authUsesKey(e.target.value) ? editing.key_path : undefined, password: authUsesPassword(e.target.value) ? editing.password : undefined })}>
                     <option value="password">{t('sidebar.password')}</option>
                     <option value="key">Key File</option>
+                    {editing.auth_type === 'managed_key' && <option value="managed_key">Managed Key</option>}
+                    {editing.auth_type === 'managed_key_password' && <option value="managed_key_password">Managed Key + Password</option>}
                   </select>
                 </div>
               </div>
-              {editing.auth_type === 'password' && (
+              {authUsesPassword(editing.auth_type) && (
                 <div className="form-group">
                   <label>{t('sidebar.password')}</label>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -441,12 +447,12 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
                   </div>
                 </div>
               )}
-              {editing.auth_type === 'key' && (
+              {authUsesKey(editing.auth_type) && (
                 <div className="form-group">
                   <label>{t('sidebar.keyPath')}</label>
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <input className="sidebar-edit-input" style={{ flex: 1 }} value={editing.key_path || ''} onChange={(e) => setEditing({ ...editing, key_path: e.target.value })} />
-                    <button className="sidebar-edit-action-btn" onClick={pickKeyFile} title={t('sidebar.browseKeyFile')}>{t('sidebar.browseKeyFile')}</button>
+                    <input className="sidebar-edit-input" style={{ flex: 1 }} value={editing.key_path || ''} onChange={(e) => setEditing({ ...editing, key_path: e.target.value })} readOnly={editing.auth_type.startsWith('managed_')} />
+                    <button className="sidebar-edit-action-btn" onClick={pickKeyFile} title={t('sidebar.browseKeyFile')} disabled={editing.auth_type.startsWith('managed_')}>{t('sidebar.browseKeyFile')}</button>
                   </div>
                 </div>
               )}
@@ -521,13 +527,13 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
                 </div>
                 <div className="form-group medium-width">
                   <label>{t('sidebar.authType')}</label>
-                  <select className="sidebar-edit-input" value={creating.auth_type} onChange={(e) => setCreating({ ...creating, auth_type: e.target.value, key_path: e.target.value === 'key' ? creating.key_path : undefined, password: e.target.value === 'password' ? creating.password : undefined })}>
+                  <select className="sidebar-edit-input" value={creating.auth_type} onChange={(e) => setCreating({ ...creating, auth_type: e.target.value, key_path: authUsesKey(e.target.value) ? creating.key_path : undefined, password: authUsesPassword(e.target.value) ? creating.password : undefined })}>
                     <option value="password">{t('sidebar.password')}</option>
                     <option value="key">Key File</option>
                   </select>
                 </div>
               </div>
-              {creating.auth_type === 'password' && (
+              {authUsesPassword(creating.auth_type) && (
                 <div className="form-group">
                   <label>{t('sidebar.password')}</label>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -536,7 +542,7 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
                   </div>
                 </div>
               )}
-              {creating.auth_type === 'key' && (
+              {authUsesKey(creating.auth_type) && (
                 <div className="form-group">
                   <label>{t('sidebar.keyPath')}</label>
                   <div style={{ display: 'flex', gap: 6 }}>

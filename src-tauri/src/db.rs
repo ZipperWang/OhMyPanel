@@ -1,5 +1,5 @@
 use rusqlite::{Connection as SqliteConn, OptionalExtension};
-use russh_keys::PublicKeyBase64;
+use russh::keys::PublicKeyBase64;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -237,14 +237,14 @@ impl HostKeyStore {
             return Err("SSH port must be greater than zero".to_string());
         }
         let host = Self::normalize_host(host)?;
-        let public_key = russh_keys::parse_public_key_base64(key_base64)
+        let public_key = russh::keys::parse_public_key_base64(key_base64)
             .map_err(|e| format!("Invalid SSH host key: {}", e))?;
         let record = HostKeyRecord {
             host: host.clone(),
             port,
             key_base64: public_key.public_key_base64(),
-            algorithm: public_key.name().to_string(),
-            fingerprint: public_key.fingerprint(),
+            algorithm: public_key.algorithm().as_str().to_string(),
+            fingerprint: public_key.fingerprint(Default::default()).to_string(),
             trusted_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -390,6 +390,40 @@ pub struct DbCredential {
 pub struct DbCredentialsManager;
 
 impl DbCredentialsManager {
+    fn hydrate_password(
+        conn: &SqliteConn,
+        server_host: &str,
+        credential: &mut DbCredential,
+    ) {
+        if !credential.password.is_empty() {
+            let legacy_password = credential.password.clone();
+            match crate::credentials::set_database_password(
+                server_host,
+                &credential.db_name,
+                &legacy_password,
+            ) {
+                Ok(()) => {
+                    if let Err(error) = conn.execute(
+                        "UPDATE db_credentials SET password = '' WHERE server_host = ?1 AND db_name = ?2",
+                        rusqlite::params![server_host, credential.db_name],
+                    ) {
+                        log::warn!("Failed to clear migrated database password: {error}");
+                    }
+                }
+                Err(error) => {
+                    log::warn!("Failed to migrate database password to the OS credential store: {error}");
+                }
+            }
+            return;
+        }
+
+        match crate::credentials::get_database_password(server_host, &credential.db_name) {
+            Ok(Some(password)) => credential.password = password,
+            Ok(None) => {}
+            Err(error) => log::warn!("Failed to read database password from the OS credential store: {error}"),
+        }
+    }
+
     /// 保存或更新数据库凭据
     pub fn save(
         conn: &SqliteConn,
@@ -400,16 +434,21 @@ impl DbCredentialsManager {
         access_type: &str,
         allowed_ip: &str,
     ) -> Result<(), String> {
+        if password.is_empty() {
+            crate::credentials::delete_database_password(server_host, db_name)?;
+        } else {
+            crate::credentials::set_database_password(server_host, db_name, password)?;
+        }
         conn.execute(
             "INSERT OR REPLACE INTO db_credentials (server_host, db_name, db_user, password, access_type, allowed_ip) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![server_host, db_name, db_user, password, access_type, allowed_ip],
+            rusqlite::params![server_host, db_name, db_user, "", access_type, allowed_ip],
         ).map_err(|e| format!("Failed to save db credentials: {}", e))?;
         Ok(())
     }
 
     /// 获取指定数据库的凭据
     pub fn get(conn: &SqliteConn, server_host: &str, db_name: &str) -> Option<DbCredential> {
-        conn.query_row(
+        let mut credential = conn.query_row(
             "SELECT db_name, db_user, password, access_type, allowed_ip FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
             rusqlite::params![server_host, db_name],
             |row| {
@@ -421,7 +460,9 @@ impl DbCredentialsManager {
                     allowed_ip: row.get(4)?,
                 })
             },
-        ).ok()
+        ).ok()?;
+        Self::hydrate_password(conn, server_host, &mut credential);
+        Some(credential)
     }
 
     /// 列出服务器的所有凭据
@@ -429,7 +470,7 @@ impl DbCredentialsManager {
         let mut stmt = conn.prepare(
             "SELECT db_name, db_user, password, access_type, allowed_ip FROM db_credentials WHERE server_host = ?1"
         ).unwrap();
-        stmt.query_map([server_host], |row| {
+        let mut credentials: Vec<DbCredential> = stmt.query_map([server_host], |row| {
             Ok(DbCredential {
                 db_name: row.get(0)?,
                 db_user: row.get::<_, String>(1).unwrap_or_default(),
@@ -439,11 +480,17 @@ impl DbCredentialsManager {
             })
         }).unwrap()
         .filter_map(|r| r.ok())
-        .collect()
+        .collect();
+        drop(stmt);
+        for credential in &mut credentials {
+            Self::hydrate_password(conn, server_host, credential);
+        }
+        credentials
     }
 
     /// 删除指定数据库的凭据
     pub fn delete(conn: &SqliteConn, server_host: &str, db_name: &str) -> Result<(), String> {
+        crate::credentials::delete_database_password(server_host, db_name)?;
         conn.execute(
             "DELETE FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
             rusqlite::params![server_host, db_name],
@@ -453,6 +500,11 @@ impl DbCredentialsManager {
 
     /// 仅更新密码（保留现有的 db_user）
     pub fn update_password(conn: &SqliteConn, server_host: &str, db_name: &str, password: &str) -> Result<(), String> {
+        if password.is_empty() {
+            crate::credentials::delete_database_password(server_host, db_name)?;
+        } else {
+            crate::credentials::set_database_password(server_host, db_name, password)?;
+        }
         // 检查记录是否存在
         let exists = conn.query_row(
             "SELECT COUNT(*) FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
@@ -462,14 +514,14 @@ impl DbCredentialsManager {
 
         if exists {
             conn.execute(
-                "UPDATE db_credentials SET password = ?3 WHERE server_host = ?1 AND db_name = ?2",
-                rusqlite::params![server_host, db_name, password],
+                "UPDATE db_credentials SET password = '' WHERE server_host = ?1 AND db_name = ?2",
+                rusqlite::params![server_host, db_name],
             ).map_err(|e| format!("Failed to update password: {}", e))?;
         } else if !password.is_empty() {
         // 如果密码非空，则使用默认值创建新记录
             conn.execute(
-                "INSERT INTO db_credentials (server_host, db_name, db_user, password, access_type, allowed_ip) VALUES (?1, ?2, ?2, ?3, 'local', '')",
-                rusqlite::params![server_host, db_name, password],
+                "INSERT INTO db_credentials (server_host, db_name, db_user, password, access_type, allowed_ip) VALUES (?1, ?2, ?2, '', 'local', '')",
+                rusqlite::params![server_host, db_name],
             ).map_err(|e| format!("Failed to insert password: {}", e))?;
         }
         Ok(())
@@ -477,6 +529,7 @@ impl DbCredentialsManager {
 
     /// 仅清空密码（设为空字符串）
     pub fn clear_password(conn: &SqliteConn, server_host: &str, db_name: &str) -> Result<(), String> {
+        crate::credentials::delete_database_password(server_host, db_name)?;
         let exists = conn.query_row(
             "SELECT COUNT(*) FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
             rusqlite::params![server_host, db_name],
@@ -754,8 +807,13 @@ mod tests {
     }
 
     fn generated_host_key() -> String {
-        let key_pair = russh_keys::key::KeyPair::generate_ed25519().unwrap();
-        key_pair.clone_public_key().unwrap().public_key_base64()
+        let mut rng = rand::rng();
+        let key_pair = russh::keys::PrivateKey::random(
+            &mut rng,
+            russh::keys::Algorithm::Ed25519,
+        )
+        .unwrap();
+        key_pair.public_key().public_key_base64()
     }
 
     #[test]
@@ -766,7 +824,13 @@ mod tests {
         let loaded = HostKeyStore::get(&conn, "example.com", 22).unwrap().unwrap();
         assert_eq!(saved, loaded);
         assert_eq!(loaded.host, "example.com");
-        assert_eq!(loaded.fingerprint, russh_keys::parse_public_key_base64(&key).unwrap().fingerprint());
+        assert_eq!(
+            loaded.fingerprint,
+            russh::keys::parse_public_key_base64(&key)
+                .unwrap()
+                .fingerprint(Default::default())
+                .to_string()
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
 import ServiceUnavailable from './ServiceUnavailable'
 
@@ -29,6 +30,13 @@ interface DbCredential {
 interface DatabasePanelProps {
   sessionId: string | null
   onNavigateToSoftware?: () => void
+}
+
+interface DatabaseTunnelInfo {
+  tunnelId: string
+  localHost: string
+  localPort: number
+  remotePort: number
 }
 
 export default function DatabasePanel({ sessionId, onNavigateToSoftware }: DatabasePanelProps) {
@@ -117,6 +125,8 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
   
   // 来自 SQLite 的数据库凭据（键：dbName）
   const [dbCredentials, setDbCredentials] = useState<Record<string, DbCredential>>({})
+  const [databaseTunnel, setDatabaseTunnel] = useState<DatabaseTunnelInfo | null>(null)
+  const [tunnelBusy, setTunnelBusy] = useState(false)
   
   const fetchDatabases = useCallback(async () => {
     if (!sessionId) return
@@ -171,6 +181,70 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
   }, [sessionId])
   
   useEffect(() => { fetchDatabases() }, [fetchDatabases])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!sessionId) {
+      setDatabaseTunnel(null)
+      return
+    }
+    invoke<DatabaseTunnelInfo | null>('database_tunnel_status', { sessionId })
+      .then(info => { if (!cancelled) setDatabaseTunnel(info) })
+      .catch(() => { if (!cancelled) setDatabaseTunnel(null) })
+    return () => { cancelled = true }
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!databaseTunnel) return
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    listen<{ tunnelId: string; status: string }>('tunnel-status', event => {
+      if (event.payload.tunnelId === databaseTunnel.tunnelId && event.payload.status === 'stopped') {
+        setDatabaseTunnel(null)
+      }
+    }).then(fn => {
+      if (disposed) fn()
+      else unlisten = fn
+    })
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [databaseTunnel?.tunnelId])
+
+  const openDatabaseTunnel = async () => {
+    if (!sessionId) return
+    setTunnelBusy(true)
+    try {
+      const info = await invoke<DatabaseTunnelInfo>('database_tunnel_open', { sessionId })
+      setDatabaseTunnel(info)
+      setMsg(t('database.tunnelReady'))
+    } catch (e) {
+      setMsg(t('database.tunnelFailed', { error: String(e) }))
+    } finally {
+      setTunnelBusy(false)
+    }
+  }
+
+  const closeDatabaseTunnel = async () => {
+    if (!sessionId || !databaseTunnel) return
+    setTunnelBusy(true)
+    try {
+      await invoke('database_tunnel_close', { sessionId, tunnelId: databaseTunnel.tunnelId })
+      setDatabaseTunnel(null)
+      setMsg(t('database.tunnelClosed'))
+    } catch (e) {
+      setMsg(t('database.tunnelFailed', { error: String(e) }))
+    } finally {
+      setTunnelBusy(false)
+    }
+  }
+
+  const copyTunnelCommand = async () => {
+    if (!databaseTunnel) return
+    await navigator.clipboard.writeText(`mysql -h ${databaseTunnel.localHost} -P ${databaseTunnel.localPort} -u <user> -p`)
+    setMsg(t('database.copiedToClipboard'))
+  }
   
   // ponytail：密码现在在 fetchDatabases 中内联加载，无需单独的 effect
 
@@ -701,6 +775,31 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
           <button onClick={() => setMsg('')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '18px', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }} title={t('common.close')}>×</button>
         </div>
       )}
+
+      <div style={{
+        border: '1px solid var(--border-color)', borderRadius: '8px', padding: '14px 16px',
+        marginBottom: '16px', background: 'var(--bg-subtle)', display: 'flex',
+        alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap'
+      }}>
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: '4px' }}>{t('database.secureTunnel')}</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+            {databaseTunnel
+              ? `${t('database.localAddress')}: ${databaseTunnel.localHost}:${databaseTunnel.localPort} → MySQL 127.0.0.1:${databaseTunnel.remotePort}`
+              : t('database.tunnelDescription')}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {databaseTunnel && <button className="btn-secondary" onClick={copyTunnelCommand}>{t('database.copyCommand')}</button>}
+          <button
+            className={databaseTunnel ? 'btn-secondary' : 'btn-primary'}
+            onClick={databaseTunnel ? closeDatabaseTunnel : openDatabaseTunnel}
+            disabled={tunnelBusy || !sessionId}
+          >
+            {tunnelBusy ? t('common.loading') : databaseTunnel ? t('common.disconnect') : t('database.openTunnel')}
+          </button>
+        </div>
+      </div>
       
       {error && (
         (error.includes('command not found') || error.toLowerCase().includes('mysql')) ? (

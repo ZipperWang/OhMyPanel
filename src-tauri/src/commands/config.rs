@@ -1,4 +1,14 @@
 use crate::{DbPool, config::{ConfigManager, Connection, Settings, SettingsManager, Favorite, FavoritesManager}};
+use crate::ssh::SshManager;
+use std::sync::Arc;
+use tokio::sync::Mutex as AsyncMutex;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigDeleteResult {
+    pub remote_key_revoked: bool,
+    pub warning: Option<String>,
+}
 
 // ponytail: 按需清理代理环境变量，以便更新器在无代理时重试
 #[tauri::command]
@@ -23,9 +33,61 @@ pub fn config_save(db: tauri::State<'_, DbPool>, connection: Connection) -> Resu
 }
 
 #[tauri::command]
-pub fn config_delete(db: tauri::State<'_, DbPool>, id: &str) -> Result<(), String> {
-    let conn = db.lock().unwrap();
-    ConfigManager::delete(&conn, id)
+pub async fn config_delete(
+    ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
+    db: tauri::State<'_, DbPool>,
+    id: &str,
+) -> Result<ConfigDeleteResult, String> {
+    let connection = {
+        let conn = db.lock().map_err(|_| "Connection database is unavailable".to_string())?;
+        ConfigManager::get(&conn, id)?
+            .ok_or_else(|| "Connection not found".to_string())?
+    };
+
+    let mut remote_key_revoked = false;
+    let mut warning = None;
+    if connection.auth_type.starts_with("managed_") {
+        let expected = crate::db::db_dir().join("keys").join(format!("{}.ed25519", id));
+        let managed_key = connection
+            .key_path
+            .as_deref()
+            .filter(|path| std::path::Path::new(path) == expected)
+            .and_then(|path| crate::ssh::load_secret_key_protected(path).ok());
+        let session = {
+            let manager = ssh_mgr.lock().await;
+            manager.get_session_for_connection(id)
+        };
+
+        match (managed_key, session) {
+            (Some(key), Some(session)) => {
+                let mut public_key = key.public_key().clone();
+                public_key.set_comment(format!("ohmypanel:{}", id));
+                let public_key = public_key
+                    .to_openssh()
+                    .map_err(|e| format!("Failed to encode managed public key: {e}"))?;
+                crate::server::remove_ssh_pubkey(&session, &public_key).await?;
+                remote_key_revoked = true;
+            }
+            (None, _) => {
+                warning = Some(
+                    "The managed private key is missing or has an unexpected path, so the matching remote authorized_keys entry could not be revoked."
+                        .to_string(),
+                );
+            }
+            (_, None) => {
+                warning = Some(
+                    "No active SSH session was available. The local managed key was deleted, but its remote authorized_keys entry could not be revoked."
+                        .to_string(),
+                );
+            }
+        }
+    }
+
+    {
+        let conn = db.lock().map_err(|_| "Connection database is unavailable".to_string())?;
+        ConfigManager::delete(&conn, id)?;
+    }
+    Ok(ConfigDeleteResult { remote_key_revoked, warning })
 }
 
 #[tauri::command]
@@ -38,8 +100,6 @@ pub fn config_save_credentials(
     password: Option<String>,
     remember_me: bool,
 ) -> Result<(), String> {
-    println!("Saving credentials: id={}, username={}, auth_type={}, key_path={:?}, password={:?}, remember_me={}", 
-             id, username, auth_type, key_path, password.as_ref().map(|_| "***"), remember_me);
     let conn = db.lock().unwrap();
     ConfigManager::save_credentials(&conn, &id, &username, &auth_type, key_path.as_deref(), password.as_deref(), remember_me)
 }

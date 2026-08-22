@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use async_trait::async_trait;
 use russh::client::{self, Handler};
+use russh::client::AuthResult;
+use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKey, PublicKeyBase64};
+use russh::MethodKind;
 use russh::ChannelMsg;
-use russh_keys::PublicKeyBase64;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
@@ -80,7 +81,7 @@ pub struct SshHandler {
     /// 远程转发注册表：服务器监听端口 -> 隧道接收器。
     /// 服务器在 server_channel_open_forwarded_tcpip 中提供端口。
     pub forwarded_reg: Arc<std::sync::Mutex<HashMap<u32, mpsc::UnboundedSender<ForwardedTcpip>>>>,
-    expected_host_key: Option<russh_keys::key::PublicKey>,
+    expected_host_key: Option<PublicKey>,
     host_key_check: Arc<std::sync::Mutex<HostKeyCheckState>>,
 }
 
@@ -110,13 +111,12 @@ struct HostKeyVerificationError {
     expected_fingerprint: Option<String>,
 }
 
-#[async_trait]
 impl Handler for SshHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh_keys::key::PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
         let accepted = self
             .expected_host_key
@@ -124,8 +124,8 @@ impl Handler for SshHandler {
             .is_some_and(|expected| expected == server_public_key);
         let mut state = self.host_key_check.lock().unwrap();
         state.presented = Some(PresentedHostKey {
-            algorithm: server_public_key.name().to_string(),
-            fingerprint: server_public_key.fingerprint(),
+            algorithm: server_public_key.algorithm().as_str().to_string(),
+            fingerprint: server_public_key.fingerprint(Default::default()).to_string(),
             key_base64: server_public_key.public_key_base64(),
         });
         state.accepted = accepted;
@@ -141,9 +141,17 @@ impl Handler for SshHandler {
         connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: russh::client::ChannelOpenHandle,
         _session: &mut russh::client::Session,
     ) -> Result<(), Self::Error> {
-        if let Some(tx) = self.forwarded_reg.lock().unwrap().get(&connected_port) {
+        let target = self
+            .forwarded_reg
+            .lock()
+            .unwrap()
+            .get(&connected_port)
+            .cloned();
+        if let Some(tx) = target {
+            reply.accept().await;
             let _ = tx.send(ForwardedTcpip { channel });
         }
         Ok(())
@@ -152,12 +160,13 @@ impl Handler for SshHandler {
 
 #[derive(Clone)]
 pub struct ConnectInfo {
+    pub connection_id: Option<String>,
     pub host: String,
     pub port: u16,
     pub username: String,
     pub password: Option<String>,
     pub key_path: Option<String>,
-    pub host_key: russh_keys::key::PublicKey,
+    pub host_key: PublicKey,
     pub cols: u32,
     pub rows: u32,
 }
@@ -186,7 +195,7 @@ pub struct TransferControl {
 fn host_key_verification_error(
     host: &str,
     port: u16,
-    expected: Option<&russh_keys::key::PublicKey>,
+    expected: Option<&PublicKey>,
     check: &Arc<std::sync::Mutex<HostKeyCheckState>>,
 ) -> Option<String> {
     let state = check.lock().ok()?;
@@ -201,35 +210,97 @@ fn host_key_verification_error(
         algorithm: presented.algorithm.clone(),
         fingerprint: presented.fingerprint.clone(),
         key_base64: presented.key_base64.clone(),
-        expected_fingerprint: expected.map(|key| key.fingerprint()),
+        expected_fingerprint: expected
+            .map(|key| key.fingerprint(Default::default()).to_string()),
     };
     let serialized = serde_json::to_string(&error).ok()?;
     Some(format!("HOST_KEY_VERIFICATION:{}", serialized))
 }
 
-fn load_secret_key_protected(path: &str) -> Result<russh_keys::key::KeyPair, String> {
+pub(crate) fn load_secret_key_protected(path: &str) -> Result<PrivateKey, String> {
     const MAX_PRIVATE_KEY_BYTES: usize = 1024 * 1024;
 
     let mut file = std::fs::File::open(path)
         .map_err(|e| format!("Failed to open key: {}", e))?;
-    let mut secret = russh::CryptoVec::new();
-    while secret.len() <= MAX_PRIVATE_KEY_BYTES {
-        let remaining = MAX_PRIVATE_KEY_BYTES + 1 - secret.len();
-        let read_size = remaining.min(8192);
-        let read = secret
-            .read(read_size, &mut file)
-            .map_err(|e| format!("Failed to read key: {}", e))?;
-        if read == 0 {
-            break;
-        }
-    }
+    use std::io::Read;
+    let mut secret = Vec::new();
+    file.by_ref()
+        .take((MAX_PRIVATE_KEY_BYTES + 1) as u64)
+        .read_to_end(&mut secret)
+        .map_err(|e| format!("Failed to read key: {}", e))?;
     if secret.len() > MAX_PRIVATE_KEY_BYTES {
         return Err("Private key file exceeds the 1 MiB limit".to_string());
     }
     let secret_text = std::str::from_utf8(secret.as_ref())
         .map_err(|e| format!("Private key is not valid UTF-8: {}", e))?;
-    russh_keys::decode_secret_key(secret_text, None)
+    russh::keys::decode_secret_key(secret_text, None)
         .map_err(|e| format!("Failed to decode key: {}", e))
+}
+
+async fn authenticate_handle(
+    sh: &mut client::Handle<SshHandler>,
+    username: &str,
+    password: Option<&str>,
+    key_path: Option<&str>,
+) -> Result<(), String> {
+    if let Some(kp) = key_path {
+        let key = load_secret_key_protected(kp)?;
+        let key_auth = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            sh.authenticate_publickey(
+                username,
+                PrivateKeyWithHashAlg::new(Arc::new(key), None),
+            ),
+        )
+        .await
+        .map_err(|_| "Key authentication timed out".to_string())?
+        .map_err(|e| format!("Key auth error: {}", e))?;
+
+        match key_auth {
+            AuthResult::Success => Ok(()),
+            AuthResult::Failure {
+                partial_success: true,
+                remaining_methods,
+            } if remaining_methods.contains(&MethodKind::Password) => {
+                let pw = password.ok_or_else(|| {
+                    "Server accepted the key but requires a password as an additional authentication factor".to_string()
+                })?;
+                let password_auth = tokio::time::timeout(
+                    std::time::Duration::from_secs(15),
+                    sh.authenticate_password(username, pw.to_owned()),
+                )
+                .await
+                .map_err(|_| "Password authentication timed out".to_string())?
+                .map_err(|e| format!("Password auth error: {}", e))?;
+                if password_auth.success() {
+                    Ok(())
+                } else {
+                    Err("Key + password authentication failed".to_string())
+                }
+            }
+            AuthResult::Failure { partial_success: true, .. } => Err(
+                "Server accepted the key but requires an unsupported additional authentication method".to_string(),
+            ),
+            AuthResult::Failure { partial_success: false, .. } => {
+                Err("Key auth failed: server rejected the key".to_string())
+            }
+        }
+    } else if let Some(pw) = password {
+        let password_auth = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            sh.authenticate_password(username, pw.to_owned()),
+        )
+        .await
+        .map_err(|_| "Password authentication timed out".to_string())?
+        .map_err(|e| format!("Password auth error: {}", e))?;
+        if password_auth.success() {
+            Ok(())
+        } else {
+            Err("Password auth failed: incorrect password".to_string())
+        }
+    } else {
+        Err("No authentication method provided".to_string())
+    }
 }
 
 pub struct SshManager {
@@ -249,15 +320,60 @@ impl SshManager {
         }
     }
 
+    /// Establish a separate, host-key-pinned connection and authenticate with
+    /// the supplied credentials. No shell or session is retained. This is used
+    /// before committing credential or sshd policy changes that could otherwise
+    /// lock the user out.
+    pub async fn verify_credentials(
+        host: &str,
+        port: u16,
+        username: &str,
+        password: Option<&str>,
+        key_path: Option<&str>,
+        trusted_host_key: &PublicKey,
+    ) -> Result<(), String> {
+        let host_key_check = Arc::new(std::sync::Mutex::new(HostKeyCheckState::default()));
+        let handler = SshHandler {
+            forwarded_reg: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            expected_host_key: Some(trusted_host_key.clone()),
+            host_key_check: host_key_check.clone(),
+        };
+        let mut config = client::Config::default();
+        config.inactivity_timeout = Some(std::time::Duration::from_secs(20));
+        let addr = format!("{}:{}", host, port);
+        let mut handle = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            client::connect(Arc::new(config), &addr, handler),
+        )
+        .await
+        .map_err(|_| format!("Credential verification timed out for {}:{}", host, port))?
+        .map_err(|error| {
+            host_key_verification_error(
+                host,
+                port,
+                Some(trusted_host_key),
+                &host_key_check,
+            )
+            .unwrap_or_else(|| format!("Credential verification connection failed: {}", error))
+        })?;
+
+        let result = authenticate_handle(&mut handle, username, password, key_path).await;
+        let _ = handle
+            .disconnect(russh::Disconnect::ByApplication, "Credential verification complete", "en")
+            .await;
+        result
+    }
+
     pub async fn connect(
         &self,
         session_id: String,
         host: String,
         port: u16,
         username: String,
+        connection_id: Option<String>,
         password: Option<String>,
         key_path: Option<String>,
-        host_key: russh_keys::key::PublicKey,
+        host_key: PublicKey,
         app_handle: AppHandle,
         cols: u32,
         rows: u32,
@@ -267,6 +383,7 @@ impl SshManager {
             host,
             port,
             username,
+            connection_id,
             password,
             key_path,
             Some(host_key),
@@ -307,9 +424,10 @@ impl SshManager {
         host: String,
         port: u16,
         username: String,
+        connection_id: Option<String>,
         password: Option<String>,
         key_path: Option<String>,
-        trusted_host_key: Option<russh_keys::key::PublicKey>,
+        trusted_host_key: Option<PublicKey>,
         app_handle: AppHandle,
         cols: u32,
         rows: u32,
@@ -352,47 +470,16 @@ impl SshManager {
         let trusted_host_key = trusted_host_key
             .ok_or_else(|| "SSH host key was not trusted".to_string())?;
 
-        // 身份验证
-        if let Some(ref kp) = key_path {
-            let key = load_secret_key_protected(kp)?;
-            let auth_result = tokio::time::timeout(
-                std::time::Duration::from_secs(15),
-                sh.authenticate_publickey(&username, Arc::new(key)),
-            )
-            .await;
-            let auth_ok = match auth_result {
-                Ok(result) => result.map_err(|e| format!("Key auth error: {}", e))?,
-                Err(_) => {
-                    let _ = sh
-                        .disconnect(russh::Disconnect::ByApplication, "Authentication timeout", "en")
-                        .await;
-                    return Err("Key authentication timed out".to_string());
-                }
-            };
-            if !auth_ok {
-                return Err("Key auth failed: server rejected the key".to_string());
-            }
-        } else if let Some(ref pw) = password {
-            let auth_result = tokio::time::timeout(
-                std::time::Duration::from_secs(15),
-                sh.authenticate_password(&username, pw),
-            )
-            .await;
-            let auth_ok = match auth_result {
-                Ok(result) => result.map_err(|e| format!("Password auth error: {}", e))?,
-                Err(_) => {
-                    let _ = sh
-                        .disconnect(russh::Disconnect::ByApplication, "Authentication timeout", "en")
-                        .await;
-                    return Err("Password authentication timed out".to_string());
-                }
-            };
-            if !auth_ok {
-                return Err("Password auth failed: incorrect password".to_string());
-            }
-        } else {
-            return Err("No authentication method provided".to_string());
-        }
+        // Never fall back to password after a rejected key. Password is sent
+        // only when the server explicitly reports that the key was accepted as
+        // the first factor and requests password as the next factor.
+        authenticate_handle(
+            &mut sh,
+            &username,
+            password.as_deref(),
+            key_path.as_deref(),
+        )
+        .await?;
 
         let mut channel = sh
             .channel_open_session()
@@ -474,6 +561,7 @@ impl SshManager {
         });
 
         let connect_info = ConnectInfo {
+            connection_id,
             host: host.clone(),
             port,
             username: username.clone(),
@@ -1360,6 +1448,30 @@ impl SshManager {
         self.sessions.read().unwrap().get(session_id).map(|s| s.connect_info.clone())
     }
 
+    pub fn get_session_for_connection(&self, connection_id: &str) -> Option<SshSession> {
+        self.sessions
+            .read()
+            .unwrap()
+            .values()
+            .find(|session| session.connect_info.connection_id.as_deref() == Some(connection_id))
+            .cloned()
+    }
+
+    pub fn update_session_auth(
+        &self,
+        session_id: &str,
+        password: Option<String>,
+        key_path: Option<String>,
+    ) -> Result<(), String> {
+        let mut sessions = self.sessions.write().unwrap();
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| "Session not found".to_string())?;
+        session.connect_info.password = password;
+        session.connect_info.key_path = key_path;
+        Ok(())
+    }
+
     pub async fn reconnect(&self, session_id: &str, app_handle: AppHandle) -> Result<(), String> {
         let info = self.get_connect_info(session_id).ok_or("Session not found")?;
         // ponytail：使用命令上下文中的 AppHandle；self.app_handle 从未初始化
@@ -1369,6 +1481,7 @@ impl SshManager {
             info.host,
             info.port,
             info.username,
+            info.connection_id,
             info.password,
             info.key_path,
             info.host_key,
@@ -1787,11 +1900,12 @@ pub async fn session_disconnect(session: &SshSession) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    fn generated_public_key() -> russh_keys::key::PublicKey {
-        russh_keys::key::KeyPair::generate_ed25519()
+    fn generated_public_key() -> PublicKey {
+        let mut rng = rand::rng();
+        PrivateKey::random(&mut rng, russh::keys::Algorithm::Ed25519)
             .unwrap()
-            .clone_public_key()
-            .unwrap()
+            .public_key()
+            .clone()
     }
 
     #[tokio::test]
@@ -1808,7 +1922,7 @@ mod tests {
         assert!(!handler.check_server_key(&changed).await.unwrap());
         let error = host_key_verification_error("host", 22, Some(&trusted), &check).unwrap();
         assert!(error.contains("\"kind\":\"changed\""));
-        assert!(error.contains(&changed.fingerprint()));
+        assert!(error.contains(&changed.fingerprint(Default::default()).to_string()));
     }
 
     #[tokio::test]
@@ -1823,7 +1937,7 @@ mod tests {
         assert!(!handler.check_server_key(&presented).await.unwrap());
         let error = host_key_verification_error("host", 22, None, &check).unwrap();
         assert!(error.contains("\"kind\":\"unknown\""));
-        assert!(error.contains(&presented.fingerprint()));
+        assert!(error.contains(&presented.fingerprint(Default::default()).to_string()));
     }
 
     // ===== parse_curl_progress =====

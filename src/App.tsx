@@ -868,7 +868,7 @@ function App() {
         while (!sid) {
           try {
             sid = await invoke<string>('ssh_connect', {
-              config: { host: conn.host, port: conn.port, username, password, keyPath, cols: estCols, rows: estRows },
+              config: { connectionId: conn.id, host: conn.host, port: conn.port, username, password, keyPath, cols: estCols, rows: estRows },
             })
           } catch (error) {
             const verification = parseHostKeyVerification(error)
@@ -916,6 +916,17 @@ function App() {
           clearTerminalOutput(sid)
           return
         }
+        // Password is only the bootstrap credential. Once connected, install
+        // and persist an app-managed key. Re-running this for non-root users is
+        // idempotent and repairs a removed authorized_keys entry.
+        if (conn.auth_type === 'password') {
+          try {
+            await invoke('ssh_provision_managed_key', { sessionId: sid, connectionId: conn.id })
+            setSidebarRefreshKey(k => k + 1)
+          } catch (provisionError) {
+            setToast(`SSH key setup failed: ${String(provisionError)}`)
+          }
+        }
         setSessions(prev => {
           const next = prev.map(session => session.tabId === tabId
             ? { ...session, sessionId: sid, name: conn.name || conn.host, hostKey, username }
@@ -949,12 +960,11 @@ function App() {
     let keyPath: string | undefined
     
     if (conn.remember_me) {
-      if (conn.auth_type === 'password' && !conn.password) {
-        setErrorDialog({ visible: true, message: 'No password saved. Please edit the connection to add credentials.', type: 'auth' })
+      if ((conn.auth_type === 'key' || conn.auth_type === 'managed_key' || conn.auth_type === 'managed_key_password') && !conn.key_path) {
+        setErrorDialog({ visible: true, message: 'SSH key file not found. Please switch to password authentication and reconnect to create it again.', type: 'auth' })
         return
       }
-      if (conn.auth_type === 'password') password = conn.password
-      if (conn.auth_type === 'key') keyPath = conn.key_path
+      if (conn.auth_type === 'key' || conn.auth_type === 'managed_key' || conn.auth_type === 'managed_key_password') keyPath = conn.key_path
     } else {
       setErrorDialog({ visible: true, message: 'Please edit the connection to configure authentication.', type: 'auth' })
       return
