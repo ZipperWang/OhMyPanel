@@ -132,10 +132,10 @@ impl TunnelManager {
         tunnel_id: String,
         session_id: String,
         session: SshSession,
-        config: TunnelConfig,
+        mut config: TunnelConfig,
         app_handle: AppHandle,
         created_at: Option<i64>,
-    ) -> Result<String, String> {
+    ) -> Result<TunnelInfo, String> {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let created_at = created_at.unwrap_or_else(|| {
             std::time::SystemTime::now()
@@ -144,20 +144,12 @@ impl TunnelManager {
                 .as_millis() as i64
         });
 
-        let active_tunnel = ActiveTunnel {
-            id: tunnel_id.clone(),
-            session_id: session_id.clone(),
-            config: config.clone(),
-            created_at,
-            shutdown_tx: Some(shutdown_tx),
-        };
-
         // 为生成的任务创建快照：任务退出时会移除对应条目
         let tunnels_reg = self.tunnels.clone();
 
-        match config.tunnel_type {
+        match config.tunnel_type.clone() {
             TunnelType::Local => {
-                self.start_local_tunnel(
+                config.local_port = self.start_local_tunnel(
                     tunnel_id.clone(),
                     session_id.clone(),
                     session,
@@ -194,6 +186,30 @@ impl TunnelManager {
             }
         }
 
+        let info = TunnelInfo {
+            id: tunnel_id.clone(),
+            session_id: session_id.clone(),
+            tunnel_type: match &config.tunnel_type {
+                TunnelType::Local => "local",
+                TunnelType::Remote => "remote",
+                TunnelType::Dynamic => "dynamic",
+            }.to_string(),
+            local_host: config.local_host.clone(),
+            local_port: config.local_port,
+            remote_host: config.remote_host.clone(),
+            remote_port: config.remote_port,
+            status: "active".to_string(),
+            created_at,
+            note: config.note.clone(),
+        };
+        let active_tunnel = ActiveTunnel {
+            id: tunnel_id.clone(),
+            session_id: session_id.clone(),
+            config,
+            created_at,
+            shutdown_tx: Some(shutdown_tx),
+        };
+
         self.tunnels.lock().await.insert(tunnel_id.clone(), active_tunnel);
 
         let _ = app_handle.emit("tunnel-created", serde_json::json!({
@@ -201,7 +217,7 @@ impl TunnelManager {
             "sessionId": session_id,
         }));
 
-        Ok(tunnel_id)
+        Ok(info)
     }
 
     /// 启动本地端口转发隧道（ssh -L）
@@ -215,17 +231,21 @@ impl TunnelManager {
         mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
         app_handle: AppHandle,
         tunnels_reg: Arc<Mutex<HashMap<String, ActiveTunnel>>>,
-    ) -> Result<(), String> {
+    ) -> Result<u16, String> {
         let bind_addr = format!("{}:{}", config.local_host, config.local_port);
         let listener = TcpListener::bind(&bind_addr).await.map_err(|e| match e.kind() {
             std::io::ErrorKind::AddrInUse => format!("Failed to bind {}: 这个本地端口已被使用。", bind_addr),
             _ => format!("Failed to bind {}: {}", bind_addr, e),
         })?;
+        let bound_port = listener.local_addr()
+            .map_err(|e| format!("Failed to inspect local tunnel address: {}", e))?
+            .port();
+        let actual_bind_addr = format!("{}:{}", config.local_host, bound_port);
 
         let _ = app_handle.emit("tunnel-status", serde_json::json!({
             "tunnelId": tunnel_id,
             "status": "listening",
-            "message": format!("Local tunnel listening on {}", bind_addr),
+            "message": format!("Local tunnel listening on {}", actual_bind_addr),
         }));
 
         tokio::spawn(async move {
@@ -310,7 +330,7 @@ impl TunnelManager {
             }));
         });
 
-        Ok(())
+        Ok(bound_port)
     }
 
     /// 启动远程端口转发隧道（ssh -R）

@@ -1,6 +1,6 @@
 use crate::ssh::{SshSession, SshCache};
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
-use russh_keys::key::{KeyPair, SignatureHash};
+use russh::keys::{Algorithm, PrivateKey, PublicKey, PublicKeyBase64};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
@@ -6359,7 +6359,6 @@ pub fn generate_ssh_keypair(
     algorithm: &str,
     destination: &std::path::Path,
 ) -> Result<SshKeyPair, String> {
-    use russh_keys::PublicKeyBase64;
     use std::io::Write;
 
     if let Ok(metadata) = std::fs::symlink_metadata(destination) {
@@ -6371,21 +6370,20 @@ pub fn generate_ssh_keypair(
         }
     }
 
+    let mut rng = rand::rng();
     let key_pair = match algorithm {
-        "ed25519" => KeyPair::generate_ed25519()
-            .ok_or_else(|| "Failed to generate Ed25519 key pair".to_string())?,
-        "rsa" => KeyPair::generate_rsa(4096, SignatureHash::SHA2_256)
-            .ok_or_else(|| "Failed to generate RSA key pair".to_string())?,
-        _ => return Err(format!("Unsupported algorithm: {}. Use 'ed25519' or 'rsa'.", algorithm)),
+        "ed25519" => PrivateKey::random(&mut rng, Algorithm::Ed25519)
+            .map_err(|e| format!("Failed to generate Ed25519 key pair: {}", e))?,
+        _ => return Err(format!("Unsupported algorithm: {}. Use 'ed25519'.", algorithm)),
     };
 
-    let mut pem_buf = russh::CryptoVec::new();
-    russh_keys::encode_pkcs8_pem(&key_pair, &mut pem_buf)
+    let private_key_openssh = key_pair
+        .to_openssh(russh::keys::ssh_key::LineEnding::LF)
         .map_err(|e| format!("Failed to encode private key: {}", e))?;
-
-    let public_key = key_pair.clone_public_key()
-        .map_err(|e| format!("Failed to extract public key: {}", e))?;
-    let public_key_openssh = format!("{} {}", public_key.name(), public_key.public_key_base64());
+    let public_key_openssh = key_pair
+        .public_key()
+        .to_openssh()
+        .map_err(|e| format!("Failed to encode public key: {}", e))?;
 
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -6403,7 +6401,33 @@ pub fn generate_ssh_keypair(
         file.set_permissions(std::fs::Permissions::from_mode(0o600))
             .map_err(|e| format!("Failed to secure private key permissions: {}", e))?;
     }
-    file.write_all(pem_buf.as_ref())
+    #[cfg(windows)]
+    {
+        // Do not place key material in the file until inherited ACLs have been
+        // removed. Reopen only after icacls has secured the empty destination.
+        drop(file);
+        let whoami = std::process::Command::new("whoami")
+            .output()
+            .map_err(|e| format!("Failed to identify the current Windows user: {}", e))?;
+        if !whoami.status.success() {
+            return Err("Failed to identify the current Windows user".to_string());
+        }
+        let user = String::from_utf8_lossy(&whoami.stdout).trim().to_string();
+        let grant = format!("{}:(R,W)", user);
+        let status = std::process::Command::new("icacls")
+            .arg(destination)
+            .args(["/inheritance:r", "/grant:r", &grant])
+            .status()
+            .map_err(|e| format!("Failed to secure private key ACL: {}", e))?;
+        if !status.success() {
+            return Err("Failed to secure private key ACL".to_string());
+        }
+        file = options
+            .open(destination)
+            .map_err(|e| format!("Failed to reopen secured private key destination: {}", e))?;
+    }
+
+    file.write_all(private_key_openssh.as_bytes())
         .map_err(|e| format!("Failed to write private key: {}", e))?;
     file.sync_all()
         .map_err(|e| format!("Failed to finalize private key: {}", e))?;
@@ -6491,23 +6515,63 @@ pub async fn change_ssh_password(
 }
 
 /// 将 SSH 公钥部署到远程服务器的 authorized_keys
+fn parse_ssh_public_key(pubkey: &str) -> Result<PublicKey, String> {
+    let trimmed = pubkey.trim();
+    if trimmed.is_empty() || trimmed.len() > 16 * 1024 || trimmed.lines().count() != 1 {
+        return Err("Invalid SSH public key".to_string());
+    }
+    let key = PublicKey::from_openssh(trimmed)
+        .map_err(|_| "Invalid SSH public key".to_string())?;
+    let comment = key
+        .comment()
+        .as_str()
+        .map_err(|_| "Invalid SSH public key comment".to_string())?;
+    if comment.len() > 128
+        || !comment
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.' | '@'))
+    {
+        return Err("Invalid SSH public key comment".to_string());
+    }
+    Ok(key)
+}
+
 pub async fn deploy_ssh_pubkey(
     session: &SshSession,
     _cache: &SshCache,
     _session_id: &str,
     pubkey: &str,
 ) -> Result<String, String> {
-    // 转义公钥中的特殊字符
-    let safe_key = pubkey.replace('"', "\\\"");
+    let canonical = parse_ssh_public_key(pubkey)?
+        .to_openssh()
+        .map_err(|e| format!("Failed to encode SSH public key: {e}"))?;
+    // The encoded payload contains only base64 characters, so no untrusted key
+    // material is interpolated into the remote shell program.
+    let encoded = B64.encode(canonical.as_bytes());
     let cmd = format!(
-        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo \"{}\" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && echo KEY_DEPLOYED",
-        safe_key
+        "key=$(printf '%s' '{}' | base64 -d) && mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && (grep -qxF \"$key\" ~/.ssh/authorized_keys || printf '%s\\n' \"$key\" >> ~/.ssh/authorized_keys) && echo KEY_DEPLOYED",
+        encoded
     );
     let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 15).await?;
     if code != 0 || !stdout.contains("KEY_DEPLOYED") {
         return Err(format!("Failed to deploy public key: {}", stderr.trim()));
     }
     Ok("Public key deployed successfully.".to_string())
+}
+
+/// Remove a specific SSH key from authorized_keys. Matching uses the key blob,
+/// so the key is revoked even if its comment was changed on the server.
+pub async fn remove_ssh_pubkey(session: &SshSession, pubkey: &str) -> Result<(), String> {
+    let key_blob = parse_ssh_public_key(pubkey)?.public_key_base64();
+    let cmd = format!(
+        "set -eu; file=~/.ssh/authorized_keys; [ -f \"$file\" ] || {{ echo KEY_REMOVED; exit 0; }}; tmp=$(mktemp ~/.ssh/authorized_keys.XXXXXX); trap 'rm -f \"$tmp\"' EXIT; awk -v key='{}' '{{ keep=1; for(i=1;i<=NF;i++) if($i==key) keep=0; if(keep) print }}' \"$file\" > \"$tmp\"; chmod 600 \"$tmp\"; mv \"$tmp\" \"$file\"; trap - EXIT; echo KEY_REMOVED",
+        key_blob
+    );
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 15).await?;
+    if code != 0 || !stdout.contains("KEY_REMOVED") {
+        return Err(format!("Failed to revoke public key: {}", stderr.trim()));
+    }
+    Ok(())
 }
 
 /// 从 sshd_config 获取 SSH 身份验证模式
@@ -6561,52 +6625,59 @@ pub async fn set_ssh_auth_mode(
     password_enabled: bool,
     pubkey_enabled: bool,
 ) -> Result<String, String> {
+    if !password_enabled && !pubkey_enabled {
+        return Err("At least one SSH authentication method must remain enabled".to_string());
+    }
     let pw_val = if password_enabled { "yes" } else { "no" };
     let pk_val = if pubkey_enabled { "yes" } else { "no" };
 
-    // ponytail：同时移除 sshd_config.d/ drop-in 文件中的覆盖指令，
-    // 确保主 sshd_config 中的值真正生效（Debian 13+ 使用 Include）
+    // Put the managed block first because sshd uses the first obtained value.
+    // Existing distribution/user configuration remains intact. Validate the
+    // candidate and restore the exact previous file if validation or restart
+    // fails, so a settings change cannot silently lock out the next login.
     let cmd = format!(r#"
-# Remove PasswordAuthentication overrides from drop-in configs
-if [ -d /etc/ssh/sshd_config.d ]; then
-  find /etc/ssh/sshd_config.d -name '*.conf' -exec sed -i '/^\s*PasswordAuthentication/d' {{}} +
+set -eu
+CONFIG=/etc/ssh/sshd_config
+BACKUP=$(mktemp /tmp/ohmypanel-sshd-backup.XXXXXX)
+CANDIDATE=$(mktemp /tmp/ohmypanel-sshd-candidate.XXXXXX)
+cp -p "$CONFIG" "$BACKUP"
+
+{{
+  printf '%s\n' '# BEGIN OHMYPANEL AUTH' 'PasswordAuthentication {}' 'PubkeyAuthentication {}' '# END OHMYPANEL AUTH'
+  awk '
+    /^# BEGIN OHMYPANEL AUTH$/ {{ skip=1; next }}
+    /^# END OHMYPANEL AUTH$/ {{ skip=0; next }}
+    !skip {{ print }}
+  ' "$CONFIG"
+}} > "$CANDIDATE"
+cat "$CANDIDATE" > "$CONFIG"
+
+if ! sshd -t; then
+  cp -p "$BACKUP" "$CONFIG"
+  rm -f "$BACKUP" "$CANDIDATE"
+  echo 'The new sshd configuration is invalid; the previous configuration was restored.' >&2
+  exit 1
 fi
 
-# Update or add PasswordAuthentication in main config
-if grep -qE '^\s*PasswordAuthentication' /etc/ssh/sshd_config; then
-  sed -i 's/^\s*PasswordAuthentication.*/PasswordAuthentication {}/' /etc/ssh/sshd_config
-elif grep -qE '^\s*#\s*PasswordAuthentication' /etc/ssh/sshd_config; then
-  sed -i 's/^\s*#\s*PasswordAuthentication.*/PasswordAuthentication {}/' /etc/ssh/sshd_config
-else
-  echo 'PasswordAuthentication {}' >> /etc/ssh/sshd_config
+if ! (systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service sshd restart 2>/dev/null || service ssh restart 2>/dev/null); then
+  cp -p "$BACKUP" "$CONFIG"
+  sshd -t
+  systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service sshd restart 2>/dev/null || service ssh restart 2>/dev/null || true
+  rm -f "$BACKUP" "$CANDIDATE"
+  echo 'SSH restart failed; the previous configuration was restored.' >&2
+  exit 1
 fi
 
-# Remove PubkeyAuthentication overrides from drop-in configs
-if [ -d /etc/ssh/sshd_config.d ]; then
-  find /etc/ssh/sshd_config.d -name '*.conf' -exec sed -i '/^\s*PubkeyAuthentication/d' {{}} +
-fi
-
-# Update or add PubkeyAuthentication in main config
-if grep -qE '^\s*PubkeyAuthentication' /etc/ssh/sshd_config; then
-  sed -i 's/^\s*PubkeyAuthentication.*/PubkeyAuthentication {}/' /etc/ssh/sshd_config
-elif grep -qE '^\s*#\s*PubkeyAuthentication' /etc/ssh/sshd_config; then
-  sed -i 's/^\s*#\s*PubkeyAuthentication.*/PubkeyAuthentication {}/' /etc/ssh/sshd_config
-else
-  echo 'PubkeyAuthentication {}' >> /etc/ssh/sshd_config
-fi
-
-# Restart SSH service
-systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service sshd restart 2>/dev/null
+rm -f "$BACKUP" "$CANDIDATE"
 echo "MODE_UPDATED"
 "#,
-        pw_val, pw_val, pw_val, pk_val, pk_val, pk_val
+        pw_val, pk_val
     );
 
     let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 20).await?;
-    if !stdout.contains("MODE_UPDATED") {
+    if code != 0 || !stdout.contains("MODE_UPDATED") {
         return Err(format!("Failed to update SSH auth mode: {}", stderr.trim()));
     }
-    let _ = code; // sshd 重启可能导致连接断开，因此非零退出码不视为失败
     Ok("SSH authentication mode updated successfully.".to_string())
 }
 
@@ -9808,7 +9879,24 @@ mod tests {
         assert_eq!(generated.private_key_path, path.to_string_lossy());
         assert!(generated.public_key_openssh.starts_with("ssh-ed25519 "));
         assert!(!serialized.contains("PRIVATE KEY"));
-        assert!(private_key.starts_with(b"-----BEGIN PRIVATE KEY-----"));
+        assert!(private_key.starts_with(b"-----BEGIN OPENSSH PRIVATE KEY-----"));
         drop(cleanup);
+    }
+
+    #[test]
+    fn ssh_public_key_parser_accepts_canonical_key_and_safe_comment() {
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let line = format!("{} ohmypanel:test-id", key.public_key().to_openssh().unwrap());
+        let parsed = parse_ssh_public_key(&line).unwrap();
+        assert_eq!(parsed.public_key_base64(), key.public_key().public_key_base64());
+    }
+
+    #[test]
+    fn ssh_public_key_parser_rejects_options_multiline_and_shell_comments() {
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let line = key.public_key().to_openssh().unwrap();
+        assert!(parse_ssh_public_key(&format!("command=\"id\" {line}")).is_err());
+        assert!(parse_ssh_public_key(&format!("{line}\n{line}")).is_err());
+        assert!(parse_ssh_public_key(&format!("{line} unsafe'comment")).is_err());
     }
 }

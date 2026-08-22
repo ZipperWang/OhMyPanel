@@ -2,10 +2,18 @@ use std::sync::Arc;
 use tauri::Emitter;
 use tokio::sync::Mutex as AsyncMutex;
 use crate::db::HostKeyStore;
+use crate::config::ConfigManager;
 use crate::ssh::{self, SshManager};
 use crate::server;
 use crate::tunnel::TunnelManager;
 use crate::DbPool;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedKeyResult {
+    pub key_path: String,
+    pub auth_type: String,
+}
 
 #[tauri::command]
 pub async fn ssh_connect(
@@ -21,17 +29,44 @@ pub async fn ssh_connect(
     if port == 0 {
         return Err("Invalid SSH port".to_string());
     }
-    let username = config["username"].as_str().unwrap_or("").to_string();
-    let password = config["password"].as_str().map(|s| s.to_string());
-    let key_path = config["keyPath"].as_str().map(|s| s.to_string());
+    let mut username = config["username"].as_str().unwrap_or("").to_string();
+    let connection_id = config["connectionId"].as_str().map(|s| s.to_string());
+    let mut password = config["password"].as_str().map(|s| s.to_string());
+    let mut key_path = config["keyPath"].as_str().map(|s| s.to_string());
     let cols = config["cols"].as_u64().unwrap_or(80) as u32;
     let rows = config["rows"].as_u64().unwrap_or(24) as u32;
+    if let Some(id) = connection_id.as_deref() {
+        let saved = {
+            let conn = db.lock().map_err(|_| "Connection database is unavailable".to_string())?;
+            ConfigManager::get(&conn, id)?
+                .ok_or_else(|| "Connection not found".to_string())?
+        };
+        if !saved.host.eq_ignore_ascii_case(&host) || saved.port != port {
+            return Err("Saved connection endpoint does not match the SSH request".to_string());
+        }
+        username = saved.username;
+        match saved.auth_type.as_str() {
+            "password" => {
+                password = saved.password;
+                key_path = None;
+            }
+            "key" | "managed_key" => {
+                password = None;
+                key_path = saved.key_path;
+            }
+            "managed_key_password" => {
+                password = saved.password;
+                key_path = saved.key_path;
+            }
+            _ => return Err("Saved connection has an unsupported authentication mode".to_string()),
+        }
+    }
     let trusted_host_key = {
         let conn = db.lock().map_err(|_| "SSH host key database is unavailable".to_string())?;
         HostKeyStore::get(&conn, &host, port)?
     }
     .map(|record| {
-        russh_keys::parse_public_key_base64(&record.key_base64)
+        russh::keys::parse_public_key_base64(&record.key_base64)
             .map_err(|e| format!("Stored SSH host key is invalid: {}", e))
     })
     .transpose()?;
@@ -41,6 +76,7 @@ pub async fn ssh_connect(
         host,
         port,
         username,
+        connection_id,
         password,
         key_path,
         trusted_host_key,
@@ -53,6 +89,92 @@ pub async fn ssh_connect(
     mgr.insert_session(session_id.clone(), session, app);
     drop(mgr);
     Ok(session_id)
+}
+
+/// After a successful password bootstrap, create (or reuse) an app-managed
+/// Ed25519 key, install it for the connected account, and update the saved
+/// connection policy.
+#[tauri::command]
+pub async fn ssh_provision_managed_key(
+    ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
+    db: tauri::State<'_, DbPool>,
+    session_id: &str,
+    connection_id: &str,
+) -> Result<ManagedKeyResult, String> {
+    if connection_id.is_empty()
+        || connection_id.len() > 128
+        || !connection_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("Invalid connection id".to_string());
+    }
+
+    let connection = {
+        let conn = db.lock().map_err(|_| "Connection database is unavailable".to_string())?;
+        ConfigManager::get(&conn, connection_id)?
+            .ok_or_else(|| "Connection not found".to_string())?
+    };
+    let (session, cache) = {
+        let mgr = ssh_mgr.lock().await;
+        (mgr.get_session(session_id)?, mgr.cache.clone())
+    };
+    let actual = &session.connect_info;
+    if !actual.host.eq_ignore_ascii_case(&connection.host)
+        || actual.port != connection.port
+        || actual.username != connection.username
+    {
+        return Err("The active SSH session does not match this saved connection".to_string());
+    }
+
+    let mut key_dir = crate::db::db_dir();
+    key_dir.push("keys");
+    std::fs::create_dir_all(&key_dir)
+        .map_err(|e| format!("Failed to create managed key directory: {}", e))?;
+    let key_path = key_dir.join(format!("{}.ed25519", connection_id));
+    let public_key_openssh = if key_path.exists() {
+        let key = crate::ssh::load_secret_key_protected(&key_path.to_string_lossy())?;
+        let mut public = key.public_key().clone();
+        public.set_comment(format!("ohmypanel:{}", connection_id));
+        public
+            .to_openssh()
+            .map_err(|e| format!("Failed to encode managed public key: {}", e))?
+    } else {
+        let generated = crate::server::generate_ssh_keypair("ed25519", &key_path)?;
+        format!("{} ohmypanel:{}", generated.public_key_openssh, connection_id)
+    };
+
+    crate::server::deploy_ssh_pubkey(&session, &cache, session_id, &public_key_openssh).await?;
+    let is_root = connection.username == "root";
+    let key_path_string = key_path.to_string_lossy().into_owned();
+    SshManager::verify_credentials(
+        &connection.host,
+        connection.port,
+        &connection.username,
+        if is_root { None } else { connection.password.as_deref() },
+        Some(&key_path_string),
+        &actual.host_key,
+    )
+    .await
+    .map_err(|e| format!(
+        "Managed key was installed but independent login verification failed; saved credentials were not changed: {}",
+        e
+    ))?;
+    {
+        let conn = db.lock().map_err(|_| "Connection database is unavailable".to_string())?;
+        ConfigManager::set_managed_key(&conn, connection_id, &key_path_string, is_root)?;
+    }
+    {
+        let mgr = ssh_mgr.lock().await;
+        mgr.update_session_auth(
+            session_id,
+            if is_root { None } else { connection.password.clone() },
+            Some(key_path_string.clone()),
+        )?;
+    }
+
+    Ok(ManagedKeyResult {
+        key_path: key_path_string,
+        auth_type: if is_root { "managed_key" } else { "managed_key_password" }.to_string(),
+    })
 }
 
 #[tauri::command]

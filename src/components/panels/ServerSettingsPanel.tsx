@@ -43,6 +43,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
   const [authMode, setAuthMode] = useState<SshAuthMode | null>(null)
   const [authModeLoading, setAuthModeLoading] = useState(false)
   const [authModeSaving, setAuthModeSaving] = useState(false)
+  const [authModeError, setAuthModeError] = useState('')
 
   // SSH 密钥生成状态
   const [keyAlgorithm, setKeyAlgorithm] = useState('ed25519')
@@ -244,6 +245,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
     // 防止同时禁用两种模式
     if (!newMode.password && !newMode.pubkey) return
     setAuthModeSaving(true)
+    setAuthModeError('')
     try {
       await invoke('server_set_ssh_auth_mode', {
         sessionId,
@@ -251,7 +253,8 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
         pubkeyEnabled: newMode.pubkey,
       })
       setAuthMode(newMode)
-    } catch {
+    } catch (error) {
+      setAuthModeError(String(error))
       // 恢复原值
       await fetchAuthMode()
     } finally {
@@ -560,6 +563,7 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
               </div>
             </div>
             {authModeLoading && <div className="settings-muted">{t('settings.loadingAuth')}</div>}
+            {authModeError && <div className="settings-muted" style={{ color: 'var(--red)' }}>{authModeError}</div>}
 
             {/* 密钥生成 */}
             <div className="settings-key-section">
@@ -571,7 +575,6 @@ export default function ServerSettingsPanel({ sessionId, appSettings, onToggleAu
                   onChange={(e) => { setKeyAlgorithm(e.target.value); setKeyPair(null) }}
                 >
                   <option value="ed25519">Ed25519</option>
-                  <option value="rsa">RSA 4096</option>
                 </select>
                 <button
                   className="svc-cfg-btn primary"

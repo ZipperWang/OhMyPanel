@@ -1,4 +1,5 @@
 mod config;
+mod credentials;
 mod db;
 mod server;
 mod ssh;
@@ -18,22 +19,25 @@ type DbPool = std::sync::Mutex<SqliteConn>;
 
 pub fn run() {
     tauri::Builder::default()
-        .plugin(
-            tauri_plugin_log::Builder::new()
-                .level(log::LevelFilter::Info)
-                .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None }),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
-                ])
-                .build(),
-        )
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            let mut logger = fern::Dispatch::new()
+                .level(log::LevelFilter::Info)
+                .chain(std::io::stdout());
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                if std::fs::create_dir_all(&log_dir).is_ok() {
+                    if let Ok(log_file) = fern::log_file(log_dir.join("ohmypanel.log")) {
+                        logger = logger.chain(log_file);
+                    }
+                }
+            }
+            if let Err(error) = logger.apply() {
+                eprintln!("Failed to initialize application logging: {error}");
+            }
+
             let ssh_mgr = Arc::new(AsyncMutex::new(SshManager::new()));
             app.manage(ssh_mgr);
 
@@ -56,6 +60,7 @@ pub fn run() {
             commands::ssh::ssh_download_to_local, commands::ssh::ssh_save_as_local, commands::ssh::ssh_save_pause, commands::ssh::ssh_save_resume, commands::ssh::ssh_save_stop,
             commands::ssh::ssh_compress, commands::ssh::ssh_extract, commands::ssh::ssh_reconnect,
             commands::ssh::ssh_generate_keypair, commands::ssh::ssh_trust_host_key,
+            commands::ssh::ssh_provision_managed_key,
             // 配置
             commands::config::config_list, commands::config::config_save, commands::config::config_delete, commands::config::config_save_credentials,
             commands::config::clear_proxy_env,
@@ -135,6 +140,8 @@ pub fn run() {
             commands::tunnel::tunnel_list, commands::tunnel::tunnel_get,
             commands::tunnel::tunnel_update_note, commands::tunnel::tunnel_delete_batch,
             commands::tunnel::tunnel_restore_batch,
+            commands::tunnel::database_tunnel_open, commands::tunnel::database_tunnel_status,
+            commands::tunnel::database_tunnel_close,
             // 端口管理
             commands::port::port_list, commands::port::port_query, commands::port::port_kill,
         ])

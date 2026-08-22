@@ -14,7 +14,7 @@ pub struct Connection {
     pub auth_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing)]
     pub password: Option<String>,
     #[serde(default)]
     pub remember_me: bool,
@@ -23,11 +23,62 @@ pub struct Connection {
 pub struct ConfigManager;
 
 impl ConfigManager {
+    fn hydrate_password(conn: &SqliteConn, connection: &mut Connection) {
+        let legacy = connection.password.take().filter(|password| !password.is_empty());
+        if let Some(password) = legacy {
+            match crate::credentials::set_connection_password(&connection.id, &password) {
+                Ok(()) => {
+                    if let Err(error) = conn.execute(
+                        "UPDATE connections SET password = NULL WHERE id = ?1",
+                        params![connection.id],
+                    ) {
+                        log::warn!("Failed to clear migrated SSH password from SQLite: {}", error);
+                    }
+                }
+                Err(error) => log::warn!("Failed to migrate SSH password to secure storage: {}", error),
+            }
+            connection.password = Some(password);
+            return;
+        }
+
+        match crate::credentials::get_connection_password(&connection.id) {
+            Ok(password) => connection.password = password,
+            Err(error) => log::warn!("Failed to read SSH password from secure storage: {}", error),
+        }
+    }
+
+    pub fn get(conn: &SqliteConn, id: &str) -> Result<Option<Connection>, String> {
+        let mut stmt = conn
+            .prepare("SELECT id, name, host, port, username, auth_type, key_path, password, remember_me FROM connections WHERE id = ?1")
+            .map_err(|e| format!("Prepare connection query failed: {}", e))?;
+        let result = stmt.query_row(params![id], |row| {
+            Ok(Connection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                host: row.get(2)?,
+                port: row.get::<_, i64>(3)? as u16,
+                username: row.get(4)?,
+                auth_type: row.get(5)?,
+                key_path: row.get(6)?,
+                password: row.get(7)?,
+                remember_me: row.get::<_, Option<i64>>(8)?.map(|v| v == 1).unwrap_or(false),
+            })
+        });
+        match result {
+            Ok(mut connection) => {
+                Self::hydrate_password(conn, &mut connection);
+                Ok(Some(connection))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(format!("Read connection failed: {}", e)),
+        }
+    }
+
     pub fn list(conn: &SqliteConn) -> Vec<Connection> {
         let mut stmt = conn
             .prepare("SELECT id, name, host, port, username, auth_type, key_path, password, remember_me FROM connections ORDER BY name")
             .expect("prepare connections list");
-        stmt.query_map([], |row| {
+        let mut connections: Vec<Connection> = stmt.query_map([], |row| {
             Ok(Connection {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -42,20 +93,58 @@ impl ConfigManager {
         })
         .expect("query connections")
         .filter_map(|r| r.ok())
-        .collect()
+        .collect();
+        drop(stmt);
+        for connection in &mut connections {
+            Self::hydrate_password(conn, connection);
+        }
+        connections
     }
 
     pub fn save(conn: &SqliteConn, c: &Connection) -> Result<(), String> {
+        let existing_legacy = conn
+            .query_row(
+                "SELECT password FROM connections WHERE id = ?1",
+                params![c.id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap_or(None)
+            .filter(|password| !password.is_empty());
+
+        if !c.remember_me {
+            crate::credentials::delete_connection_password(&c.id)?;
+        } else if let Some(password) = c.password.as_deref().filter(|password| !password.is_empty()) {
+            crate::credentials::set_connection_password(&c.id, password)?;
+        } else if let Some(password) = existing_legacy.as_deref() {
+            crate::credentials::set_connection_password(&c.id, password)?;
+        }
+
         conn.execute(
             "INSERT OR REPLACE INTO connections (id, name, host, port, username, auth_type, key_path, password, remember_me) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![c.id, c.name, c.host, c.port as i64, c.username, c.auth_type, c.key_path, c.password, if c.remember_me { 1 } else { 0 }],
+            params![c.id, c.name, c.host, c.port as i64, c.username, c.auth_type, c.key_path, Option::<String>::None, if c.remember_me { 1 } else { 0 }],
         ).map_err(|e| format!("Save connection failed: {}", e))?;
         Ok(())
     }
 
     pub fn delete(conn: &SqliteConn, id: &str) -> Result<(), String> {
+        let managed_key_path = conn
+            .query_row(
+                "SELECT auth_type, key_path FROM connections WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .ok()
+            .and_then(|(auth_type, key_path)| auth_type.starts_with("managed_").then_some(key_path).flatten());
+        crate::credentials::delete_connection_password(id)?;
         conn.execute("DELETE FROM connections WHERE id = ?1", params![id])
             .map_err(|e| format!("Delete connection failed: {}", e))?;
+        if let Some(key_path) = managed_key_path {
+            let expected = crate::db::db_dir().join("keys").join(format!("{}.ed25519", id));
+            if std::path::Path::new(&key_path) == expected && expected.is_file() {
+                std::fs::remove_file(&expected)
+                    .map_err(|e| format!("Connection was deleted, but its managed private key could not be removed: {}", e))?;
+            }
+        }
         Ok(())
     }
 
@@ -68,57 +157,48 @@ impl ConfigManager {
         password: Option<&str>,
         remember_me: bool,
     ) -> Result<(), String> {
-        println!("=== DEBUG save_credentials ===");
-        println!("id: {}", id);
-        println!("username: {}", username);
-        println!("auth_type: {}", auth_type);
-        println!("key_path: {:?}", key_path);
-        println!("password: {:?}", password.as_ref().map(|_| "***"));
-        println!("remember_me: {}", remember_me);
-        
-        let sql = "UPDATE connections SET username = ?1, auth_type = ?2, key_path = ?3, password = ?4, remember_me = ?5 WHERE id = ?6";
-        println!("SQL: {}", sql);
-        
-        let result = conn.execute(
-            sql,
-            params![username, auth_type, key_path, password, if remember_me { 1 } else { 0 }, id],
-        );
-        
-        match result {
-            Ok(rows_affected) => {
-                println!("Rows affected: {}", rows_affected);
-                
-                // Verify the update by reading back
-                let mut stmt = conn.prepare("SELECT username, auth_type, key_path, password, remember_me FROM connections WHERE id = ?1")
-                    .map_err(|e| format!("Prepare select failed: {}", e))?;
-                
-                let row_result = stmt.query_row(params![id], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, i64>(4)? == 1,
-                    ))
-                });
-                
-                match row_result {
-                    Ok((db_username, db_auth_type, db_key_path, db_password, db_remember)) => {
-                        println!("After update - username: {}, auth_type: {}, key_path: {:?}, password: {:?}, remember_me: {}",
-                            db_username, db_auth_type, db_key_path, db_password.as_ref().map(|_| "***"), db_remember);
-                    }
-                    Err(e) => {
-                        println!("Failed to verify update: {}", e);
-                    }
-                }
-                
-                Ok(())
-            }
-            Err(e) => {
-                println!("Error executing UPDATE: {}", e);
-                Err(format!("Save credentials failed: {}", e))
-            }
+        if !remember_me {
+            crate::credentials::delete_connection_password(id)?;
+        } else if let Some(password) = password.filter(|password| !password.is_empty()) {
+            crate::credentials::set_connection_password(id, password)?;
         }
+        let changed = conn.execute(
+            "UPDATE connections SET username = ?1, auth_type = ?2, key_path = ?3, password = NULL, remember_me = ?4 WHERE id = ?5",
+            params![username, auth_type, key_path, if remember_me { 1 } else { 0 }, id],
+        ).map_err(|e| format!("Save credentials failed: {}", e))?;
+        if changed == 0 {
+            return Err("Connection not found".to_string());
+        }
+        Ok(())
+    }
+
+    /// Switch a password-bootstrapped connection to its app-managed key.
+    /// Root no longer needs a stored password; non-root keeps it for
+    /// password/MFA and privilege-elevation workflows.
+    pub fn set_managed_key(
+        conn: &SqliteConn,
+        id: &str,
+        key_path: &str,
+        is_root: bool,
+    ) -> Result<(), String> {
+        let auth_type = if is_root { "managed_key" } else { "managed_key_password" };
+        let changed = if is_root {
+            crate::credentials::delete_connection_password(id)?;
+            conn.execute(
+                "UPDATE connections SET auth_type = ?1, key_path = ?2, password = NULL, remember_me = 1 WHERE id = ?3",
+                params![auth_type, key_path, id],
+            )
+        } else {
+            conn.execute(
+                "UPDATE connections SET auth_type = ?1, key_path = ?2, remember_me = 1 WHERE id = ?3",
+                params![auth_type, key_path, id],
+            )
+        }
+        .map_err(|e| format!("Save managed SSH key failed: {}", e))?;
+        if changed == 0 {
+            return Err("Connection not found".to_string());
+        }
+        Ok(())
     }
 }
 
@@ -346,6 +426,36 @@ mod tests {
         let list = ConfigManager::list(&conn);
         assert!(list[0].remember_me);
         assert_eq!(list[0].key_path, Some("/root/.ssh/id_rsa".to_string()));
+    }
+
+    #[test]
+    fn managed_root_key_removes_saved_password() {
+        let conn = test_conn();
+        ConfigManager::save(&conn, &Connection {
+            id: "root-1".into(), name: "Root".into(), host: "host".into(),
+            port: 22, username: "root".into(), auth_type: "password".into(),
+            key_path: None, password: Some("bootstrap".into()), remember_me: true,
+        }).unwrap();
+        ConfigManager::set_managed_key(&conn, "root-1", "managed.ed25519", true).unwrap();
+        let saved = ConfigManager::get(&conn, "root-1").unwrap().unwrap();
+        assert_eq!(saved.auth_type, "managed_key");
+        assert_eq!(saved.key_path.as_deref(), Some("managed.ed25519"));
+        assert_eq!(saved.password, None);
+    }
+
+    #[test]
+    fn managed_non_root_key_keeps_password() {
+        let conn = test_conn();
+        ConfigManager::save(&conn, &Connection {
+            id: "user-1".into(), name: "User".into(), host: "host".into(),
+            port: 22, username: "deploy".into(), auth_type: "password".into(),
+            key_path: None, password: Some("sudo-secret".into()), remember_me: true,
+        }).unwrap();
+        ConfigManager::set_managed_key(&conn, "user-1", "managed.ed25519", false).unwrap();
+        let saved = ConfigManager::get(&conn, "user-1").unwrap().unwrap();
+        assert_eq!(saved.auth_type, "managed_key_password");
+        assert_eq!(saved.key_path.as_deref(), Some("managed.ed25519"));
+        assert_eq!(saved.password.as_deref(), Some("sudo-secret"));
     }
 
     #[test]

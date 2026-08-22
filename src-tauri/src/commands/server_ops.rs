@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
-use crate::{DbPool, ssh, ssh::SshManager, server, db};
+use crate::{config::ConfigManager, DbPool, ssh, ssh::SshManager, server, db};
 use server::*;
 
 // ===== Site Commands =====
@@ -489,6 +489,7 @@ pub async fn server_get_ssh_auth_mode(
 #[tauri::command]
 pub async fn server_set_ssh_auth_mode(
     ssh_mgr: tauri::State<'_, Arc<AsyncMutex<SshManager>>>,
+    db: tauri::State<'_, DbPool>,
     session_id: &str,
     password_enabled: bool,
     pubkey_enabled: bool,
@@ -497,6 +498,58 @@ pub async fn server_set_ssh_auth_mode(
     let session = mgr.get_session(session_id)?;
     let cache = mgr.cache.clone();
     drop(mgr);
+
+    if !password_enabled && !pubkey_enabled {
+        return Err("At least one SSH authentication method must remain enabled".to_string());
+    }
+
+    let saved = if let Some(connection_id) = session.connect_info.connection_id.as_deref() {
+        let conn = db.lock().map_err(|_| "Connection database is unavailable".to_string())?;
+        ConfigManager::get(&conn, connection_id)?
+    } else {
+        None
+    };
+    let password = saved
+        .as_ref()
+        .and_then(|connection| connection.password.clone())
+        .or_else(|| session.connect_info.password.clone());
+    let key_path = saved
+        .as_ref()
+        .and_then(|connection| connection.key_path.clone())
+        .or_else(|| session.connect_info.key_path.clone());
+
+    // Before disabling one method, prove that a fresh host-key-pinned login
+    // succeeds using only the method that will remain available.
+    if password_enabled && !pubkey_enabled {
+        let password = password.as_deref().ok_or_else(|| {
+            "Cannot disable public-key authentication because no saved password is available for the next login".to_string()
+        })?;
+        SshManager::verify_credentials(
+            &session.connect_info.host,
+            session.connect_info.port,
+            &session.connect_info.username,
+            Some(password),
+            None,
+            &session.connect_info.host_key,
+        )
+        .await
+        .map_err(|e| format!("Password-only login verification failed; SSH settings were not changed: {}", e))?;
+    } else if pubkey_enabled && !password_enabled {
+        let key_path = key_path.as_deref().ok_or_else(|| {
+            "Cannot disable password authentication because no saved key is available for the next login".to_string()
+        })?;
+        SshManager::verify_credentials(
+            &session.connect_info.host,
+            session.connect_info.port,
+            &session.connect_info.username,
+            None,
+            Some(key_path),
+            &session.connect_info.host_key,
+        )
+        .await
+        .map_err(|e| format!("Key-only login verification failed; SSH settings were not changed: {}", e))?;
+    }
+
     let result = server::set_ssh_auth_mode(&session, &cache, session_id, password_enabled, pubkey_enabled).await;
     cache.invalidate(session_id, &["ssh_auth_mode"]);
     result
