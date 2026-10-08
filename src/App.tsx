@@ -1,0 +1,1445 @@
+import { useState, useEffect, useRef, useCallback, type RefCallback } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { check, type Update } from '@tauri-apps/plugin-updater'
+import { useTranslation } from 'react-i18next'
+import Sidebar, { type Connection as SidebarConnection } from './components/Sidebar'
+import ServerHome from './components/ServerHome'
+import type { ConnectionDraft } from './components/ConnectionDialog'
+import ServerPanel, { type PanelSection } from './components/ServerPanel'
+import { isPanelSection } from './components/navigation'
+import type { TerminalHandle } from './components/Terminal'
+import TerminalTabStrip from './components/terminal/TerminalTabStrip'
+import TerminalWorkspace from './components/terminal/TerminalWorkspace'
+import Icon from './components/icons'
+import { parseConnectionHost } from './components/terminal/terminalActions'
+import { clearTerminalOutput, ensureTerminalOutputBroker } from './components/terminal/terminalOutputBroker'
+import type { TerminalConnectionState, TerminalDimensions, TerminalSavedConnection, TerminalSessionTabModel } from './components/terminal/types'
+import './App.css'
+import './styles/tokens.css'
+import './styles/base.css'
+import './styles/ui.css'
+import './styles/shell.css'
+import './styles/overrides.css'
+
+interface UploadItem {
+  file: File
+  fileName: string
+  remotePath: string
+  status: 'pending' | 'uploading' | 'done' | 'error' | 'stopped'
+  error?: string
+  retryCount?: number
+}
+
+interface UploadState {
+  queue: UploadItem[]
+  totalBytes: number
+  uploadedBytes: number
+  speed: number
+  active: boolean
+  paused: boolean
+  workers: number
+}
+
+interface Settings {
+  auto_reconnect: boolean
+  reconnect_interval: number
+  max_reconnect_attempts: number
+  close_tab_on_disconnect: boolean
+  cache_ttl_hours: number
+  cache_max_files: number
+  cache_enabled: boolean
+  command_timeout_minutes: number
+  upload_workers: number
+  theme: string
+}
+
+interface ActiveSession {
+  tabId: string
+  configId: string
+  sessionId: string | null
+  name: string
+  hostKey: string
+  username: string
+  initialSection: PanelSection
+}
+
+function createTabId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+interface HostKeyVerification {
+  kind: 'unknown' | 'changed'
+  host: string
+  port: number
+  algorithm: string
+  fingerprint: string
+  keyBase64: string
+  expectedFingerprint?: string
+}
+
+const parseHostKeyVerification = (error: unknown): HostKeyVerification | null => {
+  const message = String(error)
+  const marker = 'HOST_KEY_VERIFICATION:'
+  const markerIndex = message.indexOf(marker)
+  if (markerIndex < 0) return null
+  try {
+    const parsed = JSON.parse(message.slice(markerIndex + marker.length)) as HostKeyVerification
+    if (
+      (parsed.kind === 'unknown' || parsed.kind === 'changed') &&
+      typeof parsed.host === 'string' &&
+      typeof parsed.port === 'number' &&
+      typeof parsed.algorithm === 'string' &&
+      typeof parsed.fingerprint === 'string' &&
+      typeof parsed.keyBase64 === 'string'
+    ) {
+      return parsed
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+function App() {
+  const { t } = useTranslation()
+  // ponytail：多会话模式：sessions 数组加活动标签页，后端已支持 N 个并发 SSH 连接
+  const [sessions, setSessions] = useState<ActiveSession[]>([])
+  const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  // ponytail：跟踪哪些会话拥有活动 SSH 连接（与标签页是否存在解耦）
+  const [connectedTabIds, setConnectedTabIds] = useState<Set<string>>(new Set())
+  const [connectingTabIds, setConnectingTabIds] = useState<Set<string>>(new Set())
+  const [error, setError] = useState('')
+  const [toast, setToast] = useState('')
+  const [showWelcome, setShowWelcome] = useState(false)
+  const termRefMap = useRef(new Map<string, TerminalHandle | null>())
+  const termRefCallbacks = useRef(new Map<string, RefCallback<TerminalHandle>>())
+  const activeTermRef = useRef<TerminalHandle | null>(null)
+  const activeTabIdRef = useRef<string | null>(null)
+  const [errorDialog, setErrorDialog] = useState<{ visible: boolean; message: string; type: 'auth' | 'network' | 'connection' | 'other' } | null>(null)
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null)
+  const [connectionErrors, setConnectionErrors] = useState<Map<string, { type: 'auth' | 'network' | 'connection' | 'other'; message: string }>>(new Map())
+  const [sessionSections, setSessionSections] = useState<Map<string, PanelSection>>(new Map())
+  const [terminalDimensions, setTerminalDimensions] = useState<Map<string, TerminalDimensions>>(new Map())
+  const [unreadSessions, setUnreadSessions] = useState<Set<string>>(new Set())
+  const [newConnectionRequestId, setNewConnectionRequestId] = useState(0)
+  const [editConnectionRequest, setEditConnectionRequest] = useState<{ id: string; requestId: number } | null>(null)
+
+  // 设置
+  const [settings, setSettings] = useState<Settings>({
+    auto_reconnect: true, reconnect_interval: 5, max_reconnect_attempts: 10, close_tab_on_disconnect: false, cache_ttl_hours: 24, cache_max_files: 500, cache_enabled: true, command_timeout_minutes: 30, upload_workers: 3, theme: 'light'
+  })
+
+  // 主题变化时应用到 <html data-theme>（同时覆盖初始加载）
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', settings.theme || 'light')
+  }, [settings.theme])
+  // ponytail：每个会话独立维护重连状态，每台服务器分别重连
+  // ponytail：Map 的值存储 { name, attempt }，使重连提示条渲染时不会出现 Toast 闪烁
+  const [reconnectingSessions, setReconnectingSessions] = useState<Map<string, { name: string; attempt: number }>>(new Map())
+  const reconnectingActiveRef = useRef(new Map<string, boolean>())
+  const reconnectAttemptRef = useRef(new Map<string, number>())
+  const reconnectTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const reconnectGenerationRef = useRef(new Map<string, number>())
+  const connectingTabIdsRef = useRef(new Set<string>())
+  const autoReconnectRef = useRef(true)
+  // ponytail：为 close_tab_on_disconnect 保存 ref，避免 useEffect 处理器使用过期闭包
+  const closeTabOnDisconnectRef = useRef(false)
+  const manualDisconnectSessionsRef = useRef(new Set<string>())
+  // ponytail：主动发起正常重启的会话，在断开时跳过自动重连
+  const normalRebootSessionsRef = useRef(new Set<string>())
+  const [connections, setConnections] = useState<SidebarConnection[]>([])
+  const connectionsLoadIdRef = useRef(0)
+  const sessionsRef = useRef<ActiveSession[]>([])
+  const settingsRef = useRef(settings)
+
+  sessionsRef.current = sessions
+  settingsRef.current = settings
+  activeTabIdRef.current = activeTabId
+
+  const activeSession = sessions.find(s => s.tabId === activeTabId) || null
+  const activeSessionId = activeSession?.sessionId ?? null
+  const activePanelSection = activeTabId
+    ? sessionSections.get(activeTabId) || activeSession?.initialSection || 'dashboard'
+    : 'dashboard'
+  // ponytail：活动标签页已断开且未重连，显示持久提示
+  const isDisconnected = activeTabId
+    ? !connectedTabIds.has(activeTabId) &&
+      !reconnectingSessions.has(activeTabId) &&
+      !connectingTabIdsRef.current.has(activeTabId)
+    : false
+
+  const markDisconnected = (tabId: string) => {
+    setConnectedTabIds(prev => { const s = new Set(prev); s.delete(tabId); return s })
+  }
+
+  const clearReconnectState = (tabId: string) => {
+    const timer = reconnectTimersRef.current.get(tabId)
+    if (timer) clearTimeout(timer)
+    reconnectTimersRef.current.delete(tabId)
+    reconnectingActiveRef.current.delete(tabId)
+    reconnectAttemptRef.current.delete(tabId)
+    setReconnectingSessions(prev => {
+      if (!prev.has(tabId)) return prev
+      const next = new Map(prev)
+      next.delete(tabId)
+      return next
+    })
+  }
+
+  const handleDisconnectAction = (tabId: string) => {
+    if (closeTabOnDisconnectRef.current) removeSession(tabId)
+    else markDisconnected(tabId)
+  }
+
+  const removeSession = (tabId: string) => {
+    clearReconnectState(tabId)
+    connectingTabIdsRef.current.delete(tabId)
+    setConnectingTabIds(prev => { const next = new Set(prev); next.delete(tabId); return next })
+    termRefMap.current.delete(tabId)
+    termRefCallbacks.current.delete(tabId)
+    const current = sessionsRef.current
+    const removedIndex = current.findIndex(session => session.tabId === tabId)
+    const removedSession = current[removedIndex]
+    if (removedSession?.sessionId) clearTerminalOutput(removedSession.sessionId)
+    const remaining = current.filter(session => session.tabId !== tabId)
+    sessionsRef.current = remaining
+    setSessions(remaining)
+    setConnectedTabIds(prev => { const s = new Set(prev); s.delete(tabId); return s })
+    setActiveTabId(prev => {
+      if (prev !== tabId) return prev
+      if (remaining.length === 0) return null
+      return remaining[Math.min(Math.max(removedIndex, 0), remaining.length - 1)].tabId
+    })
+    setConnectionErrors(prev => { const next = new Map(prev); next.delete(tabId); return next })
+    setSessionSections(prev => { const next = new Map(prev); next.delete(tabId); return next })
+    setTerminalDimensions(prev => { const next = new Map(prev); next.delete(tabId); return next })
+    setUnreadSessions(prev => { const next = new Set(prev); next.delete(tabId); return next })
+  }
+
+  const closeSession = (tabId: string) => {
+    const session = sessionsRef.current.find(item => item.tabId === tabId)
+    if (session?.sessionId) {
+      invoke('ssh_disconnect', { sessionId: session.sessionId }).catch(() => {})
+    }
+    removeSession(tabId)
+  }
+
+  const getTerminalRef = (tabId: string): RefCallback<TerminalHandle> => {
+    const existing = termRefCallbacks.current.get(tabId)
+    if (existing) return existing
+    const callback: RefCallback<TerminalHandle> = handle => {
+      if (handle) termRefMap.current.set(tabId, handle)
+      else termRefMap.current.delete(tabId)
+      if (activeTabIdRef.current === tabId) activeTermRef.current = handle
+    }
+    termRefCallbacks.current.set(tabId, callback)
+    return callback
+  }
+
+  useEffect(() => {
+    activeTermRef.current = activeTabId ? (termRefMap.current.get(activeTabId) ?? null) : null
+    if (activeTabId) {
+      setUnreadSessions(prev => {
+        if (!prev.has(activeTabId)) return prev
+        const next = new Set(prev)
+        next.delete(activeTabId)
+        return next
+      })
+    }
+  }, [activeTabId])
+
+  // 侧边栏折叠状态（仅保存在本机）
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('sidebar_collapsed') === '1' } catch { return false }
+  })
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed(previous => {
+      const next = !previous
+      try { localStorage.setItem('sidebar_collapsed', next ? '1' : '0') } catch { /* 忽略 */ }
+      return next
+    })
+  }
+
+  const sidebarCollapsedRef = useRef(sidebarCollapsed)
+  sidebarCollapsedRef.current = sidebarCollapsed
+
+  const loadConnections = useCallback(async () => {
+    const requestId = ++connectionsLoadIdRef.current
+    try {
+      const list = await invoke<SidebarConnection[]>('config_list')
+      if (requestId === connectionsLoadIdRef.current) setConnections(list)
+      return list
+    } catch {
+      return null
+    }
+  }, [])
+
+  // 首次加载：没有任何服务器时直接打开新建连接弹窗
+  useEffect(() => {
+    void loadConnections().then(list => {
+      if (list && list.length === 0) setNewConnectionRequestId(value => value + 1)
+    })
+  }, [loadConnections])
+  useEffect(() => {
+    const handleDisconnectRequest = (e: Event) => {
+      const configId = (e as CustomEvent).detail?.configId
+      const matchingSessions = sessionsRef.current.filter(session => session.configId === configId)
+      for (const session of matchingSessions) {
+        clearReconnectState(session.tabId)
+        connectingTabIdsRef.current.delete(session.tabId)
+        setConnectingTabIds(previous => {
+          const next = new Set(previous)
+          next.delete(session.tabId)
+          return next
+        })
+        if (!session.sessionId) {
+          handleDisconnectAction(session.tabId)
+          continue
+        }
+        manualDisconnectSessionsRef.current.add(session.sessionId)
+        Promise.race([
+          invoke('ssh_disconnect', { sessionId: session.sessionId }).catch(() => {}),
+          new Promise<void>(resolve => setTimeout(resolve, 3000)),
+        ]).then(() => {
+          handleDisconnectAction(session.tabId)
+          setTimeout(() => manualDisconnectSessionsRef.current.delete(session.sessionId!), 10_000)
+        })
+      }
+    }
+    window.addEventListener('sidebar-disconnect', handleDisconnectRequest)
+    return () => window.removeEventListener('sidebar-disconnect', handleDisconnectRequest)
+  }, [])
+
+  // 上传队列状态
+  const [upload, setUpload] = useState<UploadState>({
+    queue: [], totalBytes: 0, uploadedBytes: 0, speed: 0, active: false, paused: false, workers: 0
+  })
+  const uploadPauseRef = useRef(false)
+  const uploadStopRef = useRef(false)
+  const uploadCompleteRef = useRef<(() => void) | null>(null)
+
+    // ponytail：在浏览器中构建 POSIX tar 归档，无需依赖
+  const createTar = async (entries: { name: string; file: File }[]): Promise<Uint8Array> => {
+    const chunks: Uint8Array[] = []
+    for (const { name, file } of entries) {
+      const data = new Uint8Array(await file.arrayBuffer())
+      const header = new Uint8Array(512)
+      const enc = new TextEncoder()
+      header.set(enc.encode(name), 0)
+      header.set(enc.encode('0000644\0'), 100)  // 模式
+      header.set(enc.encode('0001000\0'), 108)  // uid
+      header.set(enc.encode('0001000\0'), 116)  // gid
+      header.set(enc.encode(file.size.toString(8).padStart(11, '0') + '\0'), 124)
+      header.set(enc.encode(Math.floor(Date.now() / 1000).toString(8).padStart(11, '0') + '\0'), 136)
+      header.set(enc.encode('        '), 148) // 校验和占位符（空格）
+      header[156] = 0x30 // 类型 '0' = 普通文件
+      header.set(enc.encode('ustar\0'), 257)
+      header.set(enc.encode('00'), 263)
+      // 计算校验和
+      let cksum = 0
+      for (let i = 0; i < 512; i++) cksum += header[i]
+      header.set(enc.encode(cksum.toString(8).padStart(6, '0') + '\0 '), 148)
+      chunks.push(header)
+      chunks.push(data)
+      const padLen = (512 - (data.length % 512)) % 512
+      if (padLen > 0) chunks.push(new Uint8Array(padLen))
+    }
+    chunks.push(new Uint8Array(1024)) // 终止符
+    const total = chunks.reduce((s, c) => s + c.length, 0)
+    const result = new Uint8Array(total)
+    let off = 0
+    for (const c of chunks) { result.set(c, off); off += c.length }
+    return result
+  }
+
+  const handleStartUpload = useCallback(async (files: { file: File; fileName: string; remotePath: string }[]) => {
+    if (!activeSessionId || files.length === 0) return
+    const sid = activeSessionId
+    const totalBytes = files.reduce((sum, f) => sum + f.file.size, 0)
+    const retryCounts = new Map<string, number>()
+    const queue: UploadItem[] = files.map(f => ({ ...f, status: 'pending' as const, retryCount: 0 }))
+    setUpload({ queue, totalBytes, uploadedBytes: 0, speed: 0, active: true, paused: false, workers: 0 })
+    uploadPauseRef.current = false
+    uploadStopRef.current = false
+
+    let uploadedBytes = 0
+    let activeWorkers = 0
+    const startTime = Date.now()
+    const CHUNK_SIZE = 1024 * 1024
+    // ponytail：小于 1 MB 的文件进入 tar 批处理；大文件使用分块工作器
+    const SMALL_THRESHOLD = CHUNK_SIZE
+
+    const updateSpeed = () => {
+      const elapsed = (Date.now() - startTime) / 1000
+      const speed = elapsed > 0 ? uploadedBytes / elapsed : 0
+      setUpload(prev => ({ ...prev, uploadedBytes, speed, workers: activeWorkers }))
+    }
+
+    // ponytail：按父目录将小文件批量打包为 tar 归档，N 次 SFTP 操作减少为每个目录 1 次
+    // ponytail：单个文件始终使用分块上传，tar 批处理仅用于 2 个及以上的小文件
+    const smallFiles: typeof files = []
+    const largeFiles: typeof files = []
+    for (const f of files) {
+      if (f.file.size < SMALL_THRESHOLD && f.file.size > 0) smallFiles.push(f)
+      else largeFiles.push(f)
+    }
+    if (smallFiles.length === 1) {
+      largeFiles.push(...smallFiles)
+      smallFiles.length = 0
+    }
+
+    if (smallFiles.length > 1) {
+      // 按父目录分组
+      const byDir = new Map<string, typeof files>()
+      for (const f of smallFiles) {
+        const parent = f.remotePath.substring(0, f.remotePath.lastIndexOf('/'))
+        if (!byDir.has(parent)) byDir.set(parent, [])
+        byDir.get(parent)!.push(f)
+      }
+
+      // 以并发数 3 处理目录
+      const dirEntries = [...byDir.entries()]
+      let dirIdx = 0
+      const batchWorker = async () => {
+        activeWorkers++
+        updateSpeed()
+        try {
+        while (dirIdx < dirEntries.length) {
+          if (uploadStopRef.current) return
+          const i = dirIdx++
+          const [parentDir, dirFiles] = dirEntries[i]
+
+          // 将批次标记为上传中
+          const indices = dirFiles.map(df => queue.indexOf(queue.find(q => q.remotePath === df.remotePath)!))
+          setUpload(prev => ({
+            ...prev,
+            queue: prev.queue.map((q, j) => indices.includes(j) ? { ...q, status: 'uploading' } : q)
+          }))
+
+          try {
+            const tarEntries = dirFiles.map(f => ({
+              name: f.fileName.split('/').pop()!, // 仅使用文件名，在目标目录中解压
+              file: f.file,
+            }))
+            const tarData = await createTar(tarEntries)
+            const tarPath = `${parentDir}/.__tb_${Date.now()}_${i}.tar`
+
+            // 分块上传 tar
+            let offset = 0
+            while (offset < tarData.length) {
+              if (uploadStopRef.current) return
+              const end = Math.min(offset + CHUNK_SIZE, tarData.length)
+              const chunk = tarData.slice(offset, end)
+              await invoke('ssh_upload_chunk', {
+                sessionId: sid, remotePath: tarPath, data: chunk, offset,
+              })
+              uploadedBytes += (end - offset)
+              offset = end
+              updateSpeed()
+            }
+
+            // 解压并清理
+            const escaped = (s: string) => s.replace(/'/g, "'\\''")
+            const cmd = `cd '${escaped(parentDir)}' && tar xf '${escaped(tarPath.split('/').pop()!)}' && rm -f '${escaped(tarPath.split('/').pop()!)}'`
+            const result = await invoke<[string, string, number]>('ssh_exec', { sessionId: sid, command: cmd })
+            if (result[2] !== 0) throw new Error(`tar extract failed: ${result[1]}`)
+
+            setUpload(prev => ({
+              ...prev,
+              queue: prev.queue.map((q, j) => indices.includes(j) ? { ...q, status: 'done' } : q)
+            }))
+          } catch (err) {
+            if (uploadStopRef.current) return
+            // ponytail：标记错误前，每个文件最多自动重试 3 次
+            const canRetry = dirFiles.every(f => (retryCounts.get(f.remotePath) || 0) < 3)
+            if (canRetry) {
+              dirFiles.forEach(f => retryCounts.set(f.remotePath, (retryCounts.get(f.remotePath) || 0) + 1))
+              await invoke('ssh_sftp_reset', { sessionId: sid }).catch(() => {})
+              await new Promise(r => setTimeout(r, 1000))
+              if (uploadStopRef.current) return
+              setUpload(prev => ({
+                ...prev,
+                queue: prev.queue.map((q, j) => indices.includes(j) ? { ...q, status: 'pending' as const, retryCount: retryCounts.get(q.remotePath) || 0 } : q)
+              }))
+              dirEntries.push([parentDir, dirFiles])
+            } else {
+              setUpload(prev => ({
+                ...prev,
+                queue: prev.queue.map((q, j) => indices.includes(j) ? { ...q, status: 'error', error: String(err), retryCount: retryCounts.get(q.remotePath) || 0 } : q)
+              }))
+            }
+          }
+        }
+        } finally { activeWorkers--; updateSpeed() }
+      }
+      const batchWorkers = Array.from({ length: Math.min(settings.upload_workers || 3, dirEntries.length) }, () => batchWorker())
+      await Promise.all(batchWorkers)
+    }
+
+    if (uploadStopRef.current) return
+
+    // ponytail：大文件和零字节文件通过分块工作器处理
+    const largeQueue: UploadItem[] = largeFiles.map(f => ({ ...f, status: 'pending' as const }))
+    if (largeQueue.length > 0) {
+      // 更新主队列，仅保留剩余的大文件
+      setUpload(prev => ({
+        ...prev,
+        queue: prev.queue.map(q => {
+          const inLarge = largeFiles.some(lf => lf.remotePath === q.remotePath)
+          return inLarge ? { ...q, status: 'pending' as const } : q
+        })
+      }))
+
+      const CONCURRENCY = Math.min(settings.upload_workers || 3, largeQueue.length)
+      let nextIndex = 0
+
+      const worker = async () => {
+        activeWorkers++
+        updateSpeed()
+        try {
+        while (true) {
+          if (uploadStopRef.current) return
+          const i = nextIndex++
+          if (i >= largeQueue.length) return
+          const item = largeQueue[i]
+
+          setUpload(prev => ({
+            ...prev,
+            queue: prev.queue.map(q => q.remotePath === item.remotePath ? { ...q, status: 'uploading' } : q)
+          }))
+
+          try {
+            let offset = 0
+            while (offset < item.file.size) {
+              if (uploadStopRef.current) return
+              while (uploadPauseRef.current) {
+                if (uploadStopRef.current) return
+                await new Promise(r => setTimeout(r, 100))
+              }
+
+              const end = Math.min(offset + CHUNK_SIZE, item.file.size)
+              const slice = item.file.slice(offset, end)
+              const buffer = await slice.arrayBuffer()
+              const chunkData = new Uint8Array(buffer)
+              try {
+                await invoke('ssh_upload_chunk', {
+                  sessionId: sid,
+                  remotePath: item.remotePath,
+                  data: chunkData,
+                  offset,
+                })
+              } catch (_chunkErr) {
+                if (uploadStopRef.current) return
+                await invoke('ssh_sftp_reset', { sessionId: sid }).catch(() => {})
+                await new Promise(r => setTimeout(r, 500))
+                if (uploadStopRef.current) return
+                await invoke('ssh_upload_chunk', {
+                  sessionId: sid,
+                  remotePath: item.remotePath,
+                  data: chunkData,
+                  offset,
+                })
+              }
+              uploadedBytes += (end - offset)
+              offset = end
+              updateSpeed()
+            }
+            setUpload(prev => ({
+              ...prev,
+              queue: prev.queue.map(q => q.remotePath === item.remotePath ? { ...q, status: 'done' } : q)
+            }))
+          } catch (err) {
+            if (uploadStopRef.current) return
+            // ponytail：标记错误前最多自动重试 3 次
+            const count = (retryCounts.get(item.remotePath) || 0) + 1
+            retryCounts.set(item.remotePath, count)
+            if (count < 3) {
+              await invoke('ssh_sftp_reset', { sessionId: sid }).catch(() => {})
+              await new Promise(r => setTimeout(r, 1000))
+              if (uploadStopRef.current) return
+              setUpload(prev => ({
+                ...prev,
+                queue: prev.queue.map(q => q.remotePath === item.remotePath ? { ...q, status: 'pending' as const, retryCount: count } : q)
+              }))
+              largeQueue.push(item)
+            } else {
+              setUpload(prev => ({
+                ...prev,
+                queue: prev.queue.map(q => q.remotePath === item.remotePath ? { ...q, status: 'error', error: String(err), retryCount: count } : q)
+              }))
+            }
+          }
+        }
+        } finally { activeWorkers--; updateSpeed() }
+      }
+
+      const workers = Array.from({ length: CONCURRENCY }, () => worker())
+      await Promise.all(workers)
+    }
+
+    if (!uploadStopRef.current) {
+      setUpload(prev => ({ ...prev, active: false, paused: false }))
+      uploadCompleteRef.current?.()
+    }
+  }, [activeSessionId, settings.upload_workers])
+
+  const handlePauseUpload = useCallback(() => {
+    uploadPauseRef.current = true
+    setUpload(prev => ({ ...prev, paused: true }))
+  }, [])
+
+  const handleResumeUpload = useCallback(() => {
+    uploadPauseRef.current = false
+    setUpload(prev => ({ ...prev, paused: false }))
+  }, [])
+
+  // ponytail：停止操作会立即清空 UI，并通知工作器静默退出
+  const handleStopUpload = useCallback(() => {
+    uploadStopRef.current = true
+    uploadPauseRef.current = false
+    setUpload({ queue: [], totalBytes: 0, uploadedBytes: 0, speed: 0, active: false, paused: false, workers: 0 })
+  }, [])
+
+  const handleDismissUpload = useCallback(() => {
+    if (upload.active) return
+    setUpload({ queue: [], totalBytes: 0, uploadedBytes: 0, speed: 0, active: false, paused: false, workers: 0 })
+  }, [upload.active])
+
+  // ponytail：只重试失败文件，通过相同的上传流程将它们重新加入队列
+  const handleRetryFailed = useCallback(() => {
+    const failed = upload.queue.filter(q => q.status === 'error')
+    if (failed.length === 0) return
+    handleStartUpload(failed.map(f => ({ file: f.file, fileName: f.fileName, remotePath: f.remotePath })))
+    // handleStartUpload 会创建新的 retryCounts 映射，因此重试次数会重置为 0
+  }, [upload.queue, handleStartUpload])
+
+  const [jumpToPath, setJumpToPath] = useState<string | null>(null)
+
+  const handleCreateConnection = async (data: ConnectionDraft) => {
+  // 保存新连接
+    await invoke('config_save', {
+      connection: {
+        id: Date.now().toString(),
+        name: data.name,
+        host: data.host,
+        port: data.port,
+        username: data.username,
+        auth_type: data.auth_type,
+        key_path: data.key_path,
+        password: data.password,
+        remember_me: data.remember_me || false,
+      },
+    })
+    await loadConnections()
+  }
+
+  const handleUpdateSettings = async (updates: Partial<Settings>) => {
+    const newSettings = { ...settings, ...updates }
+    setSettings(newSettings)
+    autoReconnectRef.current = newSettings.auto_reconnect
+    closeTabOnDisconnectRef.current = newSettings.close_tab_on_disconnect
+    await invoke('settings_save', { settings: newSettings }).catch(() => {})
+  }
+
+
+  // 挂载时加载设置
+  useEffect(() => {
+    invoke<Settings>('settings_load').then(s => {
+      setSettings(s)
+      autoReconnectRef.current = s.auto_reconnect
+      closeTabOnDisconnectRef.current = s.close_tab_on_disconnect ?? false
+    }).catch(() => {})
+    // ponytail：启动时自动检查更新，下载前先询问用户
+    Promise.race([
+      check(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 15000)),
+    ]).then(async update => {
+      if (update?.available) {
+        const { ask } = await import('@tauri-apps/plugin-dialog')
+        const yes = await ask(`New version ${update.version} available. Update now?`, { title: 'Update Available', kind: 'info' })
+        if (yes) {
+          showToast(`Downloading v${update.version}...`)
+          try {
+            await update.download()
+            const restart = await ask(`v${update.version} has been downloaded. Restart now to apply the update?`, { title: 'Update Ready', kind: 'info' })
+            if (restart) {
+              await update.install()
+            } else {
+              setPendingUpdate(update)
+              showToast('Update ready. Click "Restart Now" when you are ready.')
+            }
+          } catch (e) {
+            showToast(`Update failed: ${String(e).slice(0, 80)}`)
+          }
+        }
+      }
+    }).catch(() => {})
+  }, [])
+
+  const toggleAutoReconnect = async () => {
+    const newSettings = { ...settings, auto_reconnect: !settings.auto_reconnect }
+    setSettings(newSettings)
+    autoReconnectRef.current = newSettings.auto_reconnect
+    closeTabOnDisconnectRef.current = newSettings.close_tab_on_disconnect
+    await invoke('settings_save', { settings: newSettings }).catch(() => {})
+  }
+
+  useEffect(() => {
+    autoReconnectRef.current = settings.auto_reconnect
+    closeTabOnDisconnectRef.current = settings.close_tab_on_disconnect
+  }, [settings.auto_reconnect, settings.close_tab_on_disconnect])
+
+  const startReconnect = (session: ActiveSession, delayMs: number) => {
+    const sid = session.sessionId
+    if (!sid || reconnectingActiveRef.current.get(session.tabId)) return
+    const generation = (reconnectGenerationRef.current.get(session.tabId) ?? 0) + 1
+    reconnectGenerationRef.current.set(session.tabId, generation)
+    reconnectingActiveRef.current.set(session.tabId, true)
+    reconnectAttemptRef.current.set(session.tabId, 0)
+    markDisconnected(session.tabId)
+    setConnectionErrors(prev => { const next = new Map(prev); next.delete(session.tabId); return next })
+    setReconnectingSessions(prev => new Map(prev).set(session.tabId, { name: session.name, attempt: 0 }))
+
+    const attemptReconnect = async () => {
+      if (!reconnectingActiveRef.current.get(session.tabId) || reconnectGenerationRef.current.get(session.tabId) !== generation) return
+      const currentSettings = settingsRef.current
+      const attempt = (reconnectAttemptRef.current.get(session.tabId) ?? 0) + 1
+      reconnectAttemptRef.current.set(session.tabId, attempt)
+      setReconnectingSessions(prev => new Map(prev).set(session.tabId, { name: session.name, attempt }))
+      try {
+        await invoke('ssh_reconnect', { sessionId: sid })
+        if (!reconnectingActiveRef.current.get(session.tabId) || reconnectGenerationRef.current.get(session.tabId) !== generation) {
+          manualDisconnectSessionsRef.current.add(sid)
+          await invoke('ssh_disconnect', { sessionId: sid }).catch(() => {})
+          setTimeout(() => manualDisconnectSessionsRef.current.delete(sid), 10_000)
+          return
+        }
+        clearReconnectState(session.tabId)
+        setConnectedTabIds(prev => new Set(prev).add(session.tabId))
+        showToast(`[${session.name}] ${t('common.reconnectSuccess', { attempt })}`)
+      } catch {
+        if (!reconnectingActiveRef.current.get(session.tabId) || reconnectGenerationRef.current.get(session.tabId) !== generation) return
+        if (attempt >= currentSettings.max_reconnect_attempts) {
+          clearReconnectState(session.tabId)
+          showToast(`[${session.name}] ${t('common.reconnectFailed', { max: currentSettings.max_reconnect_attempts })}`)
+          handleDisconnectAction(session.tabId)
+          return
+        }
+        const timer = setTimeout(attemptReconnect, currentSettings.reconnect_interval * 1000)
+        reconnectTimersRef.current.set(session.tabId, timer)
+      }
+    }
+
+    const timer = setTimeout(attemptReconnect, delayMs)
+    reconnectTimersRef.current.set(session.tabId, timer)
+  }
+
+  useEffect(() => {
+    const unlisten = listen<{ sessionId: string; reason: string }>('ssh-disconnected', event => {
+      const sid = event.payload.sessionId
+      const sess = sessionsRef.current.find(s => s.sessionId === sid)
+      if (manualDisconnectSessionsRef.current.has(sid)) {
+        manualDisconnectSessionsRef.current.delete(sid)
+        if (sess) handleDisconnectAction(sess.tabId)
+        return
+      }
+      if (!sess) return
+      markDisconnected(sess.tabId)
+      if (normalRebootSessionsRef.current.has(sid)) {
+        normalRebootSessionsRef.current.delete(sid)
+        showToast(`ℹ [${sess.name}] ${t('common.normalRebootHint')}`)
+        handleDisconnectAction(sess.tabId)
+        return
+      }
+      if (autoReconnectRef.current) {
+        startReconnect(sess, settingsRef.current.reconnect_interval * 1000)
+      } else if (!autoReconnectRef.current) {
+        showToast(`[${sess.name}] ${t('common.connectionLost')}`)
+        handleDisconnectAction(sess.tabId)
+      }
+    })
+    return () => { unlisten.then((fn) => fn()) }
+  }, [])
+
+  useEffect(() => () => {
+    for (const timer of reconnectTimersRef.current.values()) clearTimeout(timer)
+    reconnectTimersRef.current.clear()
+  }, [])
+
+  // ponytail：监听来自 ServerSettingsPanel 的 normal-reboot 事件
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const sid = (e as CustomEvent<{ sessionId: string }>).detail?.sessionId
+      if (sid) normalRebootSessionsRef.current.add(sid)
+    }
+    window.addEventListener('normal-reboot', handler)
+    return () => window.removeEventListener('normal-reboot', handler)
+  }, [])
+
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(''), 4000)
+  }
+
+  // LNMP 安装后断开 SSH 会话（环境发生变化，需要新建会话）
+
+  const classifyError = (errorMsg: string): { type: 'auth' | 'network' | 'connection' | 'other'; message: string } => {
+    const s = errorMsg.toLowerCase()
+    
+    // 身份验证错误
+    if (s.includes('auth failed') || s.includes('auth error') || s.includes('authentication') || 
+        s.includes('no authentication') || s.includes('permission denied') || s.includes('invalid password')) {
+      return { type: 'auth', message: 'Authentication failed. Please check your username and password.' }
+    }
+    
+    // 网络错误
+    if (s.includes('timeout') || s.includes('timed out') || s.includes('network unreachable')) {
+      return { type: 'network', message: 'Connection timed out. Please check network connectivity.' }
+    }
+    
+    // 连接被拒绝
+    if (s.includes('connection refused') || s.includes('host unreachable')) {
+      return { type: 'connection', message: 'Connection refused. Server may be offline or port is incorrect.' }
+    }
+    
+    // 密钥文件错误
+    if (s.includes('key') && (s.includes('not found') || s.includes('invalid'))) {
+      return { type: 'auth', message: 'SSH key file not found or invalid.' }
+    }
+    
+    // 默认情况
+    return { type: 'other', message: errorMsg }
+  }
+
+  const handleDirectConnect = useCallback(async (conn: SidebarConnection, replaceTabId?: string) => {
+    const existing = replaceTabId ? sessionsRef.current.find(session => session.tabId === replaceTabId) : undefined
+    const tabId = existing?.tabId ?? createTabId()
+    if (connectingTabIdsRef.current.has(tabId)) {
+      setActiveTabId(tabId)
+      return
+    }
+    const doConnect = async (username: string, password?: string, keyPath?: string) => {
+      connectingTabIdsRef.current.add(tabId)
+      setConnectingTabIds(prev => new Set(prev).add(tabId))
+      setError('')
+      const hostKey = `${conn.host}_${conn.port}`
+      const panelKey = `lastPanel_${username}@${hostKey}`
+      const estCols = Math.max(80, Math.floor((window.innerWidth - (sidebarCollapsedRef.current ? 64 : 240) - 40) / 8.4))
+      const estRows = Math.max(24, Math.floor((window.innerHeight - 100) / 17))
+      try {
+        clearReconnectState(tabId)
+        if (existing?.sessionId) {
+          const current = sessionsRef.current.map(session => session.tabId === tabId ? { ...session, sessionId: null } : session)
+          sessionsRef.current = current
+          setSessions(current)
+          markDisconnected(tabId)
+          await invoke('ssh_disconnect', { sessionId: existing.sessionId }).catch(() => {})
+          clearTerminalOutput(existing.sessionId)
+        }
+        const savedPanelValue = await invoke<string>('ui_state_get', { key: panelKey }).catch(() => '')
+        if (!connectingTabIdsRef.current.has(tabId)) return
+        const savedPanel: PanelSection = isPanelSection(savedPanelValue) ? savedPanelValue : 'dashboard'
+        const placeholder: ActiveSession = {
+          tabId,
+          configId: conn.id,
+          sessionId: null,
+          name: conn.name || conn.host,
+          hostKey,
+          username,
+          initialSection: existing?.initialSection ?? savedPanel,
+        }
+        setSessions(prev => {
+          const next = prev.some(session => session.tabId === tabId)
+            ? prev.map(session => session.tabId === tabId ? placeholder : session)
+            : [...prev, placeholder]
+          sessionsRef.current = next
+          return next
+        })
+        setSessionSections(prev => prev.has(tabId) ? prev : new Map(prev).set(tabId, placeholder.initialSection))
+        setConnectionErrors(prev => { const next = new Map(prev); next.delete(tabId); return next })
+        setActiveTabId(tabId)
+        await ensureTerminalOutputBroker()
+        let sid = ''
+        let hostKeyUpdates = 0
+        while (!sid) {
+          try {
+            sid = await invoke<string>('ssh_connect', {
+              config: { connectionId: conn.id, host: conn.host, port: conn.port, username, password, keyPath, cols: estCols, rows: estRows },
+            })
+          } catch (error) {
+            const verification = parseHostKeyVerification(error)
+            if (!verification || hostKeyUpdates >= 2) throw error
+            const fingerprint = `SHA256:${verification.fingerprint}`
+            let approved = false
+            if (verification.kind === 'unknown') {
+              approved = window.confirm([
+                `The authenticity of ${verification.host}:${verification.port} cannot be established.`,
+                `Algorithm: ${verification.algorithm}`,
+                `Fingerprint: ${fingerprint}`,
+                '',
+                'Verify this fingerprint through an independent channel before trusting it.',
+                'Trust this host key and continue?',
+              ].join('\n'))
+            } else {
+              const expected = verification.expectedFingerprint
+                ? `SHA256:${verification.expectedFingerprint}`
+                : 'unknown'
+              const typed = window.prompt([
+                `WARNING: The SSH host key for ${verification.host}:${verification.port} has changed.`,
+                `Previously trusted: ${expected}`,
+                `Presented now: ${fingerprint}`,
+                '',
+                'This can indicate a man-in-the-middle attack.',
+                `After independently verifying the change, type ${fingerprint} to replace the trusted key.`,
+              ].join('\n'))
+              approved = typed?.trim() === fingerprint
+              if (typed !== null && !approved) {
+                window.alert('Fingerprint did not match. The trusted host key was not changed.')
+              }
+            }
+            if (!approved) throw new Error('Host key verification was cancelled.')
+            await invoke('ssh_trust_host_key', {
+              host: verification.host,
+              port: verification.port,
+              keyBase64: verification.keyBase64,
+              replace: verification.kind === 'changed',
+            })
+            hostKeyUpdates += 1
+          }
+        }
+        if (!connectingTabIdsRef.current.has(tabId) || !sessionsRef.current.some(session => session.tabId === tabId)) {
+          await invoke('ssh_disconnect', { sessionId: sid }).catch(() => {})
+          clearTerminalOutput(sid)
+          return
+        }
+        // Password is only the bootstrap credential. Once connected, install
+        // and persist an app-managed key. Re-running this for non-root users is
+        // idempotent and repairs a removed authorized_keys entry.
+        if (conn.auth_type === 'password') {
+          try {
+            await invoke('ssh_provision_managed_key', { sessionId: sid, connectionId: conn.id })
+            void loadConnections()
+          } catch (provisionError) {
+            setToast(`SSH key setup failed: ${String(provisionError)}`)
+          }
+        }
+        setSessions(prev => {
+          const next = prev.map(session => session.tabId === tabId
+            ? { ...session, sessionId: sid, name: conn.name || conn.host, hostKey, username }
+            : session)
+          sessionsRef.current = next
+          return next
+        })
+        setConnectedTabIds(prev => new Set(prev).add(tabId))
+        setConnectionErrors(prev => { const next = new Map(prev); next.delete(tabId); return next })
+        const WELCOME_INTERVAL = 6 * 60 * 60 * 1000
+        const lastShown = Number(localStorage.getItem('welcome_last_shown') || 0)
+        if (Date.now() - lastShown >= WELCOME_INTERVAL) {
+          setShowWelcome(true)
+          localStorage.setItem('welcome_last_shown', String(Date.now()))
+          setTimeout(() => setShowWelcome(false), 4000)
+        }
+      } catch (e) {
+        const msg = String(e)
+        const { type, message } = classifyError(msg)
+        if (connectingTabIdsRef.current.has(tabId)) {
+          setConnectionErrors(prev => new Map(prev).set(tabId, { type, message }))
+          if (activeTabIdRef.current === tabId) setErrorDialog({ visible: true, message, type })
+        }
+      } finally {
+        connectingTabIdsRef.current.delete(tabId)
+        setConnectingTabIds(prev => { const next = new Set(prev); next.delete(tabId); return next })
+      }
+    }
+
+    let password: string | undefined
+    let keyPath: string | undefined
+    
+    if (conn.remember_me) {
+      if ((conn.auth_type === 'key' || conn.auth_type === 'managed_key' || conn.auth_type === 'managed_key_password') && !conn.key_path) {
+        setErrorDialog({ visible: true, message: 'SSH key file not found. Please switch to password authentication and reconnect to create it again.', type: 'auth' })
+        return
+      }
+      if (conn.auth_type === 'key' || conn.auth_type === 'managed_key' || conn.auth_type === 'managed_key_password') keyPath = conn.key_path
+    } else {
+      setErrorDialog({ visible: true, message: 'Please edit the connection to configure authentication.', type: 'auth' })
+      return
+    }
+
+    void doConnect(conn.username, password, keyPath)
+  }, [loadConnections])
+
+  const handleSelectConnection = (conn: SidebarConnection) => {
+    const existing = sessionsRef.current.find(session => session.tabId === activeTabIdRef.current && session.configId === conn.id)
+      ?? sessionsRef.current.find(session => session.configId === conn.id && connectedTabIds.has(session.tabId))
+      ?? sessionsRef.current.find(session => session.configId === conn.id)
+    if (existing) {
+      setActiveTabId(existing.tabId)
+      return
+    }
+    void handleDirectConnect(conn)
+  }
+
+  const handleSidebarConnect = (conn: SidebarConnection) => {
+    const reusable = sessionsRef.current.find(session => session.configId === conn.id && !connectedTabIds.has(session.tabId) && !connectingTabIdsRef.current.has(session.tabId))
+    void handleDirectConnect(conn, reusable?.tabId)
+  }
+
+  // 监听来自侧边栏的 reconnect-after-edit 事件（连接按钮）
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (!detail?.conn) return
+      const target = sessionsRef.current.find(session => session.tabId === activeTabIdRef.current && session.configId === detail.conn.id)
+        ?? sessionsRef.current.find(session => session.configId === detail.conn.id)
+      void handleDirectConnect(detail.conn, target?.tabId)
+    }
+    window.addEventListener('sidebar-reconnect-after-edit', handler)
+    return () => window.removeEventListener('sidebar-reconnect-after-edit', handler)
+  }, [handleDirectConnect])
+
+  const requestNewSession = () => {
+    setNewConnectionRequestId(value => value + 1)
+  }
+
+  const requestEditConnection = (configId: string) => {
+    setEditConnectionRequest({ id: configId, requestId: Date.now() })
+  }
+
+  const cancelReconnect = (tabId: string) => {
+    reconnectGenerationRef.current.set(tabId, (reconnectGenerationRef.current.get(tabId) ?? 0) + 1)
+    clearReconnectState(tabId)
+    markDisconnected(tabId)
+  }
+
+  const reconnectSession = async (tabId: string) => {
+    const session = sessionsRef.current.find(item => item.tabId === tabId)
+    if (!session) return
+    cancelReconnect(tabId)
+    setConnectionErrors(prev => {
+      if (!prev.has(tabId)) return prev
+      const next = new Map(prev)
+      next.delete(tabId)
+      return next
+    })
+    try {
+      const connections = await invoke<TerminalSavedConnection[]>('config_list')
+      const connection = connections.find(item => item.id === session.configId)
+      if (!connection) throw new Error(t('terminal.connection.configurationMissing'))
+      await handleDirectConnect(connection, tabId)
+    } catch (reconnectError) {
+      const message = String(reconnectError)
+      setConnectionErrors(prev => new Map(prev).set(tabId, { type: 'connection', message }))
+      setErrorDialog({ visible: true, message, type: 'connection' })
+    }
+  }
+
+  const duplicateSession = async (tabId: string) => {
+    const session = sessionsRef.current.find(item => item.tabId === tabId)
+    if (!session) return
+    try {
+      const connections = await invoke<TerminalSavedConnection[]>('config_list')
+      const connection = connections.find(item => item.id === session.configId)
+      if (!connection) throw new Error(t('terminal.connection.configurationMissing'))
+      await handleDirectConnect(connection)
+    } catch (duplicateError) {
+      const message = String(duplicateError)
+      setErrorDialog({ visible: true, message, type: 'connection' })
+    }
+  }
+
+  const closeOtherSessions = (tabId: string) => {
+    for (const session of [...sessionsRef.current]) {
+      if (session.tabId !== tabId) closeSession(session.tabId)
+    }
+  }
+
+  const activateRelativeSession = (offset: number) => {
+    const current = sessionsRef.current
+    if (current.length < 2) return
+    const index = current.findIndex(session => session.tabId === activeTabId)
+    const nextIndex = (Math.max(index, 0) + offset + current.length) % current.length
+    setActiveTabId(current[nextIndex].tabId)
+  }
+
+  const reorderSessions = (fromId: string, toId: string) => {
+    const current = sessionsRef.current
+    const fromIndex = current.findIndex(session => session.tabId === fromId)
+    const toIndex = current.findIndex(session => session.tabId === toId)
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
+    const next = [...current]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    sessionsRef.current = next
+    setSessions(next)
+  }
+
+  const updateSessionSection = (tabId: string, section: PanelSection) => {
+    setSessionSections(prev => {
+      if (prev.get(tabId) === section) return prev
+      return new Map(prev).set(tabId, section)
+    })
+  }
+
+  // ponytail：切换面板并按服务器记忆，键为 lastPanel_${user}@${host}
+  const sectionPersistenceRef = useRef<Promise<void>>(Promise.resolve())
+  const navigateSession = (tabId: string, section: PanelSection) => {
+    updateSessionSection(tabId, section)
+    const session = sessionsRef.current.find(item => item.tabId === tabId)
+    if (!session) return
+    const panelKey = `lastPanel_${session.username}@${session.hostKey}`
+    sectionPersistenceRef.current = sectionPersistenceRef.current
+      .catch(() => {})
+      .then(() => invoke('ui_state_set', { key: panelKey, value: section }))
+      .then(() => undefined, () => undefined)
+  }
+
+  const updateTerminalDimensions = (tabId: string, dimensions: TerminalDimensions) => {
+    setTerminalDimensions(prev => {
+      const current = prev.get(tabId)
+      if (current?.cols === dimensions.cols && current.rows === dimensions.rows) return prev
+      return new Map(prev).set(tabId, dimensions)
+    })
+  }
+
+  const markTerminalBackgroundOutput = (tabId: string) => {
+    if (tabId === activeTabId && activePanelSection === 'terminal') return
+    setUnreadSessions(prev => prev.has(tabId) ? prev : new Set(prev).add(tabId))
+  }
+
+  const getConnectionState = (tabId: string): TerminalConnectionState => {
+    const reconnecting = reconnectingSessions.get(tabId)
+    if (reconnecting) return { kind: 'reconnecting', attempt: reconnecting.attempt, max: settings.max_reconnect_attempts }
+    if (connectingTabIdsRef.current.has(tabId)) return { kind: 'connecting' }
+    if (connectedTabIds.has(tabId)) return { kind: 'connected' }
+    const connectionError = connectionErrors.get(tabId)
+    if (connectionError?.type === 'auth') return { kind: 'authentication-failed', message: connectionError.message }
+    return { kind: 'disconnected', reason: connectionError?.message }
+  }
+
+  const sessionCountByConfig = sessions.reduce((counts, session) => {
+    counts.set(session.configId, (counts.get(session.configId) ?? 0) + 1)
+    return counts
+  }, new Map<string, number>())
+  const sessionIndexByConfig = new Map<string, number>()
+  const terminalTabs: TerminalSessionTabModel[] = sessions.map(session => {
+    const endpoint = parseConnectionHost(session.hostKey)
+    const index = (sessionIndexByConfig.get(session.configId) ?? 0) + 1
+    sessionIndexByConfig.set(session.configId, index)
+    const name = (sessionCountByConfig.get(session.configId) ?? 0) > 1 ? `${session.name} · ${index}` : session.name
+    return {
+      id: session.tabId,
+      configId: session.configId,
+      name,
+      username: session.username,
+      host: endpoint.host,
+      port: endpoint.port,
+      state: getConnectionState(session.tabId),
+      dimensions: terminalDimensions.get(session.tabId),
+      hasUnread: unreadSessions.has(session.tabId),
+    }
+  })
+
+  const terminalTabStrip = sessions.length > 0 ? (
+    <TerminalTabStrip
+      sessions={terminalTabs}
+      activeId={activeTabId}
+      commandAvailable={activePanelSection === 'terminal'}
+      onActivate={setActiveTabId}
+      onClose={closeSession}
+      onNewSession={requestNewSession}
+      onConnect={connection => void handleDirectConnect(connection)}
+      onOpenCommandPalette={() => activeTermRef.current?.openCommandPalette()}
+      onReorder={reorderSessions}
+    />
+  ) : undefined
+
+  const terminalOwnsConnectionStatus = activePanelSection === 'terminal' && activeSession !== null
+  const connectedServerIds = Array.from(new Set(sessions.filter(session => connectedTabIds.has(session.tabId)).map(session => session.configId)))
+  const connectingServerIds = Array.from(new Set(sessions.filter(session => connectingTabIds.has(session.tabId) || reconnectingSessions.has(session.tabId)).map(session => session.configId)))
+  const showTopBar = Boolean(
+    error ||
+    pendingUpdate ||
+    (!terminalOwnsConnectionStatus && (reconnectingSessions.has(activeTabId || '') || toast || isDisconnected))
+  )
+
+  const navigateActive = (section: PanelSection) => {
+    if (activeTabId) navigateSession(activeTabId, section)
+  }
+
+  return (
+    <div className={`app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <Sidebar
+        connections={connections}
+        onConnectionsChanged={async () => { await loadConnections() }}
+        onSelect={handleSelectConnection}
+        onConnect={handleSidebarConnect}
+        onCreateConnection={handleCreateConnection}
+        connectedIds={connectedServerIds}
+        connectingIds={connectingServerIds}
+        activeConfigId={activeSession?.configId ?? null}
+        section={activePanelSection}
+        navEnabled={activeSession !== null}
+        onNavigate={navigateActive}
+        onNavigateBlocked={() => showToast(t('common.connectFirst'))}
+        theme={settings.theme}
+        onToggleTheme={() => void handleUpdateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' })}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={toggleSidebarCollapsed}
+        newConnectionRequestId={newConnectionRequestId}
+        editConnectionRequest={editConnectionRequest}
+        onNewConnectionRequestHandled={requestId => setNewConnectionRequestId(current => current === requestId ? 0 : current)}
+        onEditConnectionRequestHandled={requestId => setEditConnectionRequest(current => current?.requestId === requestId ? null : current)}
+      />
+      <main className="main-area">
+        {showTopBar && <div className="top-bar">
+          {error && <div className="notice-bar danger">{error}</div>}
+          {!terminalOwnsConnectionStatus && activeTabId && reconnectingSessions.has(activeTabId) && (() => {
+            const info = reconnectingSessions.get(activeTabId)!
+            return (
+              <div className="notice-bar warning">
+                <span className="notice-spinner" />
+                <span>[{info.name}] {t('common.reconnectAttempt', { attempt: info.attempt, max: settings.max_reconnect_attempts })}</span>
+                <button className="ui-btn sm" onClick={() => cancelReconnect(activeTabId)}>{t('common.stop')}</button>
+              </div>
+            )
+          })()}
+          {!terminalOwnsConnectionStatus && toast && !reconnectingSessions.has(activeTabId || '') && !isDisconnected && (
+            <div className="notice-bar info"><span>{toast}</span></div>
+          )}
+          {!terminalOwnsConnectionStatus && isDisconnected && (
+            <div className="notice-bar danger">
+              <span>{t('common.disconnectedBanner')}</span>
+              {activeTabId && <button className="ui-btn sm" onClick={() => void reconnectSession(activeTabId)}>{t('common.connect')}</button>}
+            </div>
+          )}
+          {pendingUpdate && (
+            <div className="notice-bar info">
+              <span>Update v{pendingUpdate.version} ready</span>
+              <button className="ui-btn primary sm" onClick={async () => { await pendingUpdate.install() }}>Restart Now</button>
+            </div>
+          )}
+        </div>}
+
+        {/* 错误对话框 */}
+        {errorDialog?.visible && (
+          <div className="ui-overlay" onClick={() => setErrorDialog(null)}>
+            <div className="ui-dialog sm" onClick={(e) => e.stopPropagation()}>
+              <div className="ui-dialog-header">
+                <div className="ui-dialog-title">
+                  <span className="ui-dialog-icon danger"><Icon name="power" size={16} /></span>
+                  {t('errorDialog.connectionFailed')}
+                </div>
+                <button className="ui-icon-btn" onClick={() => setErrorDialog(null)} aria-label={t('common.close')}><Icon name="x" /></button>
+              </div>
+              <div className="ui-dialog-body">
+                <p className="ui-dialog-text">{errorDialog.message}</p>
+              </div>
+              <div className="ui-dialog-footer">
+                <span className="ui-spacer" />
+                <button className="ui-btn primary" onClick={() => setErrorDialog(null)}>{t('common.close')}</button>
+              </div>
+            </div>
+          </div>
+        )}
+        <TerminalWorkspace terminalMode={activePanelSection === 'terminal' && activeSession !== null} tabStrip={terminalTabStrip}>
+          <div className="split-container">
+            <div className="split-full">
+              {sessions.map(s => (
+              <div key={s.tabId} className={`server-session ${s.tabId === activeTabId ? 'active' : ''}`}>
+                <ServerPanel
+                  sessionId={s.sessionId}
+                  connHost={s.hostKey}
+                  connUsername={s.username}
+                  section={sessionSections.get(s.tabId) || s.initialSection}
+                  onNavigate={section => navigateSession(s.tabId, section)}
+                  jumpToPath={s.tabId === activeTabId ? jumpToPath : null}
+                  setJumpToPath={setJumpToPath}
+                  termRef={getTerminalRef(s.tabId)}
+                  onStartUpload={handleStartUpload}
+                  onUploadComplete={uploadCompleteRef}
+                  appSettings={settings}
+                  onToggleAutoReconnect={toggleAutoReconnect}
+                  onUpdateSettings={handleUpdateSettings}
+                  isSessionActive={s.tabId === activeTabId}
+                  connectionState={getConnectionState(s.tabId)}
+                  onReconnect={() => void reconnectSession(s.tabId)}
+                  onCancelReconnect={() => cancelReconnect(s.tabId)}
+                  onCloseSession={() => closeSession(s.tabId)}
+                  onNewSession={requestNewSession}
+                  onDuplicateSession={() => void duplicateSession(s.tabId)}
+                  onCloseOtherSessions={() => closeOtherSessions(s.tabId)}
+                  onNextSession={() => activateRelativeSession(1)}
+                  onPreviousSession={() => activateRelativeSession(-1)}
+                  onEditConnection={() => requestEditConnection(s.configId)}
+                  onTerminalDimensionsChange={dimensions => updateTerminalDimensions(s.tabId, dimensions)}
+                  onTerminalBackgroundOutput={() => markTerminalBackgroundOutput(s.tabId)}
+                />
+              </div>
+              ))}
+              {sessions.length === 0 && (
+                <div className="server-session active">
+                  <ServerHome
+                    connections={connections}
+                    connectingIds={connectingServerIds}
+                    onConnect={conn => void handleDirectConnect(conn)}
+                    onEdit={conn => requestEditConnection(conn.id)}
+                    onNew={requestNewSession}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </TerminalWorkspace>
+      </main>
+
+      {/* 浮动上传面板 */}
+      {upload.queue.length > 0 && (
+        <UploadPanel
+          upload={upload}
+          onPause={handlePauseUpload}
+          onResume={handleResumeUpload}
+          onStop={handleStopUpload}
+          onDismiss={handleDismissUpload}
+                    onRetry={handleRetryFailed}
+        />
+      )}
+
+      {/* 欢迎弹窗 */}
+      {showWelcome && (
+        <div className="welcome-overlay">
+          <div className="welcome-modal">
+            <button className="welcome-close-btn" onClick={() => setShowWelcome(false)} title={t('common.close')}>×</button>
+            <div className="welcome-icon"></div>
+            <h2 className="welcome-title">{t('welcome.title')}</h2>
+            <p className="welcome-subtitle">{t('welcome.subtitle')}</p>
+            <div className="welcome-features">
+              <span>{t('welcome.secureConnections')}</span>
+              <span>{t('welcome.fileManagement')}</span>
+              <span>{t('welcome.serverControl')}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+
+function UploadPanel({ upload, onPause, onResume, onStop, onDismiss, onRetry }: {
+  upload: UploadState
+  onPause: () => void
+  onResume: () => void
+  onStop: () => void
+  onDismiss: () => void
+    onRetry: () => void
+}) {
+  const { t } = useTranslation()
+  const [collapsed, setCollapsed] = useState(false)
+  const [showStopConfirm, setShowStopConfirm] = useState(false)
+  const [stopInput, setStopInput] = useState('')
+  const stopInputRef = useRef<HTMLInputElement>(null)
+  const stopConfirmed = stopInput.trim().toLowerCase() === 'stop'
+  const pct = upload.totalBytes > 0 ? Math.round((upload.uploadedBytes / upload.totalBytes) * 100) : 0
+  const uploadedMB = (upload.uploadedBytes / 1048576).toFixed(1)
+  const totalMB = (upload.totalBytes / 1048576).toFixed(1)
+  const remainingMB = ((upload.totalBytes - upload.uploadedBytes) / 1048576).toFixed(1)
+  const speedStr = upload.speed >= 1048576
+    ? `${(upload.speed / 1048576).toFixed(1)} MB/s`
+    : `${(upload.speed / 1024).toFixed(0)} KB/s`
+  const doneCount = upload.queue.filter(q => q.status === 'done').length
+  const allDone = !upload.active && upload.queue.every(q => q.status === 'done' || q.status === 'error' || q.status === 'stopped')
+    const failedCount = upload.queue.filter(q => q.status === 'error').length
+
+  return (
+    <div className={`upload-panel ${collapsed ? 'collapsed' : ''}`}>
+      <div className="upload-panel-header" onClick={() => setCollapsed(!collapsed)}>
+        <span className="upload-panel-title">
+          {upload.active ? (upload.paused ? t('upload.paused') : t('upload.uploading')) : allDone ? t('upload.complete') : t('upload.stopped')}
+          {' '}{doneCount}/{upload.queue.length}
+          {upload.active && !upload.paused && ` — ${pct}% — ${upload.workers}`}
+        </span>
+        <span className="upload-panel-toggle">{collapsed ? '^' : 'v'}</span>
+      </div>
+      {!collapsed && (
+        <>
+          {upload.active && (
+            <div className="upload-panel-progress">
+              <div className="upload-progress-track">
+                <div className="upload-progress-fill" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="upload-progress-info">
+                {uploadedMB}M / {totalMB}M | {t('upload.remaining')} {remainingMB}M | {speedStr}
+              </div>
+            </div>
+          )}
+          <div className="upload-panel-queue">
+            {upload.queue.map((item, i) => (
+              <div key={i} className={`upload-queue-item ${item.status}`}>
+                <span className="upload-item-name" title={item.fileName}>{item.fileName}</span>
+                <span className="upload-item-size">{(item.file.size / 1048576).toFixed(1)}M</span>
+                {item.retryCount && item.retryCount > 0 && item.status === 'pending' && <span className="upload-item-retry">{item.retryCount}/3</span>}
+                {item.error && <span className="upload-item-error" title={item.error}>!</span>}
+              </div>
+            ))}
+          </div>
+          <div className="upload-panel-actions">
+            {upload.active && !upload.paused && (
+              <>
+                <button className="upload-btn" onClick={onPause} title={t('upload.pause')}>{t('upload.pause')}</button>
+                <button className="upload-btn" onClick={() => { setShowStopConfirm(true); setStopInput('') }} title={t('upload.stop')}>{t('upload.stop')}</button>
+              </>
+            )}
+            {upload.active && upload.paused && (
+              <>
+                <button className="upload-btn" onClick={onResume} title={t('upload.resume')}>{t('upload.resume')}</button>
+                <button className="upload-btn" onClick={() => { setShowStopConfirm(true); setStopInput('') }} title={t('upload.stop')}>{t('upload.stop')}</button>
+              </>
+            )}
+            {!upload.active && (
+              <>
+                {failedCount > 0 && (
+                  <button className="upload-btn" onClick={onRetry} title={t('upload.retryFailed')}>{t('upload.retryFailed')} ({failedCount})</button>
+                )}
+                <button className="upload-btn" onClick={onDismiss} title={t('common.close')}>{t('common.close')}</button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* 停止确认弹窗 */}
+      {showStopConfirm && (
+        <div className="fb-dialog-overlay" onClick={() => setShowStopConfirm(false)}>
+          <div className="fb-dialog" onClick={(e) => e.stopPropagation()} style={{ minWidth: 380 }}>
+            <button className="modal-close-btn" onClick={() => setShowStopConfirm(false)} title={t('common.close')}>×</button>
+            <div className="fb-dialog-title" style={{ marginBottom: 12 }}>{t('upload.confirmStopTitle')}</div>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              {t('upload.confirmStopMsg')}
+            </p>
+            <input
+              ref={stopInputRef}
+              className="fb-dialog-input"
+              value={stopInput}
+              onChange={e => setStopInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && stopConfirmed) { onStop(); setShowStopConfirm(false) } }}
+              placeholder={t('upload.confirmStopPlaceholder')}
+              autoFocus
+              style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+            />
+            <div className="fb-dialog-actions">
+              <button className="fb-dialog-btn" onClick={() => setShowStopConfirm(false)}>{t('common.cancel')}</button>
+              <button className="fb-dialog-btn danger" disabled={!stopConfirmed} onClick={() => { onStop(); setShowStopConfirm(false) }} style={{ opacity: stopConfirmed ? 1 : 0.4 }}>
+                {t('upload.stop')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default App

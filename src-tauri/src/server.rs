@@ -1,0 +1,9902 @@
+use crate::ssh::{SshSession, SshCache};
+use base64::{Engine, engine::general_purpose::STANDARD as B64};
+use russh::keys::{Algorithm, PrivateKey, PublicKey, PublicKeyBase64};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter};
+
+// ===== Data Structures =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct OsInfo {
+    pub distro: String,      // 例如 "Ubuntu"、"CentOS"
+    pub version: String,     // 例如 "22.04"、"7"
+    pub codename: String,    // 例如 "jammy"（仅 Ubuntu）
+    pub family: String,      // "debian" or "rhel"
+    pub kernel: String,
+    pub arch: String,
+    pub hostname: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DiskInfo {
+    pub filesystem: String,
+    pub size: String,
+    pub used: String,
+    pub available: String,
+    pub use_percent: String,
+    pub mount: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SystemInfo {
+    pub os: OsInfo,
+    pub uptime: String,
+    pub load_avg: String,
+    pub cpu_model: String,
+    pub cpu_cores: u32,
+    #[serde(default)]
+    pub cpu_percent: u32,
+    pub mem_total_mb: u64,
+    pub mem_used_mb: u64,
+    pub mem_free_mb: u64,
+    pub swap_total_mb: u64,
+    pub swap_used_mb: u64,
+    pub disks: Vec<DiskInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ServiceStatus {
+    pub name: String,
+    pub active: bool,
+    pub status_text: String, // "active (running)", "inactive (dead)", etc.
+    pub version: String,
+}
+
+// ===== OS Detection =====
+
+/// 检测远程服务器的操作系统
+pub async fn detect_os(session: &SshSession, _cache: &SshCache, _session_id: &str) -> Result<OsInfo, String> {
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+# Detect distro
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  echo "DISTRO=$NAME"
+  echo "VERSION=$VERSION_ID"
+  echo "CODENAME=$VERSION_CODENAME"
+  echo "ID=$ID"
+  echo "ID_LIKE=$ID_LIKE"
+elif [ -f /etc/redhat-release ]; then
+  echo "DISTRO=$(cat /etc/redhat-release)"
+  echo "VERSION=unknown"
+  echo "ID=rhel"
+fi
+echo "KERNEL=$(uname -r)"
+echo "ARCH=$(uname -m)"
+echo "HOSTNAME=$(hostname)"
+"#,
+            15,
+        )
+        .await?;
+
+    let mut info = OsInfo {
+        distro: String::new(),
+        version: String::new(),
+        codename: String::new(),
+        family: String::new(),
+        kernel: String::new(),
+        arch: String::new(),
+        hostname: String::new(),
+    };
+
+    for line in stdout.lines() {
+        if let Some((key, val)) = line.split_once('=') {
+            let val = val.trim().trim_matches('"').to_string();
+            match key.trim() {
+                "DISTRO" => info.distro = val,
+                "VERSION" => info.version = val,
+                "CODENAME" => info.codename = val,
+                "ID" | "ID_LIKE" => {
+                    if info.family.is_empty() {
+                        let lower = val.to_lowercase();
+                        if lower.contains("debian") || lower.contains("ubuntu") {
+                            info.family = "debian".to_string();
+                        } else if lower.contains("rhel")
+                            || lower.contains("centos")
+                            || lower.contains("fedora")
+                            || lower.contains("rocky")
+                            || lower.contains("alma")
+                        {
+                            info.family = "rhel".to_string();
+                        }
+                    }
+                }
+                "KERNEL" => info.kernel = val,
+                "ARCH" => info.arch = val,
+                "HOSTNAME" => info.hostname = val,
+                _ => {}
+            }
+        }
+    }
+
+    // 回退：如果 ID 检测失败，则根据发行版名称检测系统系列
+    if info.family.is_empty() {
+        let d = info.distro.to_lowercase();
+        if d.contains("ubuntu") || d.contains("debian") {
+            info.family = "debian".to_string();
+        } else if d.contains("centos")
+            || d.contains("rhel")
+            || d.contains("red hat")
+            || d.contains("rocky")
+            || d.contains("alma")
+        {
+            info.family = "rhel".to_string();
+        } else {
+            info.family = "unknown".to_string();
+        }
+    }
+
+    Ok(info)
+}
+
+// ===== System Info =====
+
+/// 获取完整的系统信息
+pub async fn get_system_info(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<SystemInfo, String> {
+    // ponytail：缓存系统信息 15 秒（内存、运行时间和负载会变化，但面板切换很快）
+    if let Some(cached) = cache.get(session_id, "system_info", 15) {
+        if let Ok(info) = serde_json::from_str::<SystemInfo>(&cached) {
+            return Ok(info);
+        }
+    }
+    // ponytail：通过一次 SSH 往返同时获取操作系统检测结果和系统信息（原本需要 2 次调用）
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+# OS Detection
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  echo "DISTRO=$NAME"
+  echo "VERSION=$VERSION_ID"
+  echo "CODENAME=$VERSION_CODENAME"
+  echo "ID=$ID"
+  echo "ID_LIKE=$ID_LIKE"
+elif [ -f /etc/redhat-release ]; then
+  echo "DISTRO=$(cat /etc/redhat-release)"
+  echo "VERSION=unknown"
+  echo "ID=rhel"
+fi
+echo "KERNEL=$(uname -r)"
+echo "ARCH=$(uname -m)"
+echo "HOSTNAME=$(hostname)"
+# System info
+echo "UPTIME=$(uptime -p 2>/dev/null || uptime)"
+echo "LOAD=$(cat /proc/loadavg | awk '{print $1, $2, $3}')"
+echo "CPU_MODEL=$(grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)"
+echo "CPU_CORES=$(nproc)"
+# CPU usage (quick snapshot from /proc/stat)
+CPU_IDLE=$(awk '/^cpu / {print $5}' /proc/stat)
+CPU_TOTAL=$(awk '/^cpu / {sum=$2+$3+$4+$5+$6+$7+$8; print sum}' /proc/stat)
+if [ "$CPU_TOTAL" -gt 0 ]; then
+  CPU_USED=$((100 - ($CPU_IDLE * 100 / $CPU_TOTAL)))
+else
+  CPU_USED=0
+fi
+echo "CPU_PERCENT=$CPU_USED"
+free -m | awk '/^Mem:/ {print "MEM_TOTAL=" $2; print "MEM_USED=" $3; print "MEM_FREE=" $4}'
+free -m | awk '/^Swap:/ {print "SWAP_TOTAL=" $2; print "SWAP_USED=" $3}'
+echo "---DISKS---"
+df -h --output=source,size,used,avail,pcent,target -x tmpfs -x devtmpfs -x squashfs 2>/dev/null | tail -n +2 || df -h | grep -v tmpfs | tail -n +2
+"#,
+            15,
+        )
+        .await?;
+
+    let mut info = SystemInfo {
+        os: OsInfo {
+            distro: String::new(),
+            version: String::new(),
+            codename: String::new(),
+            family: String::new(),
+            kernel: String::new(),
+            arch: String::new(),
+            hostname: String::new(),
+        },
+        uptime: String::new(),
+        load_avg: String::new(),
+        cpu_model: String::new(),
+        cpu_cores: 0,
+        cpu_percent: 0,
+        mem_total_mb: 0,
+        mem_used_mb: 0,
+        mem_free_mb: 0,
+        swap_total_mb: 0,
+        swap_used_mb: 0,
+        disks: Vec::new(),
+    };
+
+    let mut in_disks = false;
+
+    for line in stdout.lines() {
+        if line.starts_with("---DISKS---") {
+            in_disks = true;
+            continue;
+        }
+
+        if in_disks {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 6 {
+                info.disks.push(DiskInfo {
+                    filesystem: parts[0].to_string(),
+                    size: parts[1].to_string(),
+                    used: parts[2].to_string(),
+                    available: parts[3].to_string(),
+                    use_percent: parts[4].to_string(),
+                    mount: parts[5..].join(" "),
+                });
+            }
+            continue;
+        }
+
+        if let Some((key, val)) = line.split_once('=') {
+            let val = val.trim().trim_matches('"').to_string();
+            match key.trim() {
+                "DISTRO" => info.os.distro = val,
+                "VERSION" => info.os.version = val,
+                "CODENAME" => info.os.codename = val,
+                "ID" | "ID_LIKE" => {
+                    if info.os.family.is_empty() {
+                        let lower = val.to_lowercase();
+                        if lower.contains("debian") || lower.contains("ubuntu") {
+                            info.os.family = "debian".to_string();
+                        } else if lower.contains("rhel")
+                            || lower.contains("centos")
+                            || lower.contains("fedora")
+                            || lower.contains("rocky")
+                            || lower.contains("alma")
+                        {
+                            info.os.family = "rhel".to_string();
+                        }
+                    }
+                }
+                "KERNEL" => info.os.kernel = val,
+                "ARCH" => info.os.arch = val,
+                "HOSTNAME" => info.os.hostname = val,
+                "UPTIME" => info.uptime = val.replace("up ", ""),
+                "LOAD" => info.load_avg = val,
+                "CPU_MODEL" => info.cpu_model = val,
+                "CPU_CORES" => info.cpu_cores = val.parse().unwrap_or(0),
+                "CPU_PERCENT" => info.cpu_percent = val.parse().unwrap_or(0),
+                "MEM_TOTAL" => info.mem_total_mb = val.parse().unwrap_or(0),
+                "MEM_USED" => info.mem_used_mb = val.parse().unwrap_or(0),
+                "MEM_FREE" => info.mem_free_mb = val.parse().unwrap_or(0),
+                "SWAP_TOTAL" => info.swap_total_mb = val.parse().unwrap_or(0),
+                "SWAP_USED" => info.swap_used_mb = val.parse().unwrap_or(0),
+                _ => {}
+            }
+        }
+    }
+
+    // 回退：如果 ID 检测失败，则根据发行版名称检测系统系列
+    if info.os.family.is_empty() {
+        let d = info.os.distro.to_lowercase();
+        if d.contains("ubuntu") || d.contains("debian") {
+            info.os.family = "debian".to_string();
+        } else if d.contains("centos")
+            || d.contains("rhel")
+            || d.contains("red hat")
+            || d.contains("rocky")
+            || d.contains("alma")
+        {
+            info.os.family = "rhel".to_string();
+        } else {
+            info.os.family = "unknown".to_string();
+        }
+    }
+
+    // ponytail：缓存系统信息
+    if let Ok(json) = serde_json::to_string(&info) {
+        cache.put(session_id, "system_info", json);
+    }
+    Ok(info)
+}
+
+// ===== Service Status =====
+
+/// 检查 LNMP 服务状态
+pub async fn get_service_statuses(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<Vec<ServiceStatus>, String> {
+    // ponytail：缓存服务状态 30 秒（仅在启动或停止时变化）
+    if let Some(cached) = cache.get(session_id, "service_statuses", 30) {
+        if let Ok(statuses) = serde_json::from_str::<Vec<ServiceStatus>>(&cached) {
+            return Ok(statuses);
+        }
+    }
+    // ponytail：通过一次 SSH 往返获取所有服务状态（原本需要约 10 次顺序调用）
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+for svc in nginx php-fpm; do
+  ACTIVE=$(systemctl is-active $svc 2>/dev/null)
+  SUBSTATE=$(systemctl show $svc --property=SubState 2>/dev/null | cut -d= -f2)
+  echo "SVC=$svc|ACTIVE=$ACTIVE|SUB=$SUBSTATE"
+done
+# ponytail: BT Panel installs binaries outside PATH, fallback to /www/server/ paths
+_nver=$(nginx -v 2>&1 || /www/server/nginx/sbin/nginx -v 2>&1 || echo '')
+echo "NGINX_VER=$(echo "$_nver" | grep -oP '[\d.]+' || echo '')"
+
+_pver=$(php -v 2>/dev/null || $(ls /www/server/php/*/bin/php 2>/dev/null | tail -1) -v 2>/dev/null || echo '')
+echo "PHP_VER=$(echo "$_pver" | head -1 | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1 || echo '')"
+"#,
+            15,
+        )
+        .await?;
+
+    let mut statuses = Vec::new();
+    let mut nginx_ver = String::new();
+    let mut php_ver = String::new();
+
+    for line in stdout.lines() {
+        if line.starts_with("SVC=") {
+            // 解析格式：SVC=name|ACTIVE=status|SUB=substate
+            let parts: Vec<&str> = line.split('|').collect();
+            if parts.len() >= 3 {
+                let name = parts[0].strip_prefix("SVC=").unwrap_or("");
+                let active_str = parts[1].strip_prefix("ACTIVE=").unwrap_or("inactive");
+                let substate = parts[2].strip_prefix("SUB=").unwrap_or("");
+                let active = active_str.trim() == "active";
+                let status_text = if !substate.is_empty() {
+                    substate.to_string()
+                } else if active {
+                    "running".to_string()
+                } else {
+                    "inactive".to_string()
+                };
+                // 跳过不存在的服务（systemctl 对 is-active 返回 "unknown"）
+                if active_str.trim() != "unknown" || active {
+                    statuses.push(ServiceStatus {
+                        name: name.to_string(),
+                        active,
+                        status_text,
+                        version: String::new(), // 在下方填充
+                    });
+                }
+            }
+        } else if let Some((key, val)) = line.split_once('=') {
+            let val = val.trim().to_string();
+            match key.trim() {
+                "NGINX_VER" => nginx_ver = val,
+                "PHP_VER" => php_ver = val,
+                _ => {}
+            }
+        }
+    }
+
+    // 分配版本
+    for s in &mut statuses {
+        s.version = match s.name.as_str() {
+            "nginx" => nginx_ver.clone(),
+            "php-fpm" => php_ver.clone(),
+            _ => String::new(),
+        };
+    }
+
+    // ponytail：缓存服务状态
+    if let Ok(json) = serde_json::to_string(&statuses) {
+        cache.put(session_id, "service_statuses", json);
+    }
+    Ok(statuses)
+}
+
+// ===== LNMP Install =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LnmpInstallConfig {
+    pub install_nginx: bool,
+    pub install_php: bool,
+    // ponytail：已移除 php_version；由系统包管理器选择版本
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LnmpStatus {
+    pub nginx_installed: bool,
+    pub php_installed: bool,
+    pub nginx_version: String,
+    pub php_version: String,
+}
+
+/// 检查当前已安装的 LNMP 组件
+pub async fn check_lnmp_status(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<LnmpStatus, String> {
+    // ponytail：在连接生命周期内缓存 LNMP 状态（仅在安装或卸载时变化）
+    if let Some(cached) = cache.get(session_id, "lnmp_status", 0) {
+        if let Ok(status) = serde_json::from_str::<LnmpStatus>(&cached) {
+            return Ok(status);
+        }
+    }
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+echo "NGINX=$(( command -v nginx || [ -x /www/server/nginx/sbin/nginx ] ) >/dev/null 2>&1 && echo yes || echo no)"
+echo "PHP=$(( command -v php || ls /www/server/php/*/bin/php >/dev/null 2>&1 ) >/dev/null 2>&1 && echo yes || echo no)"
+echo "NGINX_VER=$(nginx -v 2>&1 || /www/server/nginx/sbin/nginx -v 2>&1 | grep -oP '[\d.]+' || echo '')"
+echo "PHP_VER=$(php -v 2>/dev/null || $(ls /www/server/php/*/bin/php 2>/dev/null | tail -1) -v 2>/dev/null | head -1 | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1 || echo '')"
+"#,
+            15,
+        )
+        .await?;
+
+    let mut status = LnmpStatus {
+        nginx_installed: false,
+        php_installed: false,
+        nginx_version: String::new(),
+        php_version: String::new(),
+    };
+
+    for line in stdout.lines() {
+        if let Some((key, val)) = line.split_once('=') {
+            match key.trim() {
+                "NGINX" => status.nginx_installed = val.trim() == "yes",
+                "PHP" => status.php_installed = val.trim() == "yes",
+                "NGINX_VER" => status.nginx_version = val.trim().to_string(),
+                "PHP_VER" => status.php_version = val.trim().to_string(),
+                _ => {}
+            }
+        }
+    }
+
+    // ponytail：缓存 LNMP 状态
+    if let Ok(json) = serde_json::to_string(&status) {
+        cache.put(session_id, "lnmp_status", json);
+    }
+    Ok(status)
+}
+
+/// 生成适用于当前操作系统的 LNMP 安装脚本
+fn generate_install_script(os: &OsInfo, config: &LnmpInstallConfig) -> String {
+    let mut script = String::new();
+
+    script.push_str("#!/bin/bash\n");
+    script.push_str("set -e\n");
+    script.push_str("export DEBIAN_FRONTEND=noninteractive\n");
+    script.push_str(r#"log() { echo "[$(date +%H:%M:%S)] $*"; }"#);
+    script.push('\n');
+    script.push_str(r#"err() { log "ERROR: $*"; exit 1; }"#);
+    script.push('\n');
+    script.push_str("log 'Starting LNMP installation...'\n");
+    script.push_str(&format!("log 'System: {} {} ({})'\n", os.distro, os.version, os.family));
+
+    if os.family == "debian" {
+        script.push_str("\n# Update package index\n");
+        script.push_str("log 'Updating package index...'\n");
+        script.push_str("apt-get update -y --allow-releaseinfo-change || true\n");
+
+        if config.install_nginx {
+            script.push_str("\n# Install Nginx\n");
+            script.push_str("log 'Installing Nginx...'\n");
+            script.push_str("apt-get install -y nginx || err 'Failed to install Nginx'\n");
+            script.push_str("systemctl enable nginx\n");
+            script.push_str("systemctl start nginx\n");
+            script.push_str("log 'Nginx installed successfully'\n");
+        }
+
+        if config.install_php {
+            script.push_str("\n# Install PHP\n");
+            script.push_str("log 'Installing PHP...'\n");
+            script.push_str("apt-get install -y php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-zip || err 'Failed to install PHP'\n");
+            script.push_str("systemctl enable php-fpm\n");
+            script.push_str("systemctl start php-fpm\n");
+            script.push_str("log 'PHP installed successfully'\n");
+        }
+    } else if os.family == "rhel" {
+        // CentOS / RHEL / Rocky / Alma
+        let pkg_mgr = if os.version.starts_with('9') || os.version.starts_with("8.") {
+            "dnf"
+        } else {
+            "yum"
+        };
+
+        script.push_str("\n# Install EPEL repository\n");
+        script.push_str("log 'Installing EPEL repository...'\n");
+        script.push_str(&format!("{} install -y epel-release || true\n", pkg_mgr));
+
+        if config.install_nginx {
+            script.push_str("\n# Install Nginx\n");
+            script.push_str("log 'Installing Nginx...'\n");
+            script.push_str(&format!("{} install -y nginx || err 'Failed to install Nginx'\n", pkg_mgr));
+            script.push_str("systemctl enable nginx\n");
+            script.push_str("systemctl start nginx\n");
+            script.push_str("log 'Nginx installed successfully'\n");
+        }
+
+        if config.install_php {
+            script.push_str("\n# Install PHP\n");
+            script.push_str("log 'Installing PHP...'\n");
+            script.push_str(&format!("{} install -y php-fpm php-mysqlnd php-gd php-mbstring php-xml php-zip || err 'Failed to install PHP'\n", pkg_mgr));
+            script.push_str("systemctl enable php-fpm\n");
+            script.push_str("systemctl start php-fpm\n");
+            script.push_str("log 'PHP installed successfully'\n");
+        }
+    } else {
+        return format!("#!/bin/bash\necho 'ERROR: Unsupported OS family: {}'\nexit 1\n", os.family);
+    }
+
+    // 防火墙配置提示
+    script.push_str("\n# Configure firewall\n");
+    if os.family == "debian" {
+        script.push_str("if command -v ufw >/dev/null 2>&1; then\n");
+        script.push_str("  log 'Configuring UFW firewall...'\n");
+        if config.install_nginx {
+            script.push_str("  ufw allow 'Nginx Full' || true\n");
+        }
+        script.push_str("fi\n");
+    } else {
+        script.push_str("if command -v firewall-cmd >/dev/null 2>&1; then\n");
+        script.push_str("  log 'Configuring firewalld...'\n");
+        if config.install_nginx {
+            script.push_str("  firewall-cmd --permanent --add-service=http || true\n");
+            script.push_str("  firewall-cmd --permanent --add-service=https || true\n");
+        }
+        script.push_str("  firewall-cmd --reload || true\n");
+        script.push_str("fi\n");
+    }
+
+    script.push_str("\nlog 'LNMP installation completed successfully!'\n");
+    script.push_str("echo 'INSTALL_SUCCESS'\n");
+
+    script
+}
+
+/// 在远程服务器上安装 LNMP 环境，并发送进度事件
+pub async fn install_lnmp(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    config: &LnmpInstallConfig,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    // 先检测操作系统
+    let os = detect_os(session, cache, session_id).await?;
+
+    if os.family == "unknown" {
+        return Err(format!("Unsupported operating system: {}", os.distro));
+    }
+
+    // 生成安装脚本
+    let script = generate_install_script(&os, config);
+
+    // 将脚本写入远程服务器
+    crate::ssh::session_write_file(session, "/tmp/lnmp-install.sh", &script)
+        .await?;
+
+    // 赋予脚本执行权限并运行
+    // 使用 Shell 通道流式传输输出
+    let mut channel = crate::ssh::session_open_channel(session).await?;
+    channel
+        .exec(true, "bash /tmp/lnmp-install.sh")
+        .await
+        .map_err(|e| format!("Failed to start install script: {}", e))?;
+
+    let mut full_output = String::new();
+    let mut exit_code: i32 = -1;
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(1800); // 30 min timeout
+
+    loop {
+        tokio::select! {
+            msg = channel.wait() => {
+                match msg {
+                    Some(russh::ChannelMsg::Data { data }) => {
+                        let text = String::from_utf8_lossy(&data);
+                        full_output.push_str(&text);
+                        // 实时将每一行输出发送到 UI
+                        for line in text.lines() {
+                            if !line.trim().is_empty() {
+                                let _ = app_handle.emit("lnmp-install-progress", serde_json::json!({
+                                    "sessionId": session_id,
+                                    "line": line,
+                                    "status": "installing",
+                                }));
+                            }
+                        }
+                    }
+                    Some(russh::ChannelMsg::ExtendedData { data, ext }) => {
+                        if ext == 1 {
+                            let text = String::from_utf8_lossy(&data);
+                            full_output.push_str(&text);
+                            for line in text.lines() {
+                                if !line.trim().is_empty() {
+                                    let _ = app_handle.emit("lnmp-install-progress", serde_json::json!({
+                                        "sessionId": session_id,
+                                        "line": line,
+                                        "status": "installing",
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                    Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                        exit_code = exit_status as i32;
+                    }
+                    Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => break,
+                    _ => {}
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                return Err("LNMP installation timed out (30 minutes)".to_string());
+            }
+        }
+    }
+
+    // 发送最终状态
+    // ponytail：russh 可能在 Eof 或 Close 之后才发送 ExitStatus，因此 exit_code 会保持为 -1。
+    // 回退检查脚本输出中自身的成功标记。
+    let script_succeeded = full_output.contains("INSTALL_SUCCESS");
+
+    if exit_code == 0 || script_succeeded {
+        let _ = app_handle.emit("lnmp-install-progress", serde_json::json!({
+            "sessionId": session_id,
+            "line": "Installation completed successfully!",
+            "status": "done",
+        }));
+        Ok(full_output)
+    } else {
+        let _ = app_handle.emit("lnmp-install-progress", serde_json::json!({
+            "sessionId": session_id,
+            "line": format!("Installation failed (exit code {})", exit_code),
+            "status": "error",
+        }));
+        Err(format!("Installation failed (exit code {}):\n{}", exit_code, full_output))
+    }
+}
+
+// ===== Service Management =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ServiceInfo {
+    pub name: String,
+    pub display_name: String,
+    pub active: bool,
+    pub status_text: String,
+    pub version: String,
+    pub pid: String,
+    pub memory: String,
+    pub uptime: String,
+    pub config_path: String,
+}
+
+/// 获取指定服务的详细信息
+pub async fn get_service_info(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    service: &str,
+) -> Result<ServiceInfo, String> {
+    // ponytail：通过一次 SSH 往返同时获取状态、版本和配置检测结果（原本需要 2 至 3 次调用）
+    let cmd = match service {
+        "nginx" => format!(r#"
+echo "ACTIVE=$(systemctl is-active {svc} 2>/dev/null || echo inactive)"
+echo "STATUS=$(systemctl show {svc} --property=ActiveState,SubState,MainPID,MemoryCurrent 2>/dev/null | paste -sd ',' -)"
+echo "UPTIME=$(systemctl show {svc} --property=ActiveEnterTimestamp 2>/dev/null | cut -d= -f2-)"
+echo "VER=$(nginx -v 2>&1 | grep -oP '[\d.]+' || echo '')"
+"#, svc = service),
+        "mysqld" | "mysql" | "mariadb" => format!(r#"
+echo "ACTIVE=$(systemctl is-active {svc} 2>/dev/null || echo inactive)"
+echo "STATUS=$(systemctl show {svc} --property=ActiveState,SubState,MainPID,MemoryCurrent 2>/dev/null | paste -sd ',' -)"
+echo "UPTIME=$(systemctl show {svc} --property=ActiveEnterTimestamp 2>/dev/null | cut -d= -f2-)"
+echo "VER=$(mysql --version 2>/dev/null | head -1 || echo '')"
+echo "CFG=$(mysql --help 2>/dev/null | grep 'Default options' -A 1 | tail -1 | xargs || echo '')"
+"#, svc = service),
+        _ => format!(r#"
+echo "ACTIVE=$(systemctl is-active {svc} 2>/dev/null || echo inactive)"
+echo "STATUS=$(systemctl show {svc} --property=ActiveState,SubState,MainPID,MemoryCurrent 2>/dev/null | paste -sd ',' -)"
+echo "UPTIME=$(systemctl show {svc} --property=ActiveEnterTimestamp 2>/dev/null | cut -d= -f2-)"
+echo "VER=$(php -v 2>/dev/null | head -1 | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1 || echo '')"
+echo "CFG=$(php -i 2>/dev/null | grep 'Loaded Configuration File' | head -1 | cut -d= -f2- | xargs || echo '')"
+"#, svc = service),
+    };
+
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session, &cmd, 15)
+        .await?;
+
+    let mut info = ServiceInfo {
+        name: service.to_string(),
+        display_name: service.to_string(),
+        active: false,
+        status_text: String::new(),
+        version: String::new(),
+        pid: String::new(),
+        memory: String::new(),
+        uptime: String::new(),
+        config_path: String::new(),
+    };
+
+    for line in stdout.lines() {
+        if let Some((key, val)) = line.split_once('=') {
+            let val = val.trim().to_string();
+            match key.trim() {
+                "ACTIVE" => {
+                    info.active = val == "active";
+                    info.status_text = val;
+                }
+                "STATUS" => {
+                    for prop in val.split(',') {
+                        if let Some((k, v)) = prop.split_once('=') {
+                            match k {
+                                "MainPID" => info.pid = v.to_string(),
+                                "MemoryCurrent" => {
+                                    if let Ok(bytes) = v.parse::<u64>() {
+                                        info.memory = format!("{} MB", bytes / 1024 / 1024);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                "UPTIME" => info.uptime = val,
+                "VER" => info.version = val,
+                "CFG" => info.config_path = val,
+                _ => {}
+            }
+        }
+    }
+
+    // 根据服务类型设置显示名称和配置路径默认值
+    match service {
+        "nginx" => {
+            info.display_name = "Nginx".to_string();
+            if info.config_path.is_empty() {
+                info.config_path = "/etc/nginx/nginx.conf".to_string();
+            }
+        }
+        "mysqld" | "mysql" => {
+            info.display_name = "MySQL".to_string();
+            if info.config_path.is_empty() || !info.config_path.starts_with('/') {
+                info.config_path = info.config_path.split_whitespace()
+                    .next().unwrap_or("/etc/my.cnf").to_string();
+            }
+            if info.config_path.is_empty() {
+                info.config_path = "/etc/my.cnf".to_string();
+            }
+        }
+        "mariadb" => {
+            info.display_name = "MariaDB".to_string();
+            if info.config_path.is_empty() || !info.config_path.starts_with('/') {
+                info.config_path = info.config_path.split_whitespace()
+                    .next().unwrap_or("/etc/my.cnf").to_string();
+            }
+            if info.config_path.is_empty() {
+                info.config_path = "/etc/my.cnf".to_string();
+            }
+        }
+        "php-fpm" => {
+            info.display_name = "PHP-FPM".to_string();
+            if info.config_path.is_empty() {
+                info.config_path = "/etc/php.ini".to_string();
+            }
+        }
+        _ => {}
+    }
+
+    Ok(info)
+}
+
+/// 通过一次 SSH 调用查找活动的 MySQL/MariaDB 服务名称（原本需要约 9 次顺序调用）
+pub async fn find_mysql_service(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<(String, ServiceInfo), String> {
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+for svc in mysqld mariadb mysql; do
+  ACTIVE=$(systemctl is-active $svc 2>/dev/null || echo inactive)
+  echo "SVC=$svc|ACTIVE=$ACTIVE"
+done
+"#,
+            10,
+        )
+        .await?;
+
+    // 查找第一个活动的服务，或者第一个存在的服务
+    let mut first_existing = String::new();
+    let mut found_active: Option<String> = None;
+
+    for line in stdout.lines() {
+        if line.starts_with("SVC=") {
+            let parts: Vec<&str> = line.split('|').collect();
+            if parts.len() >= 2 {
+                let name = parts[0].strip_prefix("SVC=").unwrap_or("");
+                let active = parts[1].strip_prefix("ACTIVE=").unwrap_or("inactive");
+                if first_existing.is_empty() && active != "unknown" {
+                    first_existing = name.to_string();
+                }
+                if active == "active" && found_active.is_none() {
+                    found_active = Some(name.to_string());
+                }
+            }
+        }
+    }
+
+    let service_name = found_active.unwrap_or(first_existing);
+    if service_name.is_empty() {
+        return Err("No MySQL/MariaDB service found".to_string());
+    }
+
+    let info = get_service_info(session, cache, session_id, &service_name).await?;
+    Ok((service_name, info))
+}
+
+/// 通过一次 SSH 调用查找活动的 PHP-FPM 服务名称（原本需要约 18 次顺序调用）
+pub async fn find_php_service(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<(String, ServiceInfo), String> {
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+for svc in php-fpm php8.4-fpm php8.3-fpm php8.2-fpm php8.1-fpm php8.0-fpm; do
+  ACTIVE=$(systemctl is-active $svc 2>/dev/null || echo inactive)
+  echo "SVC=$svc|ACTIVE=$ACTIVE"
+done
+"#,
+            10,
+        )
+        .await?;
+
+    let mut first_existing = String::new();
+    let mut found_active: Option<String> = None;
+
+    for line in stdout.lines() {
+        if line.starts_with("SVC=") {
+            let parts: Vec<&str> = line.split('|').collect();
+            if parts.len() >= 2 {
+                let name = parts[0].strip_prefix("SVC=").unwrap_or("");
+                let active = parts[1].strip_prefix("ACTIVE=").unwrap_or("inactive");
+                if first_existing.is_empty() && active != "unknown" {
+                    first_existing = name.to_string();
+                }
+                if active == "active" && found_active.is_none() {
+                    found_active = Some(name.to_string());
+                }
+            }
+        }
+    }
+
+    let service_name = found_active.unwrap_or(first_existing);
+    if service_name.is_empty() {
+        return Err("No PHP-FPM service found".to_string());
+    }
+
+    let info = get_service_info(session, cache, session_id, &service_name).await?;
+    Ok((service_name, info))
+}
+
+/// 通过一次 SSH 调用查找 FPM 池配置路径（原本最多需要 6 次顺序读取）
+pub async fn find_php_fpm_config(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<(String, String), String> {
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+for p in /etc/php-fpm.d/www.conf /etc/php/8.4/fpm/pool.d/www.conf /etc/php/8.3/fpm/pool.d/www.conf /etc/php/8.2/fpm/pool.d/www.conf /etc/php/8.1/fpm/pool.d/www.conf /etc/php/8.0/fpm/pool.d/www.conf; do
+  if [ -f "$p" ]; then
+    echo "PATH=$p"
+    cat "$p"
+    exit 0
+  fi
+done
+echo "NOT_FOUND"
+"#,
+            10,
+        )
+        .await?;
+
+    if stdout.contains("NOT_FOUND") {
+        return Err("FPM pool config not found".to_string());
+    }
+
+    let mut path = String::new();
+    let mut content = String::new();
+    for line in stdout.lines() {
+        if line.starts_with("PATH=") {
+            path = line.strip_prefix("PATH=").unwrap_or("").to_string();
+        } else if !path.is_empty() {
+            content.push_str(line);
+            content.push('\n');
+        }
+    }
+
+    if path.is_empty() {
+        return Err("FPM pool config not found".to_string());
+    }
+
+    Ok((path, content))
+}
+
+/// 通过 SSH exec 读取远程文件内容
+pub async fn read_remote_file(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    path: &str,
+) -> Result<String, String> {
+    let safe = path.replace('\'', "'\\''");
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &format!("cat '{}'", safe), 10)
+        .await?;
+    if code != 0 {
+        Err(format!("Failed to read {}: {}", path, stderr.trim()))
+    } else {
+        Ok(stdout)
+    }
+}
+
+/// 通过 SFTP 将内容写入远程文件
+pub async fn write_remote_file(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    path: &str,
+    content: &str,
+) -> Result<(), String> {
+    crate::ssh::session_write_file(session, path, content).await
+}
+
+/// 获取文件中最近的日志行
+pub async fn get_log_lines(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    path: &str,
+    lines: u32,
+) -> Result<String, String> {
+    let safe = path.replace('\'', "'\\''");
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session, &format!("tail -{} '{}'", lines, safe), 10)
+        .await?;
+    Ok(stdout)
+}
+
+/// 列出 Nginx 虚拟主机
+pub async fn list_nginx_vhosts(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<String>, String> {
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+for dir in /etc/nginx/conf.d /etc/nginx/sites-enabled /etc/nginx/sites-available /www/server/panel/vhost/nginx /www/server/nginx/conf/vhost; do
+  [ -d "$dir" ] && find "$dir" -maxdepth 1 -type f 2>/dev/null
+done | sort -u
+"#,
+            10,
+        )
+        .await?;
+
+    let vhosts: Vec<String> = stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .filter(|l| {
+            let name = l.rsplit('/').next().unwrap_or(l);
+            name != "default"
+        })
+        .collect();
+
+    Ok(vhosts)
+}
+
+/// 获取 Nginx 配置测试结果
+pub async fn test_nginx_config(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<(bool, String), String> {
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, "nginx -t 2>&1", 10)
+        .await?;
+    let combined = format!("{} {}", stdout, stderr);
+    let ok = code == 0 || combined.contains("test is successful") || combined.contains("syntax is ok");
+    Ok((ok, combined.trim().to_string()))
+}
+
+/// 获取 MySQL 全局变量
+pub async fn get_mysql_variables(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            "mysql -e 'SHOW GLOBAL VARIABLES' 2>/dev/null | head -80",
+            10,
+        )
+        .await?;
+
+    let mut vars = Vec::new();
+    for line in stdout.lines().skip(1) {
+        if let Some((name, value)) = line.split_once('\t') {
+            vars.push((name.trim().to_string(), value.trim().to_string()));
+        }
+    }
+    Ok(vars)
+}
+
+/// 获取 MySQL 进程列表
+pub async fn get_mysql_processes(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<String, String> {
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            "mysql -e 'SHOW PROCESSLIST' 2>/dev/null",
+            10,
+        )
+        .await?;
+    Ok(stdout)
+}
+
+/// 执行 MySQL 查询
+pub async fn exec_mysql_query(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    query: &str,
+) -> Result<String, String> {
+    let safe_query = query.replace('\'', "'\\''");
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session,
+            &format!("mysql -e '{}' 2>&1", safe_query),
+            15,
+        )
+        .await?;
+    let combined = format!("{} {}", stdout, stderr);
+    // mysql 错误以 "ERROR" 开头（例如 "ERROR 1045 (28000): Access denied"）
+    let has_error = combined.contains("ERROR ") || combined.contains("ERROR:");
+    if code != 0 && has_error {
+        Err(combined.trim().to_string())
+    } else {
+        Ok(stdout)
+    }
+}
+
+// ===== Site Management =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SiteInfo {
+    pub domain: String,
+    pub domains: String,             // 以空格分隔的所有 server_names 列表
+    pub root: String,
+    pub config_path: String,
+    pub ssl: bool,
+    pub ssl_cert_path: Option<String>,
+    pub ssl_key_path: Option<String>,
+    pub php_version: String,
+    pub running_dir: String,
+    pub open_basedir: bool,
+    pub enabled: bool,
+    pub index_files: String,         // 以空格分隔的索引文件列表
+    pub proxy_target: String,        // 检测到的 proxy_pass URL
+    pub hotlink_enabled: bool,       // 是否启用防盗链
+    pub hotlink_extensions: String,  // 以逗号分隔的文件扩展名
+    pub hotlink_allowed_domains: String, // 以换行分隔的允许域名
+    pub hotlink_response: String,    // 响应代码或路径
+    pub hotlink_allow_empty_referer: bool, // 允许空 referer
+    pub created_at: i64,
+}
+
+/// 列出服务器上已安装的 PHP-FPM 版本
+pub async fn list_php_versions(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<Vec<String>, String> {
+    // ponytail：在连接生命周期内缓存 PHP 版本
+    if let Some(cached) = cache.get(session_id, "php_versions", 0) {
+        if let Ok(versions) = serde_json::from_str::<Vec<String>>(&cached) {
+            return Ok(versions);
+        }
+    }
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+# ponytail: dynamic scan — no hardcoded version list
+# Supports: php8.1-fpm (Debian), php81-php-fpm (CentOS Remi SCL), php-fpm (CentOS default)
+# From systemd unit files: Debian/Ubuntu style (php8.1-fpm)
+systemctl list-unit-files --type=service 2>/dev/null | grep -oE 'php[0-9]+\.[0-9]+-fpm' | sed -E 's/^php([0-9]+\.[0-9]+)-fpm$/\1/'
+# CentOS Remi SCL style (php81-php-fpm)
+systemctl list-unit-files --type=service 2>/dev/null | grep -oE 'php[0-9]+-php-fpm' | sed -E 's/^php([0-9]+)-php-fpm$/\1/' | sed 's/\([0-9]\)\([0-9]\)/\1.\2/'
+# BT Panel: versions not in systemd
+if [ -d /www/server/php ]; then
+  for d in /www/server/php/*/; do
+    [ -d "$d" ] || continue
+    v=$(basename "$d")
+    echo "$v" | grep -qE '^[0-9]+\.[0-9]+$' || continue
+    [ -x "/www/server/php/$v/sbin/php-fpm" ] || continue
+    echo "$v"
+  done
+fi
+# Fallback: generic php-fpm (CentOS default, no version in service name)
+if systemctl list-unit-files --type=service 2>/dev/null | grep -qE '^php-fpm\.service'; then
+  php -v 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1
+fi
+"#,
+            10,
+        )
+        .await?;
+
+    let versions: Vec<String> = stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let mut versions = versions;
+    versions.sort_by(|a, b| {
+        let parse = |s: &str| -> Vec<u32> { s.split('.').filter_map(|p| p.parse().ok()).collect() };
+        let va = parse(a); let vb = parse(b);
+        va.iter().chain(std::iter::repeat(&0))
+            .zip(vb.iter().chain(std::iter::repeat(&0)))
+            .take(3)
+            .find_map(|(x, y)| x.partial_cmp(y).and_then(|o| if o == std::cmp::Ordering::Equal { None } else { Some(o) }))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // ponytail：缓存 PHP 版本
+    if let Ok(json) = serde_json::to_string(&versions) {
+        cache.put(session_id, "php_versions", json);
+    }
+    Ok(versions)
+}
+
+/// 列出指定路径下的直接子目录
+pub async fn list_subdirs(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    path: &str,
+) -> Result<Vec<String>, String> {
+    let safe_path = path.replace('\'', "'\\''");
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            &format!("find '{}' -maxdepth 1 -mindepth 1 -type d -printf '%f\\n' 2>/dev/null | sort", safe_path),
+            10,
+        )
+        .await?;
+
+    let dirs: Vec<String> = stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    Ok(dirs)
+}
+
+/// 从 Nginx 列出所有已配置的站点
+pub async fn list_sites(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<SiteInfo>, String> {
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r##"
+# Parse nginx vhost configs — scan both enabled and disabled
+seen=""
+
+# 1) Scan enabled configs (standard + BT Panel vhost paths)
+for dir in /etc/nginx/sites-enabled /etc/nginx/conf.d /www/server/panel/vhost/nginx /www/server/nginx/conf/vhost; do
+  if [ -d "$dir" ]; then
+    for f in "$dir"/*; do
+      [ -f "$f" ] || continue
+      # Skip default config
+      case "$(basename "$f")" in default) continue;; esac
+      # Skip .disabled files in conf.d (not enabled)
+      case "$f" in *.conf.disabled) continue;; esac
+      echo "===TIME:$(stat -c %Y "$f" 2>/dev/null || echo 0)==="
+      echo "===FILE:$f==="
+      cat "$f" 2>/dev/null
+      # ponytail: detect PHP version from config content, socket paths, and php -v fallback
+      _pv=$(grep -ohP 'php\K[0-9]+\.[0-9]+' "$f" 2>/dev/null | head -1)
+      if [ -z "$_pv" ]; then
+        _inc=$(grep -oP 'include\s+\K[^;]+' "$f" 2>/dev/null | tr -d " '" | while read _ip; do
+          for _g in $_ip; do [ -f "$_g" ] && grep -ohP 'php\K[0-9]+\.[0-9]+' "$_g" 2>/dev/null; done
+        done | head -1)
+        [ -n "$_inc" ] && _pv="$_inc"
+      fi
+      # ponytail: extract version from fastcgi_pass socket path (www-X.Y.sock, phpX.Y-fpm.sock)
+      if [ -z "$_pv" ] && grep -q 'fastcgi_pass' "$f" 2>/dev/null; then
+        _fp=$(grep -oP 'fastcgi_pass\s+unix:\K[^;]+' "$f" 2>/dev/null | head -1)
+        if [ -n "$_fp" ]; then
+          _pv=$(echo "$_fp" | grep -oP 'www-\K[0-9]+\.[0-9]+' | head -1)
+          [ -z "$_pv" ] && _pv=$(echo "$_fp" | grep -oP 'php\K[0-9]+\.[0-9]+' | head -1)
+        fi
+        [ -z "$_pv" ] && _pv=$(php -v 2>/dev/null | grep -oP 'PHP\s+\K[0-9]+\.[0-9]+' | head -1)
+      fi
+      [ -n "$_pv" ] && echo "# __PHP_FPM:$_pv"
+      # ponytail: explicit SSL marker for reliable detection
+      grep -q 'ssl_certificate' "$f" 2>/dev/null && echo '# __SSL:1' || echo '# __SSL:0'
+      # Record the server_name for dedup
+      sn=$(grep -E '^[[:space:]]*server_name[[:space:]]+' "$f" 2>/dev/null | head -1 | sed 's/.*server_name[[:space:]]*//' | sed 's/;.*//' | awk '{print $1}')
+      [ -n "$sn" ] && seen="$seen $sn"
+    done
+  fi
+done
+
+# 2) Scan disabled configs (sites-available without symlink + conf.d/*.conf.disabled)
+
+# sites-available
+if [ -d /etc/nginx/sites-available ]; then
+  for f in /etc/nginx/sites-available/*; do
+    [ -f "$f" ] || continue
+    # Skip default config
+    case "$(basename "$f")" in default) continue;; esac
+    sn=$(grep -E '^[[:space:]]*server_name[[:space:]]+' "$f" 2>/dev/null | head -1 | sed 's/.*server_name[[:space:]]*//' | sed 's/;.*//' | awk '{print $1}')
+    [ -z "$sn" ] && continue
+    # Skip if already seen as enabled
+    echo "$seen" | grep -qw "$sn" && continue
+    echo "===TIME:$(stat -c %Y "$f" 2>/dev/null || echo 0)==="
+    echo "===FILE:$f==="
+    cat "$f" 2>/dev/null
+    _pv=$(grep -ohP 'php\K[0-9]+\.[0-9]+' "$f" 2>/dev/null | head -1)
+    if [ -z "$_pv" ]; then
+      _inc=$(grep -oP 'include\s+\K[^;]+' "$f" 2>/dev/null | tr -d " '" | while read _ip; do
+        for _g in $_ip; do [ -f "$_g" ] && grep -ohP 'php\K[0-9]+\.[0-9]+' "$_g" 2>/dev/null; done
+      done | head -1)
+      [ -n "$_inc" ] && _pv="$_inc"
+    fi
+    # ponytail: extract version from fastcgi_pass socket path (www-X.Y.sock, phpX.Y-fpm.sock)
+    if [ -z "$_pv" ] && grep -q 'fastcgi_pass' "$f" 2>/dev/null; then
+      _fp=$(grep -oP 'fastcgi_pass\s+unix:\K[^;]+' "$f" 2>/dev/null | head -1)
+      if [ -n "$_fp" ]; then
+        _pv=$(echo "$_fp" | grep -oP 'www-\K[0-9]+\.[0-9]+' | head -1)
+        [ -z "$_pv" ] && _pv=$(echo "$_fp" | grep -oP 'php\K[0-9]+\.[0-9]+' | head -1)
+      fi
+      [ -z "$_pv" ] && _pv=$(php -v 2>/dev/null | grep -oP 'PHP\s+\K[0-9]+\.[0-9]+' | head -1)
+    fi
+    [ -n "$_pv" ] && echo "# __PHP_FPM:$_pv"
+    grep -q 'ssl_certificate' "$f" 2>/dev/null && echo '# __SSL:1' || echo '# __SSL:0'
+  done
+fi
+
+# conf.d .disabled files
+if [ -d /etc/nginx/conf.d ]; then
+  for f in /etc/nginx/conf.d/*.conf.disabled; do
+    [ -f "$f" ] || continue
+    echo "===TIME:$(stat -c %Y "$f" 2>/dev/null || echo 0)==="
+    echo "===FILE:$f==="
+    cat "$f" 2>/dev/null
+    _pv=$(grep -ohP 'php\K[0-9]+\.[0-9]+' "$f" 2>/dev/null | head -1)
+    if [ -z "$_pv" ]; then
+      _inc=$(grep -oP 'include\s+\K[^;]+' "$f" 2>/dev/null | tr -d " '" | while read _ip; do
+        for _g in $_ip; do [ -f "$_g" ] && grep -ohP 'php\K[0-9]+\.[0-9]+' "$_g" 2>/dev/null; done
+      done | head -1)
+      [ -n "$_inc" ] && _pv="$_inc"
+    fi
+    # ponytail: extract version from fastcgi_pass socket path (www-X.Y.sock, phpX.Y-fpm.sock)
+    if [ -z "$_pv" ] && grep -q 'fastcgi_pass' "$f" 2>/dev/null; then
+      _fp=$(grep -oP 'fastcgi_pass\s+unix:\K[^;]+' "$f" 2>/dev/null | head -1)
+      if [ -n "$_fp" ]; then
+        _pv=$(echo "$_fp" | grep -oP 'www-\K[0-9]+\.[0-9]+' | head -1)
+        [ -z "$_pv" ] && _pv=$(echo "$_fp" | grep -oP 'php\K[0-9]+\.[0-9]+' | head -1)
+      fi
+      [ -z "$_pv" ] && _pv=$(php -v 2>/dev/null | grep -oP 'PHP\s+\K[0-9]+\.[0-9]+' | head -1)
+    fi
+    [ -n "$_pv" ] && echo "# __PHP_FPM:$_pv"
+    grep -q 'ssl_certificate' "$f" 2>/dev/null && echo '# __SSL:1' || echo '# __SSL:0'
+  done
+fi
+"##,
+            15,
+        )
+        .await?;
+
+    let mut sites: Vec<SiteInfo> = Vec::new();
+    let mut current_file = String::new();
+    let mut current_content = String::new();
+
+    for line in stdout.lines() {
+        if line.starts_with("===TIME:") && line.ends_with("===") {
+            // ponytail：解析 TIME 行但忽略；创建时间现在由 site_metadata 数据库跟踪
+            continue;
+        } else if line.starts_with("===FILE:") && line.ends_with("===") {
+            // 处理上一个文件
+            if !current_file.is_empty() {
+                if let Some(site) = parse_site_config(&current_file, &current_content) {
+                    sites.push(site);
+                }
+            }
+            current_file = line
+                .trim_start_matches("===FILE:")
+                .trim_end_matches("===")
+                .to_string();
+            current_content.clear();
+        } else {
+            current_content.push_str(line);
+            current_content.push('\n');
+        }
+    }
+    // 处理最后一个文件
+    if !current_file.is_empty() {
+        if let Some(site) = parse_site_config(&current_file, &current_content) {
+            sites.push(site);
+        }
+    }
+
+    // 按域名去重（保留首次出现的项，即启用的项）
+    let mut seen_domains = std::collections::HashSet::new();
+    sites.retain(|s| seen_domains.insert(s.domain.clone()));
+
+    Ok(sites)
+}
+
+/// 解析单个 nginx vhost 配置，提取站点信息
+fn parse_site_config(path: &str, content: &str) -> Option<SiteInfo> {
+    // ponytail：从所有 server_name 指令中提取全部 server_name，并去重以处理 Certbot 的多个服务器块
+    use std::collections::HashSet;
+    let mut domains: Vec<String> = content
+        .lines()
+        .filter(|l| l.trim().starts_with("server_name"))
+        .flat_map(|l| {
+            l.trim()
+                .strip_prefix("server_name")
+                .map(|s| s.trim().trim_end_matches(';').trim())
+                .unwrap_or("")
+                .split_whitespace()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    // ponytail：排序以确定稳定的主域名（HashSet 的顺序是随机的）
+    domains.sort();
+    
+    let domains_str = if domains.is_empty() {
+        "unknown".to_string()
+    } else {
+        domains.join(" ")
+    };
+    
+    let domain = domains.first().cloned().unwrap_or_else(|| "unknown".to_string());
+
+    // 如果未找到 server_name 且文件名类似默认配置，则跳过
+    if domain == "unknown" && (path.contains("default") || path.contains("default.conf")) {
+        return None;
+    }
+
+    let root = content
+        .lines()
+        .find(|l| l.trim().starts_with("root "))
+        .and_then(|l| {
+            l.trim()
+                .strip_prefix("root ")
+                .map(|s| s.trim().trim_end_matches(';').trim().to_string())
+        })
+        .unwrap_or_else(|| format!("/var/www/{}", domain));
+
+    // ponytail：使用 Shell 脚本提供的显式 SSL 标记，失败时回退到内容扫描
+    let ssl = content.lines().any(|l| l.trim() == "# __SSL:1")
+        || content.contains("ssl_certificate")
+        || content.contains("listen 443");
+
+    // ponytail：从配置中解析 SSL 证书和密钥路径
+    let ssl_cert_path = content.lines()
+        .find(|l| l.trim().starts_with("ssl_certificate "))
+        .and_then(|l| l.trim().strip_prefix("ssl_certificate ").map(|s| s.trim().trim_end_matches(';').trim().to_string()));
+    let ssl_key_path = content.lines()
+        .find(|l| l.trim().starts_with("ssl_certificate_key "))
+        .and_then(|l| l.trim().strip_prefix("ssl_certificate_key ").map(|s| s.trim().trim_end_matches(';').trim().to_string()));
+
+    let php_version = content
+        .lines()
+        .find(|l| l.starts_with("# __PHP_FPM:"))
+        .map(|l| l.trim_start_matches("# __PHP_FPM:").trim().to_string())
+        .or_else(|| {
+            // 回退：扫描内容，在套接字路径和服务名称中查找 PHP 版本模式
+            let lower = content.to_lowercase();
+            // ponytail：从 fastcgi_pass 中尝试查找 www-X.Y.sock（CentOS）或 phpX.Y-fpm.sock（Debian）
+            for line in lower.lines() {
+                if let Some(pos) = line.find("fastcgi_pass") {
+                    let rest = &line[pos..];
+                    if let Some(p) = rest.find("www-") {
+                        let v: String = rest[p+4..].chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+                        if v.contains('.') { return Some(v); }
+                    }
+                    if let Some(p) = rest.find("php") {
+                        let v: String = rest[p+3..].chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+                        if v.contains('.') { return Some(v); }
+                    }
+                }
+            }
+            // 尝试查找后面直接跟版本数字的 php-fpm/php_fpm
+            for pat in &["php-fpm", "php_fpm"] {
+                let mut start = 0;
+                while let Some(idx) = lower[start..].find(pat) {
+                    let abs = start + idx + pat.len();
+                    let rest: String = lower[abs..].chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+                    if !rest.is_empty() && rest.contains('.') {
+                        return Some(rest);
+                    }
+                    start = abs;
+                }
+            }
+            None
+        })
+        .unwrap_or_default();
+
+    // ponytail：配置文件以 .disabled 结尾时站点被禁用；否则只要位于 sites-enabled 或 conf.d 中就视为启用
+    let enabled = !path.ends_with(".disabled") && (path.contains("sites-enabled") || path.contains("conf.d"));
+
+    // 检测 running_dir：从注释标记读取，默认为 "/"
+    let running_dir = content
+        .lines()
+        .find(|l| l.starts_with("# __RUNNING_DIR:"))
+        .map(|l| l.trim_start_matches("# __RUNNING_DIR:").trim().to_string())
+        .unwrap_or_else(|| "/".to_string());
+
+    // 从 Nginx 根路径中去除 running_dir，得到实际的网站根目录
+    let web_root = if running_dir != "/" {
+        let suffix = running_dir.trim_start_matches('/');
+        root.strip_suffix(&format!("/{}", suffix)).unwrap_or(&root).to_string()
+    } else {
+        root.clone()
+    };
+
+    // 检测 open_basedir：检查配置中是否存在 PHP_ADMIN_VALUE open_basedir
+    let open_basedir = content.contains("PHP_ADMIN_VALUE") && content.contains("open_basedir");
+
+    // ponytail：从 index 指令中解析索引文件
+    let index_files = content.lines()
+        .find(|l| l.trim().starts_with("index "))
+        .and_then(|l| l.trim().strip_prefix("index ").map(|s| s.trim().trim_end_matches(';').trim().to_string()))
+        .unwrap_or_else(|| "index.php index.html index.htm".to_string());
+
+    // ponytail：从配置中检测 proxy_pass URL（首次出现的值）
+    let proxy_target = content.lines()
+        .find(|l| l.trim().starts_with("proxy_pass "))
+        .and_then(|l| l.trim().strip_prefix("proxy_pass ").map(|s| s.trim().trim_end_matches(';').trim().to_string()))
+        .unwrap_or_default();
+
+    // ponytail：从配置标记中解析防盗链设置
+    let hotlink_enabled = content.contains("# Hotlink Protection Start");
+    
+    let (hotlink_extensions, hotlink_allowed_domains, hotlink_response, hotlink_allow_empty_referer) = if hotlink_enabled {
+        // 提取防盗链代码块
+        let mut in_hotlink_block = false;
+        let mut hotlink_content = String::new();
+        for line in content.lines() {
+            if line.contains("# Hotlink Protection Start") {
+                in_hotlink_block = true;
+                continue;
+            }
+            if line.contains("# Hotlink Protection End") {
+                break;
+            }
+            if in_hotlink_block {
+                hotlink_content.push_str(line);
+                hotlink_content.push('\n');
+            }
+        }
+        
+        // 从 location ~* \.(ext)$ 模式中解析扩展名
+        let extensions = hotlink_content
+            .lines()
+            .find(|l| l.contains("location ~* \\.") && l.contains("$"))
+            .and_then(|l| {
+                l.split("\\.").nth(1)
+                    .and_then(|s| s.split('$').next())
+                    .map(|s| {
+                        // 移除括号，并将 | 转换为逗号
+                        s.replace('(', "")
+                            .replace(')', "")
+                            .replace('|', ",")
+                    })
+            })
+            .unwrap_or_else(|| "jpg,jpeg,gif,png,js,css".to_string());
+        
+        // 解析 valid_referers，提取允许的域名
+        let referers_line = hotlink_content
+            .lines()
+            .find(|l| l.trim().starts_with("valid_referers"));
+        
+        eprintln!("[DEBUG] referers_line: {:?}", referers_line);
+        
+        let mut allowed_domains_list: Vec<String> = Vec::new();
+        let mut allow_empty = false;
+        
+        if let Some(ref_line) = referers_line {
+            let parts: Vec<&str> = ref_line
+                .trim()  // 先移除首尾空白
+                .strip_prefix("valid_referers")
+                .unwrap_or("")
+                .trim()
+                .trim_end_matches(';')
+                .split_whitespace()
+                .collect();
+            
+            eprintln!("[DEBUG] parts: {:?}", parts);
+            
+            for part in parts {
+                if part == "none" {
+                    allow_empty = true;
+                } else if part.starts_with("*.") {
+                    // *.example.com -> example.com
+                    let domain = part.strip_prefix("*.").unwrap_or(part).to_string();
+                    eprintln!("[DEBUG] Adding wildcard domain: {}", domain);
+                    if !allowed_domains_list.contains(&domain) {
+                        allowed_domains_list.push(domain);
+                    }
+                } else if part != "blocked" && part != "server_names" {
+                    let domain_str = part.to_string();
+                    eprintln!("[DEBUG] Adding regular domain: {}", domain_str);
+                    if !allowed_domains_list.contains(&domain_str) {
+                        allowed_domains_list.push(domain_str);
+                    }
+                }
+            }
+        }
+        
+        // 使用换行连接域名（保持原有顺序）
+        let allowed_domains = allowed_domains_list.join("\n");
+        eprintln!("[DEBUG] Final allowed_domains: {:?}", allowed_domains);
+        
+        // 解析响应指令
+        let response = hotlink_content
+            .lines()
+            .find(|l| l.trim().starts_with("return "))
+            .and_then(|l| {
+                let trimmed = l.trim().strip_prefix("return ")?.trim_end_matches(';').trim();
+                // 仅提取代码或路径
+                if let Some(code) = trimmed.split_whitespace().next() {
+                    // 如果是数字则返回数字，否则返回完整指令
+                    if code.parse::<u16>().is_ok() {
+                        Some(code.to_string())
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "403".to_string());
+        
+        (extensions, allowed_domains, response, allow_empty)
+    } else {
+        ("".to_string(), "".to_string(), "".to_string(), false)
+    };
+
+    Some(SiteInfo {
+        domain,
+        domains: domains_str,
+        root: web_root,
+        config_path: path.to_string(),
+        ssl,
+        ssl_cert_path,
+        ssl_key_path,
+        php_version,
+        running_dir,
+        open_basedir,
+        enabled,
+        index_files,
+        proxy_target,
+        hotlink_enabled,
+        hotlink_extensions,
+        hotlink_allowed_domains,
+        hotlink_response,
+        hotlink_allow_empty_referer,
+        created_at: 0, // 由调用方从 site_metadata 数据库设置
+    })
+}
+
+/// 创建带有 Nginx vhost 配置的新站点
+pub async fn create_site(
+    session: &SshSession,
+    _cache: &SshCache,
+    session_id: &str,
+    domain: &str,
+    root: &str,
+    php_version: &str,
+    running_dir: &str,
+    open_basedir: bool,
+    use_ssl: bool,
+    create_db: bool,
+    db_name: &str,
+    db_user: &str,
+    db_pass: &str,
+    app_handle: &AppHandle,
+) -> Result<(String, String), String> {
+    // 检查是否已安装 nginx（同时兼容标准安装和宝塔面板安装）
+    let emit = |line: &str| {
+        let _ = app_handle.emit("site-create-progress", serde_json::json!({
+            "sessionId": session_id,
+            "domain": domain,
+            "line": line,
+            "status": "running",
+        }));
+    };
+    
+    emit(&format!("Starting site creation for {}...", domain));
+    
+    // 检查是否已安装 nginx
+    let nginx_check_cmd = r#"which nginx 2>/dev/null || command -v nginx 2>/dev/null || [ -x /www/server/nginx/sbin/nginx ] && echo 'found' || echo ''"#;
+    emit(&format!("Command: {}", nginx_check_cmd));
+    let (nginx_check_out, nginx_check_err, _nginx_check_code) = crate::ssh::session_exec_with_output(session, nginx_check_cmd, 5)
+        .await?;
+    if !nginx_check_out.trim().is_empty() {
+        emit("STDOUT: Nginx found");
+    }
+    if !nginx_check_err.trim().is_empty() {
+        emit(&format!("STDERR: {}", nginx_check_err.trim()));
+    }
+    if nginx_check_out.trim().is_empty() {
+        return Err("Please install nginx first before creating a site.".to_string());
+    }
+    emit("Nginx detected");
+
+    let safe_domain = domain.replace('\'', "'\\''");
+    let safe_root = root.replace('\'', "'\\''");
+
+    // 检测操作系统、nginx 用户、vhost 布局和 PHP 套接字
+    let detect_cmd = r#"
+# Detect OS
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  echo "FAMILY=$ID_LIKE"
+  echo "ID=$ID"
+fi
+
+# Detect nginx user
+NGINX_USER=$(ps aux | grep -E '^www-data ' 2>/dev/null | head -1)
+if [ -n "$NGINX_USER" ]; then
+  echo "NGINX_USER=www-data"
+else
+  NGINX_USER=$(ps aux | grep -E '^nginx ' 2>/dev/null | head -1)
+  if [ -n "$NGINX_USER" ]; then
+    echo "NGINX_USER=nginx"
+  else
+    # Fallback: check /etc/nginx/nginx.conf
+    echo "NGINX_USER=$(grep -E '^user[[:space:]]+' /etc/nginx/nginx.conf 2>/dev/null | awk '{print $2}' | tr -d ';' || echo 'www-data')"
+  fi
+fi
+
+# Detect vhost layout
+echo "VHOST_DIR=$([ -d /etc/nginx/sites-available ] && echo 'sites-available' || echo 'conf.d')"
+
+# Detect PHP-FPM socket
+if command -v php-fpm &>/dev/null || command -v php-fpm$(php -v 2>/dev/null | head -1 | grep -oP '[\d]+\.[\d]+' | head -1) &>/dev/null; then
+  SOCK=$(ls /run/php/php*-fpm.sock /var/run/php/php*-fpm.sock /run/php-fpm/www.sock /var/run/php-fpm/www.sock 2>/dev/null | head -1)
+  echo "PHP_SOCK=$SOCK"
+fi
+
+# Check if nginx snippets exist
+echo "HAS_FCGI_SNIPPET=$([ -f /etc/nginx/snippets/fastcgi-php.conf ] && echo '1' || echo '0')"
+"#;
+    
+    emit("Detecting system configuration...");
+    emit(&format!("Command: {}", detect_cmd.trim()));
+    let (detect_out, detect_err, _) = crate::ssh::session_exec_with_output(session, detect_cmd, 10)
+        .await?;
+    
+    if !detect_out.trim().is_empty() {
+        emit("STDOUT:");
+        for line in detect_out.lines() {
+            emit(line);
+        }
+    }
+    if !detect_err.trim().is_empty() {
+        emit(&format!("STDERR: {}", detect_err.trim()));
+    }
+
+    let get = |key: &str| -> String {
+        detect_out
+            .lines()
+            .find(|l| l.starts_with(key))
+            .map(|l| l.split('=').nth(1).unwrap_or("").trim().to_string())
+            .unwrap_or_default()
+    };
+
+    let family = get("FAMILY");
+    let os_id = get("ID");
+    let is_debian = family.contains("debian") || os_id == "ubuntu" || os_id == "debian";
+    let nginx_user = get("NGINX_USER");
+    let nginx_user = if nginx_user.is_empty() { if is_debian { "www-data".to_string() } else { "nginx".to_string() } } else { nginx_user };
+    let vhost_dir = get("VHOST_DIR");
+    let uses_sites = vhost_dir == "sites-available";
+    let php_sock = get("PHP_SOCK");
+    let has_fcgi_snippet = get("HAS_FCGI_SNIPPET") == "1";
+
+    let config_path = if uses_sites {
+        format!("/etc/nginx/sites-available/{}", domain)
+    } else {
+        format!("/etc/nginx/conf.d/{}.conf", domain)
+    };
+
+    // 计算实际的 nginx 根目录：web_root + running_dir
+    let running_dir_clean = running_dir.trim().trim_start_matches('/');
+    let effective_root = if running_dir_clean.is_empty() {
+        safe_root.clone()
+    } else {
+        format!("{}/{}", safe_root, running_dir_clean)
+    };
+
+    // 构建 PHP 套接字路径：始终根据请求的版本生成，仅在失败时使用检测到的套接字作为回退
+    let php_sock = if php_version.is_empty() {
+        String::new()
+    } else if is_debian {
+        format!("/run/php/php{}-fpm.sock", php_version)
+    } else {
+        // RHEL/CentOS：使用特定版本的套接字，否则回退到通用套接字
+        let versioned = format!("/run/php-fpm/www-{}.sock", php_version);
+        if !php_sock.is_empty() && php_sock.contains(php_version) {
+            php_sock
+        } else {
+            // ponytail：尝试请求版本对应的常见 RHEL 套接字路径
+            versioned
+        }
+    };
+
+    let has_php = !php_sock.is_empty();
+
+    // 构建 nginx 配置，同时处理 Debian（snippets）和 RHEL/CentOS（内联配置）
+    let open_basedir_line = if open_basedir && has_php {
+        format!("\n        fastcgi_param PHP_ADMIN_VALUE \"open_basedir={}:/tmp/\";", safe_root)
+    } else {
+        String::new()
+    };
+    let fastcgi_block = if has_php {
+        if has_fcgi_snippet {
+            format!(r#"
+    location ~ \.php$ {{
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:{sock};{oba}
+    }}
+"#, sock = php_sock, oba = open_basedir_line)
+        } else {
+            format!(r#"
+    location ~ \.php$ {{
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass unix:{sock};
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $fastcgi_path_info;{oba}
+    }}
+"#, sock = php_sock, oba = open_basedir_line)
+        }
+    } else {
+        String::new()
+    };
+
+    let try_files = if has_php {
+        "try_files $uri $uri/ /index.php?$query_string;"
+    } else {
+        "try_files $uri $uri/ =404;"
+    };
+
+    let nginx_conf = format!(
+        r#"server {{
+    listen 80;
+    listen [::]:80;
+    server_name {domain};
+    root {root};
+    index index.php index.html index.htm;
+
+    location / {{
+        {try_files}
+    }}
+{fastcgi}
+    location ~ /\.ht {{
+        deny all;
+    }}
+
+    access_log /var/log/nginx/{domain}.access.log;
+    error_log /var/log/nginx/{domain}.error.log;
+# __RUNNING_DIR:{running_dir}
+}}
+"#,
+        domain = safe_domain,
+        root = effective_root,
+        fastcgi = fastcgi_block,
+        running_dir = running_dir.trim(),
+        try_files = try_files,
+    );
+
+    // 创建实际的根目录（web_root + running_dir）
+    emit(&format!("Creating web root: {}", root));
+    let mkdir_cmd = format!("mkdir -p '{}'", effective_root);
+    emit(&format!("Command: {}", mkdir_cmd));
+    let (mkdir_out, mkdir_err, _) = crate::ssh::session_exec_with_output(session, &mkdir_cmd, 10)
+        .await?;
+    if !mkdir_out.trim().is_empty() {
+        emit(&format!("STDOUT: {}", mkdir_out.trim()));
+    }
+    if !mkdir_err.trim().is_empty() {
+        emit(&format!("STDERR: {}", mkdir_err.trim()));
+    }
+
+    // 设置所有权
+    emit("Setting file permissions...");
+    let chown_cmd = format!("chown -R {}:'{}' '{}' 2>/dev/null || true", nginx_user, nginx_user, safe_root);
+    emit(&format!("Command: {}", chown_cmd));
+    let (chown_out, chown_err, _) = crate::ssh::session_exec_with_output(session, &chown_cmd, 10)
+        .await?;
+    if !chown_out.trim().is_empty() {
+        emit(&format!("STDOUT: {}", chown_out.trim()));
+    }
+    if !chown_err.trim().is_empty() {
+        emit(&format!("STDERR: {}", chown_err.trim()));
+    }
+
+    // 创建默认欢迎页面
+    if !php_version.is_empty() {
+        let index_content = r#"<?php
+$domain = $_SERVER['HTTP_HOST'] ?? 'your site';
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome - <?= htmlspecialchars($domain) ?></title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a2332 100%);
+            color: #c9d1d9;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            text-align: center;
+            padding: 20px 40px;
+            max-width: 600px;
+        }
+        h1 {
+            font-size: 2.2em;
+            white-space: nowrap;
+            margin-bottom: 12px;
+        }
+        h1.success-title {
+            color: #3fb950;
+        }
+        .subtitle {
+            font-size: 1.1em;
+            color: #8b949e;
+            margin-bottom: 40px;
+        }
+        .info {
+            background: rgba(88, 166, 255, 0.08);
+            border: 1px solid rgba(88, 166, 255, 0.2);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 30px;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: #8b949e; }
+        .info-value { color: #58a6ff; font-weight: 600; }
+        .features {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .features span {
+            background: rgba(35, 134, 54, 0.15);
+            border: 1px solid rgba(35, 134, 54, 0.3);
+            color: #3fb950;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+        .footer {
+            margin-top: 40px;
+            color: #484f58;
+            font-size: 0.85em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="success-title">Congratulations!</h1>
+        <h1>Your website has been created successfully.</h1>
+        <p class="subtitle">OhMyPanel, Your powerful SSH server management companion.</p>
+        <div class="features">
+            <span>&#10003; Secure Connections</span>
+            <span>&#10003; File Management</span>
+            <span>&#10003; Server Control</span>
+        </div>
+        <p class="footer">Powered by OhMyPanel</p>
+    </div>
+</body>
+</html>
+"#;
+        crate::ssh::session_write_file(session,
+                &format!("{}/index.php", root),
+                index_content,
+            )
+            .await?;
+    } else {
+        let index_content = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a2332 100%);
+            color: #c9d1d9;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            text-align: center;
+            padding: 20px 40px;
+            max-width: 600px;
+        }
+        h1 {
+            font-size: 2.2em;
+            white-space: nowrap;
+            margin-bottom: 12px;
+        }
+        h1.success-title {
+            color: #3fb950;
+        }
+        .subtitle {
+            font-size: 1.1em;
+            color: #8b949e;
+            margin-bottom: 40px;
+        }
+        .features {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .features span {
+            background: rgba(35, 134, 54, 0.15);
+            border: 1px solid rgba(35, 134, 54, 0.3);
+            color: #3fb950;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+        .footer {
+            margin-top: 40px;
+            color: #484f58;
+            font-size: 0.85em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="success-title">Congratulations!</h1>
+        <h1>Your website has been created successfully.</h1>
+        <p class="subtitle">OhMyPanel, Your powerful SSH server management companion.</p>
+        <div class="features">
+            <span>&#10003; Secure Connections</span>
+            <span>&#10003; File Management</span>
+            <span>&#10003; Server Control</span>
+        </div>
+        <p class="footer">Powered by OhMyPanel</p>
+    </div>
+</body>
+</html>
+"#;
+        crate::ssh::session_write_file(session,
+                &format!("{}/index.html", root),
+                index_content,
+            )
+            .await?;
+    }
+
+    // 写入 nginx 配置
+    emit("Generating Nginx configuration...");
+    crate::ssh::session_write_file(session, &config_path, &nginx_conf)
+        .await?;
+    emit(&format!("Config written to: {}", config_path));
+
+    // 启用站点（使用 sites-available 时创建符号链接）
+    if uses_sites {
+        emit("Enabling site in Nginx...");
+        let symlink_cmd = format!("ln -sf '{}' '/etc/nginx/sites-enabled/{}'", config_path, safe_domain);
+        emit(&format!("Command: {}", symlink_cmd));
+        let (symlink_out, symlink_err, _) = crate::ssh::session_exec_with_output(session, &symlink_cmd, 5)
+            .await?;
+        if !symlink_out.trim().is_empty() {
+            emit(&format!("STDOUT: {}", symlink_out.trim()));
+        }
+        if !symlink_err.trim().is_empty() {
+            emit(&format!("STDERR: {}", symlink_err.trim()));
+        }
+    }
+
+    // 测试 nginx 配置
+    emit("Testing Nginx configuration...");
+    let test_cmd = "nginx -t 2>&1";
+    emit(&format!("Command: {}", test_cmd));
+    let (test_stdout, test_stderr, test_code) = crate::ssh::session_exec_with_output(session, test_cmd, 10)
+        .await?;
+    // nginx -t 将所有内容输出到 stderr；合并 stdout 和 stderr 以便可靠检查
+    let test_combined = format!("{} {}", test_stdout, test_stderr);
+    if !test_stdout.trim().is_empty() {
+        emit(&format!("STDOUT: {}", test_stdout.trim()));
+    }
+    if !test_stderr.trim().is_empty() {
+        emit(&format!("STDERR: {}", test_stderr.trim()));
+    }
+    let test_ok = test_code == 0 || test_combined.contains("test is successful") || test_combined.contains("syntax is ok");
+    if !test_ok {
+        return Err(format!("Nginx config test failed: {}", test_combined.trim()));
+    }
+
+    // 重新加载 nginx
+    emit("Reloading Nginx...");
+    let reload_cmd = "systemctl reload nginx";
+    emit(&format!("Command: {}", reload_cmd));
+    let (reload_out, reload_err, _) = crate::ssh::session_exec_with_output(session, reload_cmd, 10)
+        .await?;
+    if !reload_out.trim().is_empty() {
+        emit(&format!("STDOUT: {}", reload_out.trim()));
+    }
+    if !reload_err.trim().is_empty() {
+        emit(&format!("STDERR: {}", reload_err.trim()));
+    }
+    emit("Nginx reloaded successfully");
+
+    // 如果用户请求，则创建 MySQL 数据库和用户
+    let mut db_warning = String::new();
+    if create_db && !db_name.is_empty() {
+        emit(&format!("Creating database: {}...", db_name));
+        
+        // 检查服务器上是否安装了 mysql 客户端
+        let (which_out, _, which_code) = crate::ssh::session_exec_with_output(session, "command -v mysql", 5)
+            .await?;
+        if which_code != 0 || which_out.trim().is_empty() {
+            emit("MySQL client is NOT installed on the server");
+            emit("  Install it first: apt install mysql-client (Debian/Ubuntu) or yum install mysql (CentOS/RHEL)");
+            db_warning = " (database not created: mysql client not found on server)".to_string();
+        } else {
+            emit(&format!("MySQL client found: {}", which_out.trim()));
+        }
+        
+        if db_warning.is_empty() {
+            let safe_db = db_name.replace('`', "");
+            let safe_user = db_user.replace('`', "");
+            let safe_pw = db_pass.replace('`', "");
+            let sql = format!(
+                "CREATE DATABASE IF NOT EXISTS `{}`;\n\
+                 CREATE USER IF NOT EXISTS '{}'@'localhost' IDENTIFIED BY '{}';\n\
+                 GRANT ALL PRIVILEGES ON `{}`.* TO '{}'@'localhost';\n\
+                 FLUSH PRIVILEGES;\n",
+                safe_db, safe_user, safe_pw, safe_db, safe_user
+            );
+            
+            // 通过 SFTP 写入 SQL 文件（比使用复杂转义的 echo 更可靠）
+            let tmp_sql = "/tmp/db_setup.sql";
+            emit(&format!("Writing SQL file to {}...", tmp_sql));
+            emit("SQL Content:");
+            for line in sql.lines() {
+                emit(line);
+            }
+            
+            if let Err(e) = crate::ssh::session_write_file(session, tmp_sql, &sql).await {
+                emit(&format!("Failed to write SQL file: {}", e));
+                db_warning = format!(" (database not created: failed to write SQL file: {})", e);
+            } else {
+                emit("SQL file written successfully");
+                
+                // 单独执行 mysql 命令
+                let mysql_cmd = format!("mysql < {}", tmp_sql);
+                emit(&format!("Command: {}", mysql_cmd));
+                
+                let (db_out, db_err, db_code) = crate::ssh::session_exec_with_output(session, &mysql_cmd, 30)
+                    .await?;
+                
+                // 检查数据库是否实际创建（无论退出码如何都进行验证）
+                let verify_cmd = format!("mysql -e 'SHOW DATABASES' 2>&1 | grep -i '{}'", safe_db);
+                let (verify_out, _, _) = crate::ssh::session_exec_with_output(session, &verify_cmd, 10)
+                    .await?;
+                let db_exists = !verify_out.trim().is_empty();
+                
+                if db_code != 0 && !db_exists {
+                    // 真正失败：数据库未创建
+                    let full_output = format!("{} {}", db_out, db_err).trim().to_string();
+                    let error_detail = if full_output.is_empty() {
+                        "unknown error".to_string()
+                    } else {
+                        full_output.clone()
+                    };
+                    db_warning = format!(" (but database creation failed: {})", error_detail.lines().next().unwrap_or("unknown error"));
+                    
+                    emit("Database creation failed!");
+                    emit(&format!("Exit code: {}", db_code));
+                    
+                    if !db_out.trim().is_empty() {
+                        emit("=== STDOUT ===");
+                        for line in db_out.lines() {
+                            emit(line);
+                        }
+                    } else {
+                        emit("STDOUT: (empty)");
+                    }
+                    
+                    if !db_err.trim().is_empty() {
+                        emit("=== STDERR ===");
+                        for line in db_err.lines() {
+                            emit(line);
+                        }
+                    } else {
+                        emit("STDERR: (empty)");
+                    }
+                    
+                    if db_out.trim().is_empty() && db_err.trim().is_empty() {
+                        emit("");
+                        emit(" Troubleshooting hints:");
+                        emit("- Check if MySQL/MariaDB service is running: systemctl status mysql");
+                        emit("- Try connecting manually: mysql -u root -p");
+                        emit("- Check MySQL error log: /var/log/mysql/error.log or journalctl -u mysql");
+                        emit("- Verify MySQL socket exists: ls -la /var/run/mysqld/mysqld.sock");
+                    }
+                } else if db_code != 0 && db_exists {
+                    // 退出码非零但数据库已存在，可能是 SSH 通道问题
+                    emit("Database created successfully (verified)");
+                    emit(&format!("Note: Exit code was {} but database exists", db_code));
+                    if !db_out.trim().is_empty() {
+                        emit("=== Output ===");
+                        for line in db_out.lines() {
+                            emit(line);
+                        }
+                    }
+                } else {
+                    emit("Database created successfully");
+                    if !db_out.trim().is_empty() {
+                        emit("=== Output ===");
+                        for line in db_out.lines() {
+                            emit(line);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 如果用户请求，则使用 certbot 配置 SSL
+    if use_ssl {
+        emit("Setting up SSL certificate...");
+        let ssl_cmd = format!("certbot --nginx -d '{}' --non-interactive --agree-tos --email admin@'{}' 2>&1", safe_domain, safe_domain);
+        emit(&format!("Command: {}", ssl_cmd));
+        let (ssl_out, ssl_err, ssl_code) = crate::ssh::session_exec_with_output(session, &ssl_cmd, 120)
+            .await?;
+        
+        if !ssl_out.trim().is_empty() {
+            emit("=== STDOUT ===");
+            for line in ssl_out.lines() {
+                emit(line);
+            }
+        }
+        if !ssl_err.trim().is_empty() {
+            emit("=== STDERR ===");
+            for line in ssl_err.lines() {
+                emit(line);
+            }
+        }
+        
+        if ssl_code != 0 {
+            emit("SSL setup failed!");
+            return Ok((
+                config_path,
+                format!(
+                    "Site created successfully but SSL setup failed. Check the logs above for details.\nYou can run certbot manually later."
+                ),
+            ));
+        }
+        emit("SSL certificate installed");
+    }
+
+    emit(&format!("Site {} created successfully!", domain));
+    Ok((config_path, format!("Site {} created successfully at {}{}", domain, root, db_warning)))
+}
+
+/// 切换站点的启用或禁用状态
+pub async fn toggle_site(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    config_path: &str,
+    domain: &str,
+    enable: bool,
+) -> Result<String, String> {
+    let safe_domain = domain.replace('\'', "'\\''");
+    let safe_path = config_path.replace('\'', "'\\''");
+
+    // 根据配置所在位置确定要使用的策略
+    if config_path.contains("sites-available") || config_path.contains("sites-enabled") {
+        // sites-enabled/sites-available 风格：管理 sites-enabled 中的符号链接，
+        // 实际配置位于 sites-available（如果没有使用符号链接，则位于 sites-enabled）
+        let link = format!("/etc/nginx/sites-enabled/{}", safe_domain);
+        let available_path = if config_path.contains("sites-available") {
+            // 如果存在 .disabled 后缀则移除，以获取规范路径
+            config_path.trim_end_matches(".disabled").to_string()
+        } else {
+            // 配置直接位于 sites-enabled 中；禁用时将其移动到 sites-available
+            format!("/etc/nginx/sites-available/{}", safe_domain)
+        };
+        let safe_available = available_path.replace('\'', "'\\''");
+
+        if enable {
+            // 确保配置位于 sites-available 中
+            if config_path.contains("sites-enabled") && !config_path.contains("sites-available") {
+                let src = config_path.trim_end_matches(".disabled");
+                let safe_src = src.replace('\'', "'\\''");
+                crate::ssh::session_exec_with_output(session, &format!("mv '{}' '{}'", safe_src, safe_available), 5)
+                    .await?;
+            }
+            // 创建符号链接
+            crate::ssh::session_exec_with_output(session, &format!("ln -sf '{}' '{}'", safe_available, link), 5)
+                .await?;
+        } else {
+            // 从 sites-enabled 中删除符号链接
+            crate::ssh::session_exec_with_output(session, &format!("rm -f '{}'", link), 5)
+                .await?;
+            // 如果配置位于 sites-enabled 中，则将其移动到 sites-available
+            if config_path.contains("sites-enabled") && !config_path.contains("sites-available") {
+                crate::ssh::session_exec_with_output(session, "mkdir -p /etc/nginx/sites-available", 5)
+                    .await?;
+                crate::ssh::session_exec_with_output(session, &format!("mv '{}' '{}'", safe_path, safe_available), 5)
+                    .await?;
+            }
+        }
+    } else {
+        // conf.d 风格：在 .conf 和 .conf.disabled 之间重命名
+        let enabled_path = config_path.trim_end_matches(".disabled").to_string();
+        if enable {
+            crate::ssh::session_exec_with_output(session, &format!("mv '{}' '{}'", safe_path, enabled_path.replace('\'', "'\\''")), 5)
+                .await?;
+        } else {
+            crate::ssh::session_exec_with_output(session, &format!("mv '{}' '{}.disabled'", safe_path, safe_path), 5)
+                .await?;
+        }
+    }
+
+    // 测试并重新加载 nginx
+    let (test_out, test_err, test_code) = crate::ssh::session_exec_with_output(session, "nginx -t 2>&1", 10)
+        .await?;
+    let test_combined = format!("{} {}", test_out, test_err);
+    if test_code != 0 && !test_combined.contains("test is successful") && !test_combined.contains("syntax is ok") {
+        // 恢复更改
+        let link = format!("/etc/nginx/sites-enabled/{}", safe_domain);
+        if config_path.contains("sites-available") || config_path.contains("sites-enabled") {
+            let available_path = if config_path.contains("sites-available") {
+                config_path.trim_end_matches(".disabled").to_string()
+            } else {
+                format!("/etc/nginx/sites-available/{}", safe_domain)
+            };
+            let safe_available = available_path.replace('\'', "'\\''");
+            if enable {
+                let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f '{}'", link), 5).await;
+                if config_path.contains("sites-enabled") && !config_path.contains("sites-available") {
+                    let src = config_path.trim_end_matches(".disabled");
+                    let safe_src = src.replace('\'', "'\\''");
+                    let _ = crate::ssh::session_exec_with_output(session, &format!("mv '{}' '{}'", safe_available, safe_src), 5).await;
+                }
+            } else {
+                if config_path.contains("sites-enabled") && !config_path.contains("sites-available") {
+                    let _ = crate::ssh::session_exec_with_output(session, &format!("mv '{}' '{}'", safe_available, safe_path), 5).await;
+                }
+                let _ = crate::ssh::session_exec_with_output(session, &format!("ln -sf '{}' '{}'", safe_available, link), 5).await;
+            }
+        }
+        return Err(format!("Nginx test failed after toggling site, reverted: {}", test_combined.trim()));
+    }
+
+    crate::ssh::session_exec_with_output(session, "systemctl reload nginx", 10)
+        .await?;
+
+    let action = if enable { "Started" } else { "Stopped" };
+    Ok(format!("{} site {}", action, domain))
+}
+
+/// 优雅重启（重新加载）站点：先执行 nginx -t，再执行 systemctl reload nginx
+#[allow(dead_code)]
+pub async fn restart_site(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    domain: &str,
+) -> Result<String, String> {
+    // 先验证配置
+    let (test_out, test_err, test_code) = crate::ssh::session_exec_with_output(session, "nginx -t 2>&1", 10)
+        .await?;
+    let test_combined = format!("{} {}", test_out, test_err);
+    if test_code != 0 && !test_combined.contains("test is successful") && !test_combined.contains("syntax is ok") {
+        return Err(format!("Nginx config test failed, reload aborted: {}", test_combined.trim()));
+    }
+
+    crate::ssh::session_exec_with_output(session, "systemctl reload nginx", 10)
+        .await?;
+
+    Ok(format!("Restarted site {}", domain))
+}
+
+/// 删除站点
+pub async fn delete_site(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    domain: &str,
+    remove_files: bool,
+) -> Result<String, String> {
+    let safe_domain = domain.replace('\'', "'\\''");
+
+    // 删除符号链接和配置文件
+    crate::ssh::session_exec_with_output(session,
+            &format!(
+                "rm -f '/etc/nginx/sites-enabled/{}' '/etc/nginx/conf.d/{}.conf' 2>/dev/null; rm -f '/etc/nginx/sites-available/{}' 2>/dev/null",
+                safe_domain, safe_domain, safe_domain
+            ),
+            5,
+        )
+        .await?;
+
+    if remove_files {
+        // 查找并删除网站根目录（检查两个常见路径）
+        let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+                &format!(
+                    "for d in /www/wwwroot/{d} /var/www/{d}; do [ -d \"$d\" ] && echo \"$d\" && break; done",
+                    d = safe_domain
+                ),
+                5,
+            )
+            .await?;
+        let web_root = stdout.trim();
+        if !web_root.is_empty() {
+            crate::ssh::session_exec_with_output(session,
+                    &format!("rm -rf '{}'", web_root.replace('\'', "'\\''")),
+                    10,
+                )
+                .await?;
+        }
+    }
+
+    // 重新加载 nginx
+    let (reload_stdout, reload_stderr, reload_code) = crate::ssh::session_exec_with_output(session, "nginx -t 2>&1 && systemctl reload nginx 2>&1", 10)
+        .await?;
+    let reload_combined = format!("{} {}", reload_stdout, reload_stderr);
+    let reload_ok = reload_code == 0
+        || reload_combined.contains("test is successful")
+        || reload_combined.contains("syntax is ok");
+    if !reload_ok {
+        return Err(format!("Nginx reload failed after site deletion: {}", reload_combined.trim()));
+    }
+
+    Ok(format!("Site {} deleted successfully", domain))
+}
+
+/// 在一次调用中更新站点的所有设置（批量更新）
+pub async fn update_site_full(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    old_domain: &str,
+    new_domains: &str,           // 以空格分隔
+    new_root: &str,
+    new_php_version: &str,
+    index_files: &str,           // 以空格分隔
+    rewrite_rules: &str,
+    config_path: &str,
+    running_dir: &str,
+    open_basedir: bool,
+    hotlink_enabled: bool,
+    hotlink_extensions: &str,    // 以逗号分隔
+    hotlink_allowed_domains: &str, // 以换行分隔
+    hotlink_response: &str,
+    hotlink_allow_empty_referer: bool,
+    proxy_enabled: bool,
+    proxy_path: &str,
+    proxy_target: &str,
+    proxy_websocket: bool,
+    proxy_preserve_host: bool,
+) -> Result<String, String> {
+    let primary_domain = new_domains.split_whitespace().next().unwrap_or(old_domain);
+    
+    // 步骤 1：读取现有配置以检查并保留 SSL 设置
+    let (old_conf, _, _) = crate::ssh::session_exec_with_output(session, &format!("cat '{}' 2>/dev/null", config_path.replace('\'', "'\\''")), 5)
+        .await?;
+    let has_ssl = old_conf.contains("ssl_certificate") || old_conf.contains("listen 443");
+    
+    // 步骤 2：在内存中构建完整的 nginx 配置
+    let safe_domains: Vec<String> = new_domains.split_whitespace().map(|d| d.replace('\'', "'\\''")).collect();
+    let server_name = safe_domains.join(" ");
+    let safe_root = new_root.replace('\'', "'\\''");
+    
+    let has_php = !new_php_version.is_empty();
+
+    // ponytail：通过一次 SSH 调用完成操作系统检测、snippet 检查和套接字检测
+    let detect_out = if has_php {
+        crate::ssh::session_exec_with_output(session, r#"
+. /etc/os-release 2>/dev/null
+echo "FAMILY=$ID_LIKE"
+echo "ID=$ID"
+echo "HAS_FCGI_SNIPPET=$([ -f /etc/nginx/snippets/fastcgi-php.conf ] && echo 1 || echo 0)"
+SOCK=$(ls /run/php/php*-fpm.sock /var/run/php/php*-fpm.sock /run/php-fpm/www.sock /var/run/php-fpm/www.sock /run/php-fpm/www-*.sock 2>/dev/null | head -1)
+echo "PHP_SOCK=$SOCK"
+"#, 5).await.map(|(o,_,_)| o).unwrap_or_default()
+    } else { String::new() };
+    let detect_get = |key: &str| -> String {
+        detect_out.lines().find(|l| l.starts_with(key))
+            .map(|l| l.split('=').nth(1).unwrap_or("").trim().to_string())
+            .unwrap_or_default()
+    };
+    let is_debian = detect_get("FAMILY").contains("debian") || detect_get("ID") == "ubuntu" || detect_get("ID") == "debian";
+    let has_fcgi_snippet = detect_get("HAS_FCGI_SNIPPET") == "1";
+    let detected_sock = detect_get("PHP_SOCK");
+
+    let php_sock = if !has_php {
+        String::new()
+    } else if is_debian {
+        format!("/run/php/php{}-fpm.sock", new_php_version)
+    } else if !detected_sock.is_empty() && detected_sock.contains(new_php_version) {
+        detected_sock
+    } else if !detected_sock.is_empty() {
+        detected_sock
+    } else {
+        format!("/run/php-fpm/www-{}.sock", new_php_version)
+    };
+
+    let index_directive = if index_files.trim().is_empty() {
+        "index.php index.html index.htm".to_string()
+    } else {
+        index_files.trim().to_string()
+    };
+
+    // 计算实际的 nginx 根目录：web_root + running_dir
+    let running_dir_clean = running_dir.trim().trim_start_matches('/');
+    let effective_root = if running_dir_clean.is_empty() {
+        safe_root.clone()
+    } else {
+        format!("{}/{}", safe_root, running_dir_clean)
+    };
+
+    let open_basedir_line = if open_basedir && has_php {
+        format!("\n        fastcgi_param PHP_ADMIN_VALUE \"open_basedir={}:/tmp/\";", safe_root)
+    } else {
+        String::new()
+    };
+
+    // 构建 PHP location 代码块
+    let php_location = if has_php {
+        if has_fcgi_snippet {
+            format!(r#"
+    location ~ \.php$ {{
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:{php_sock};
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;{oba}
+    }}
+"#, php_sock = php_sock, oba = open_basedir_line)
+        } else {
+            format!(r#"
+    location ~ \.php$ {{
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass unix:{php_sock};
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $fastcgi_path_info;{oba}
+    }}
+"#, php_sock = php_sock, oba = open_basedir_line)
+        }
+    } else {
+        String::new()
+    };
+    
+    let try_files = if has_php {
+        "try_files $uri $uri/ /index.php?$query_string;"
+    } else {
+        "try_files $uri $uri/ =404;"
+    };
+    
+    // 构建基础配置
+    let mut nginx_conf = format!(
+        r#"server {{
+    listen 80;
+    listen [::]:80;
+    server_name {server_name};
+    root {root};
+    index {index_directive};
+
+{location_root}{rewrite_section}{php_location}
+    location ~ /\.ht {{
+        deny all;
+    }}
+
+    access_log /var/log/nginx/{domain}.access.log;
+    error_log /var/log/nginx/{domain}.error.log;
+# __RUNNING_DIR:{running_dir}
+"#,
+        server_name = server_name,
+        root = effective_root,
+        index_directive = index_directive,
+        domain = safe_domains.first().map(|s| s.as_str()).unwrap_or(primary_domain),
+        running_dir = running_dir.trim(),
+        location_root = if proxy_enabled && proxy_path.trim() == "/" {
+            // 反向代理覆盖根路径时，跳过默认的 location / 代码块以避免重复
+            String::new()
+        } else {
+            format!(
+                r#"    location / {{
+        {}
+    }}
+
+"#,
+                try_files
+            )
+        },
+        php_location = php_location,
+        rewrite_section = if rewrite_rules.trim().is_empty() {
+            String::new()
+        } else {
+            let trimmed = rewrite_rules.trim();
+            // 检查用户输入是否包含完整的 location 代码块（例如 "location / { ... }"）
+            // 如果包含，则提取内部内容以避免重复的 location 代码块
+            if trimmed.starts_with("location ") && trimmed.contains('{') && trimmed.contains('}') {
+                // 提取第一个 '{' 与最后一个 '}' 之间的内容
+                if let Some(start) = trimmed.find('{') {
+                    if let Some(end) = trimmed.rfind('}') {
+                        let inner = trimmed[start+1..end].trim();
+                        // 格式化为带缩进的指令，不包含 location 包装器
+                        format!("    # Rewrite rules\n    {}\n\n", inner.replace('\n', "\n    "))
+                    } else {
+                        format!("    # Rewrite rules\n    {}\n\n", trimmed.replace('\n', "\n    "))
+                    }
+                } else {
+                    format!("    # Rewrite rules\n    {}\n\n", trimmed.replace('\n', "\n    "))
+                }
+            } else {
+                // 用户只提供了指令，按原样添加缩进后插入
+                format!("    # Rewrite rules\n    {}\n\n", trimmed.replace('\n', "\n    "))
+            }
+        },
+    );
+    
+    // 如果原配置存在 SSL 代码块，则保留它
+    if has_ssl {
+        let ssl_lines: Vec<&str> = old_conf.lines()
+            .filter(|l| l.contains("ssl_") || l.contains("listen 443") || l.contains("listen [::]:443"))
+            .collect();
+        if !ssl_lines.is_empty() {
+            nginx_conf.push_str("\n    # SSL Configuration (preserved)\n");
+            for line in ssl_lines {
+                nginx_conf.push_str("    ");
+                nginx_conf.push_str(line.trim());
+                nginx_conf.push('\n');
+            }
+        }
+    }
+    
+    // 添加防盗链代码块
+    if hotlink_enabled {
+        let ext_list: Vec<&str> = hotlink_extensions.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let ext_regex = if ext_list.is_empty() {
+            "(jpg|jpeg|gif|png|js|css)".to_string()
+        } else {
+            format!("({})", ext_list.join("|"))
+        };
+        
+        let mut referers = Vec::new();
+        if hotlink_allow_empty_referer {
+            referers.push("none".to_string());
+        }
+        referers.push("blocked".to_string());
+        referers.push("server_names".to_string());
+        for d in hotlink_allowed_domains.lines() {
+            let d = d.trim();
+            if !d.is_empty() {
+                if d.starts_with("*.") {
+                    referers.push(d.to_string());
+                } else {
+                    referers.push(format!("*.{}", d));
+                }
+            }
+        }
+        let valid_referers = referers.join(" ");
+        
+        let return_directive = if hotlink_response.trim().parse::<u16>().is_ok() {
+            format!("return {}", hotlink_response.trim())
+        } else {
+            format!("rewrite ^ {} last", hotlink_response.trim())
+        };
+        
+        nginx_conf.push_str(&format!(r#"
+    # Hotlink Protection Start
+    location ~* \.{}$ {{
+        valid_referers {};
+        if ($invalid_referer) {{
+            {};
+        }}
+    }}
+    # Hotlink Protection End
+"#, ext_regex, valid_referers, return_directive));
+    }
+    
+    // 添加反向代理代码块
+    if proxy_enabled {
+        let proxy_path_clean = if proxy_path.starts_with('/') {
+            proxy_path.to_string()
+        } else {
+            format!("/{}", proxy_path)
+        };
+        let proxy_target_clean = proxy_target.trim().split_whitespace().next().unwrap_or(proxy_target);
+        
+        let mut headers = vec![
+            "proxy_set_header Host $host;".to_string(),
+            "proxy_set_header X-Real-IP $remote_addr;".to_string(),
+            "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;".to_string(),
+            "proxy_set_header X-Forwarded-Proto $scheme;".to_string(),
+        ];
+        
+        if !proxy_preserve_host {
+            headers[0] = format!("proxy_set_header Host {};", proxy_target_clean.replace("http://", "").replace("https://", "").trim_end_matches('/'));
+        }
+        
+        if proxy_websocket {
+            headers.push("proxy_http_version 1.1;".to_string());
+            headers.push("proxy_set_header Upgrade $http_upgrade;".to_string());
+            headers.push("proxy_set_header Connection upgrade;".to_string());
+        }
+        
+        nginx_conf.push_str(&format!(r#"
+    # Reverse Proxy Start
+    location {} {{
+        proxy_pass {};
+{}
+    }}
+    # Reverse Proxy End
+"#, proxy_path_clean, proxy_target_clean, headers.iter().map(|h| format!("        {}", h)).collect::<Vec<_>>().join("\n")));
+    }
+    
+    nginx_conf.push_str("}\n");
+    
+    // 步骤 3：如果主域名发生变化，确定新的配置路径
+    let domain_changed = old_domain != primary_domain;
+    let new_config_path = if domain_changed {
+        if config_path.contains("sites-available") {
+            format!("/etc/nginx/sites-available/{}", primary_domain)
+        } else if config_path.contains("conf.d") {
+            format!("/etc/nginx/conf.d/{}.conf", primary_domain)
+        } else {
+            config_path.to_string()
+        }
+    } else {
+        config_path.to_string()
+    };
+    
+    // 步骤 4：创建实际的根目录
+    crate::ssh::session_exec_with_output(session,
+            &format!("mkdir -p '{}' && chown -R www-data:www-data '{}' 2>/dev/null || true", effective_root, effective_root),
+            10,
+        )
+        .await?;
+    
+    // 步骤 5：一次性写入完整配置
+    crate::ssh::session_write_file(session, &new_config_path, &nginx_conf)
+        .await?;
+    
+    // 步骤 6：处理域名变更：创建符号链接并清理
+    if domain_changed {
+        let safe_old_domain = old_domain.replace('\'', "'\\''");
+        if new_config_path.contains("sites-available") {
+            crate::ssh::session_exec_with_output(session,
+                    &format!(
+                        "rm -f '/etc/nginx/sites-enabled/{}'; ln -sf '{}' '/etc/nginx/sites-enabled/{}'",
+                        safe_old_domain, new_config_path, safe_domains.first().map(|s| s.as_str()).unwrap_or(primary_domain)
+                    ),
+                    5,
+                )
+                .await?;
+        }
+        if new_config_path != config_path {
+            crate::ssh::session_exec_with_output(session,
+                    &format!("rm -f '{}'", config_path.replace('\'', "'\\''")),
+                    5,
+                )
+                .await?;
+        }
+    }
+    
+    // 步骤 7：测试并重新加载 nginx
+    test_and_reload_nginx(session, cache, session_id).await?;
+    
+    Ok(format!("Site {} updated successfully", primary_domain))
+}
+
+/// 更新现有站点的配置
+pub async fn update_site(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    old_domain: &str,
+    new_domains: &str,
+    new_root: &str,
+    new_php_version: &str,
+    index_files: &str,
+    rewrite_rules: &str,
+    config_path: &str,
+    running_dir: &str,
+    open_basedir: bool,
+) -> Result<String, String> {
+    // new_domains 是以空格分隔的列表；第一个域名是主域名
+    let primary_domain = new_domains.split_whitespace().next().unwrap_or(old_domain);
+    let safe_domains: Vec<String> = new_domains.split_whitespace().map(|d| d.replace('\'', "'\\''")).collect();
+    let server_name = safe_domains.join(" ");
+    let safe_root = new_root.replace('\'', "'\\''");
+
+    let has_php = !new_php_version.is_empty();
+
+    // ponytail：通过一次 SSH 调用完成操作系统检测、snippet 检查和套接字检测
+    let detect_out = if has_php {
+        crate::ssh::session_exec_with_output(session, r#"
+. /etc/os-release 2>/dev/null
+echo "FAMILY=$ID_LIKE"
+echo "ID=$ID"
+echo "HAS_FCGI_SNIPPET=$([ -f /etc/nginx/snippets/fastcgi-php.conf ] && echo 1 || echo 0)"
+SOCK=$(ls /run/php/php*-fpm.sock /var/run/php/php*-fpm.sock /run/php-fpm/www.sock /var/run/php-fpm/www.sock /run/php-fpm/www-*.sock 2>/dev/null | head -1)
+echo "PHP_SOCK=$SOCK"
+"#, 5).await.map(|(o,_,_)| o).unwrap_or_default()
+    } else { String::new() };
+    let detect_get = |key: &str| -> String {
+        detect_out.lines().find(|l| l.starts_with(key))
+            .map(|l| l.split('=').nth(1).unwrap_or("").trim().to_string())
+            .unwrap_or_default()
+    };
+    let is_debian = detect_get("FAMILY").contains("debian") || detect_get("ID") == "ubuntu" || detect_get("ID") == "debian";
+    let has_fcgi_snippet = detect_get("HAS_FCGI_SNIPPET") == "1";
+    let detected_sock = detect_get("PHP_SOCK");
+
+    let php_sock = if !has_php {
+        String::new()
+    } else if is_debian {
+        format!("/run/php/php{}-fpm.sock", new_php_version)
+    } else if !detected_sock.is_empty() && detected_sock.contains(new_php_version) {
+        detected_sock
+    } else if !detected_sock.is_empty() {
+        detected_sock
+    } else {
+        format!("/run/php-fpm/www-{}.sock", new_php_version)
+    };
+
+    // 读取旧配置以检查 SSL 设置
+    let (old_conf, _, _) = crate::ssh::session_exec_with_output(session, &format!("cat '{}' 2>/dev/null", config_path.replace('\'', "'\\''")), 5)
+        .await?;
+    let has_ssl = old_conf.contains("ssl_certificate") || old_conf.contains("listen 443");
+
+    let index_directive = if index_files.trim().is_empty() {
+        "index.php index.html index.htm".to_string()
+    } else {
+        index_files.trim().to_string()
+    };
+
+    // 计算实际的 nginx 根目录：web_root + running_dir
+    let running_dir_clean = running_dir.trim().trim_start_matches('/');
+    let effective_root = if running_dir_clean.is_empty() {
+        safe_root.clone()
+    } else {
+        format!("{}/{}", safe_root, running_dir_clean)
+    };
+
+    let open_basedir_line = if open_basedir && has_php {
+        format!("\n        fastcgi_param PHP_ADMIN_VALUE \"open_basedir={}:/tmp/\";", safe_root)
+    } else {
+        String::new()
+    };
+
+    // 构建 PHP location 代码块（仅在选择 PHP 版本时）
+    let php_location = if has_php {
+        if has_fcgi_snippet {
+            format!(r#"
+    location ~ \.php$ {{
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:{php_sock};
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;{oba}
+    }}
+"#, php_sock = php_sock, oba = open_basedir_line)
+        } else {
+            format!(r#"
+    location ~ \.php$ {{
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass unix:{php_sock};
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $fastcgi_path_info;{oba}
+    }}
+"#, php_sock = php_sock, oba = open_basedir_line)
+        }
+    } else {
+        String::new()
+    };
+
+    let try_files = if has_php {
+        "try_files $uri $uri/ /index.php?$query_string;"
+    } else {
+        "try_files $uri $uri/ =404;"
+    };
+
+    let mut nginx_conf = format!(
+        r#"server {{
+    listen 80;
+    listen [::]:80;
+    server_name {server_name};
+    root {root};
+    index {index_directive};
+
+    location / {{
+        {try_files}
+    }}
+
+{rewrite_section}{php_location}
+    location ~ /\.ht {{
+        deny all;
+    }}
+
+    access_log /var/log/nginx/{domain}.access.log;
+    error_log /var/log/nginx/{domain}.error.log;
+# __RUNNING_DIR:{running_dir}
+"#,
+        server_name = server_name,
+        root = effective_root,
+        index_directive = index_directive,
+        domain = safe_domains.first().map(|s| s.as_str()).unwrap_or(primary_domain),
+        running_dir = running_dir.trim(),
+        try_files = try_files,
+        php_location = php_location,
+        rewrite_section = if rewrite_rules.trim().is_empty() {
+            String::new()
+        } else {
+            let trimmed = rewrite_rules.trim();
+            // 检查用户输入是否包含完整的 location 代码块（例如 "location / { ... }"）
+            // 如果包含，则提取内部内容以避免重复的 location 代码块
+            if trimmed.starts_with("location ") && trimmed.contains('{') && trimmed.contains('}') {
+                // 提取第一个 '{' 与最后一个 '}' 之间的内容
+                if let Some(start) = trimmed.find('{') {
+                    if let Some(end) = trimmed.rfind('}') {
+                        let inner = trimmed[start+1..end].trim();
+                        // 格式化为带缩进的指令，不包含 location 包装器
+                        format!("    # Rewrite rules\n    {}\n\n", inner.replace('\n', "\n    "))
+                    } else {
+                        format!("    # Rewrite rules\n    {}\n\n", trimmed.replace('\n', "\n    "))
+                    }
+                } else {
+                    format!("    # Rewrite rules\n    {}\n\n", trimmed.replace('\n', "\n    "))
+                }
+            } else {
+                // 用户只提供了指令，按原样添加缩进后插入
+                format!("    # Rewrite rules\n    {}\n\n", trimmed.replace('\n', "\n    "))
+            }
+        },
+    );
+
+    // 如果原配置存在 SSL 代码块，则保留它
+    if has_ssl {
+        let ssl_lines: Vec<&str> = old_conf.lines()
+            .filter(|l| l.contains("ssl_") || l.contains("listen 443") || l.contains("listen [::]:443"))
+            .collect();
+        if !ssl_lines.is_empty() {
+            nginx_conf.push_str("\n    # SSL Configuration (preserved)\n");
+            for line in ssl_lines {
+                nginx_conf.push_str("    ");
+                nginx_conf.push_str(line.trim());
+                nginx_conf.push('\n');
+            }
+        }
+    }
+    nginx_conf.push_str("}\n");
+
+    // 如果主域名发生变化，确定新的配置路径
+    let domain_changed = old_domain != primary_domain;
+    let new_config_path = if domain_changed {
+        if config_path.contains("sites-available") {
+            format!("/etc/nginx/sites-available/{}", primary_domain)
+        } else if config_path.contains("conf.d") {
+            format!("/etc/nginx/conf.d/{}.conf", primary_domain)
+        } else {
+            config_path.to_string()
+        }
+    } else {
+        config_path.to_string()
+    };
+
+    // 创建实际的根目录（web_root + running_dir）
+    crate::ssh::session_exec_with_output(session,
+            &format!("mkdir -p '{}' && chown -R www-data:www-data '{}' 2>/dev/null || true", effective_root, effective_root),
+            10,
+        )
+        .await?;
+
+    // 写入配置
+    crate::ssh::session_write_file(session, &new_config_path, &nginx_conf)
+        .await?;
+
+    // 处理域名变更：创建符号链接并清理
+    if domain_changed {
+        let safe_old_domain = old_domain.replace('\'', "'\\''");
+        if new_config_path.contains("sites-available") {
+            crate::ssh::session_exec_with_output(session,
+                    &format!(
+                        "rm -f '/etc/nginx/sites-enabled/{}'; ln -sf '{}' '/etc/nginx/sites-enabled/{}'",
+                        safe_old_domain, new_config_path, safe_domains.first().map(|s| s.as_str()).unwrap_or(primary_domain)
+                    ),
+                    5,
+                )
+                .await?;
+        }
+        if new_config_path != config_path {
+            crate::ssh::session_exec_with_output(session,
+                    &format!("rm -f '{}'", config_path.replace('\'', "'\\''")),
+                    5,
+                )
+                .await?;
+        }
+    }
+
+    // 测试并重新加载 nginx
+    test_and_reload_nginx(session, cache, session_id).await?;
+
+    Ok(format!("Site {} updated successfully", primary_domain))
+}
+
+/// 保存站点的原始 nginx 配置，测试并重新加载
+pub async fn save_site_config(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    config_path: &str,
+    config_content: &str,
+) -> Result<String, String> {
+    crate::ssh::session_write_file(session, config_path, config_content)
+        .await?;
+    test_and_reload_nginx(session, cache, session_id).await?;
+    Ok("Config saved and nginx reloaded".to_string())
+}
+
+/// 设置站点的防盗链
+pub async fn set_hotlink_protection(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    config_path: &str,
+    enabled: bool,
+    extensions: &str,
+    allowed_domains: &str,
+    response_code: &str,
+    allow_empty_referer: bool,
+) -> Result<String, String> {
+    // 读取当前配置
+    let (config, _, _) = crate::ssh::session_exec_with_output(session, &format!("cat '{}'", config_path.replace('\'', "'\\''")), 5)
+        .await?;
+
+    // 删除现有的防盗链代码块（位于标记之间）
+    let mut lines: Vec<String> = config.lines().map(|l| l.to_string()).collect();
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].contains("# Hotlink Protection Start") {
+            let start = i;
+            while i < lines.len() && !lines[i].contains("# Hotlink Protection End") {
+                i += 1;
+            }
+            if i < lines.len() { i += 1; } // 跳过 End 标记
+            lines.drain(start..i);
+            break;
+        }
+        i += 1;
+    }
+
+    if enabled {
+        // 构建扩展名正则：jpg,jpeg,png -> (jpg|jpeg|png)
+        let ext_list: Vec<&str> = extensions.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let ext_regex = if ext_list.is_empty() {
+            "(jpg|jpeg|gif|png|js|css)".to_string()
+        } else {
+            format!("({})", ext_list.join("|"))
+        };
+
+        // 构建 valid_referers
+        let mut referers = Vec::new();
+        if allow_empty_referer {
+            referers.push("none".to_string());
+        }
+        referers.push("blocked".to_string());
+        referers.push("server_names".to_string());
+        for d in allowed_domains.lines() {
+            let d = d.trim();
+            if !d.is_empty() {
+                // 只添加通配符版本（*.domain），同时覆盖子域名和主域名
+                // 避免同时添加 *.domain 和 domain，以防 Nginx 报告“参数冲突”错误
+                if d.starts_with("*.") {
+                    referers.push(d.to_string());
+                } else {
+                    referers.push(format!("*.{}", d));
+                }
+            }
+        }
+        let valid_referers = referers.join(" ");
+
+        // 响应：403、404 或路径
+        let return_directive = if response_code.trim().parse::<u16>().is_ok() {
+            format!("return {}", response_code.trim())
+        } else {
+            format!("return 403 \"{}\" ", response_code.trim())
+        };
+
+        let hotlink_block = format!(
+r#"    # Hotlink Protection Start
+    location ~* \.{ext}$ {{
+        valid_referers {referers};
+        if ($invalid_referer) {{
+            {ret};
+        }}
+    }}
+    # Hotlink Protection End"#,
+            ext = ext_regex,
+            referers = valid_referers,
+            ret = return_directive,
+        );
+
+        // 插入到最后一个右大括号之前
+        // 查找配置中的最后一个 `}`
+        let mut insert_idx = lines.len();
+        for j in (0..lines.len()).rev() {
+            if lines[j].trim() == "}" {
+                insert_idx = j;
+                break;
+            }
+        }
+        lines.insert(insert_idx, hotlink_block);
+    }
+
+    let new_config = lines.join("\n");
+    crate::ssh::session_write_file(session, config_path, &new_config).await?;
+    test_and_reload_nginx(session, cache, session_id).await?;
+
+    Ok(if enabled { "Hotlink protection enabled".to_string() } else { "Hotlink protection disabled".to_string() })
+}
+
+/// 设置或移除站点的反向代理配置
+pub async fn set_reverse_proxy(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    config_path: &str,
+    enabled: bool,
+    proxy_path: &str,
+    proxy_target: &str,
+    websocket: bool,
+    preserve_host: bool,
+) -> Result<String, String> {
+    // 在执行任何操作之前，清理其他站点中损坏的代理代码块
+    cleanup_all_proxy_blocks(session, cache, session_id, config_path).await;
+
+    // 读取当前配置
+    let (config, _, _) = crate::ssh::session_exec_with_output(session, &format!("cat '{}'", config_path.replace('\'', "'\\''" )), 5)
+        .await?;
+
+    // 删除现有的反向代理代码块（位于标记之间）
+    let mut lines: Vec<String> = config.lines().map(|l| l.to_string()).collect();
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].contains("# Reverse Proxy Start") {
+            let start = i;
+            while i < lines.len() && !lines[i].contains("# Reverse Proxy End") {
+                i += 1;
+            }
+            if i < lines.len() { i += 1; } // 跳过 End 标记
+            lines.drain(start..i);
+            break;
+        }
+        i += 1;
+    }
+
+    if enabled {
+        // 验证 proxy_target：移除空白并确保它是有效的纯净 URL
+        let proxy_target_clean = proxy_target.trim().split_whitespace().next().unwrap_or(proxy_target);
+
+        let proxy_path_clean = if proxy_path.starts_with('/') {
+            proxy_path.to_string()
+        } else {
+            format!("/{}", proxy_path)
+        };
+
+        let mut headers = vec![
+            "proxy_set_header Host $host;".to_string(),
+            "proxy_set_header X-Real-IP $remote_addr;".to_string(),
+            "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;".to_string(),
+            "proxy_set_header X-Forwarded-Proto $scheme;".to_string(),
+        ];
+
+        if !preserve_host {
+            headers[0] = format!("proxy_set_header Host {};", proxy_target_clean.replace("http://", "").replace("https://", "").trim_end_matches('/'));
+        }
+
+        if websocket {
+            headers.push("proxy_http_version 1.1;".to_string());
+            headers.push("proxy_set_header Upgrade $http_upgrade;".to_string());
+            headers.push("proxy_set_header Connection upgrade;".to_string());
+        }
+
+        let proxy_block = format!(
+"    # Reverse Proxy Start
+    location {} {{
+        proxy_pass {};
+{}
+        proxy_connect_timeout 60s;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 60s;
+    }}
+    # Reverse Proxy End",
+            proxy_path_clean,
+            proxy_target_clean,
+            headers.iter().map(|h| format!("        {}", h)).collect::<Vec<_>>().join("\n"),
+        );
+
+        // 删除与代理路径冲突的现有 location 代码块
+        // 例如，为 / 添加代理时删除 `location / { try_files ... }`
+        let loc_pattern = format!("location {}", proxy_path_clean);
+        let mut j = 0;
+        while j < lines.len() {
+            let trimmed = lines[j].trim();
+            if trimmed.starts_with(&loc_pattern) && (trimmed.ends_with('{') || trimmed == &loc_pattern) {
+                let block_start = j;
+                // 查找匹配的右大括号（跟踪嵌套层级）
+                let mut depth: isize = 0;
+                while j < lines.len() {
+                    if lines[j].contains('{') { depth += lines[j].matches('{').count() as isize; }
+                    if lines[j].contains('}') { depth -= lines[j].matches('}').count() as isize; }
+                    j += 1;
+                    if depth <= 0 { break; }
+                }
+                lines.drain(block_start..j);
+                break;
+            }
+            j += 1;
+        }
+
+        // 插入到最后一个右大括号之前
+        let mut insert_idx = lines.len();
+        for j in (0..lines.len()).rev() {
+            if lines[j].trim() == "}" {
+                insert_idx = j;
+                break;
+            }
+        }
+        lines.insert(insert_idx, proxy_block);
+    }
+
+    let new_config = lines.join("\n");
+    crate::ssh::session_write_file(session, config_path, &new_config).await?;
+    test_and_reload_nginx(session, cache, session_id).await?;
+
+    Ok(if enabled { "Reverse proxy enabled".to_string() } else { "Reverse proxy disabled".to_string() })
+}
+
+/// 从 /etc/nginx/sites-enabled/ 中所有站点配置删除全部反向代理 location 代码块
+/// 同时处理带标记的代码块（包含 # Reverse Proxy Start/End）以及无标记或孤立的代理 location
+async fn cleanup_all_proxy_blocks(session: &SshSession, _cache: &SshCache, _session_id: &str, skip_path: &str) {
+    let (files_out, _, _) = match crate::ssh::session_exec_with_output(session, "ls -1 /etc/nginx/sites-enabled/ 2>/dev/null", 5)
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+
+    for fname in files_out.split_whitespace() {
+        let fpath = format!("/etc/nginx/sites-enabled/{}", fname);
+        // 跳过当前正在修改的配置（按完整路径或文件名匹配）
+        let skip_fname = skip_path.rsplit('/').next().unwrap_or("");
+        if fpath == skip_path || fname == skip_fname
+            || fpath.replace("sites-enabled", "sites-available") == skip_path
+            || fpath.replace("sites-available", "sites-enabled") == skip_path
+        { continue; }
+
+        let (content, _, _) = match crate::ssh::session_exec_with_output(session, &format!("cat '{}'", fpath), 5)
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        if !content.contains("proxy_pass") {
+            continue;
+        }
+
+        let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        let mut changed = false;
+        let mut i = 0;
+        while i < lines.len() {
+            let trimmed = lines[i].trim();
+            // 删除带标记的代理代码块
+            if trimmed.contains("# Reverse Proxy Start") {
+                let start = i;
+                while i < lines.len() && !lines[i].contains("# Reverse Proxy End") {
+                    i += 1;
+                }
+                if i < lines.len() { i += 1; }
+                lines.drain(start..i);
+                changed = true;
+                continue;
+            }
+            // 删除包含 proxy_pass 的无标记 location 代码块
+            if trimmed.starts_with("location") && trimmed.ends_with('{') {
+                let block_start = i;
+                let mut depth: isize = 0;
+                let mut has_proxy_pass = false;
+                let mut j = i;
+                while j < lines.len() {
+                    if lines[j].contains('{') { depth += lines[j].matches('{').count() as isize; }
+                    if lines[j].contains('}') { depth -= lines[j].matches('}').count() as isize; }
+                    if lines[j].contains("proxy_pass") { has_proxy_pass = true; }
+                    j += 1;
+                    if depth <= 0 { break; }
+                }
+                if has_proxy_pass {
+                    lines.drain(block_start..j);
+                    changed = true;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+
+        if changed {
+            let cleaned = lines.join("\n");
+            let _ = crate::ssh::session_write_file(session, &fpath, &cleaned).await;
+        }
+    }
+}
+
+/// 辅助函数：测试 nginx 配置并重新加载
+async fn test_and_reload_nginx(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<(), String> {
+    // 先测试配置
+    let (test_stdout, test_stderr, test_code) = crate::ssh::session_exec_with_output(session, "nginx -t 2>&1", 10)
+        .await?;
+    let test_combined = format!("{} {}", test_stdout, test_stderr).trim().to_string();
+    if test_code != 0 && !test_combined.contains("test is successful") && !test_combined.contains("syntax is ok") {
+        return Err(format!("Nginx config test failed: {}", test_combined));
+    }
+
+    // 首先尝试使用 systemctl reload
+    let (sys_stdout, sys_stderr, sys_code) = crate::ssh::session_exec_with_output(session, "systemctl reload nginx 2>&1", 10)
+        .await?;
+    let sys_combined = format!("{} {}", sys_stdout, sys_stderr).trim().to_string();
+    if sys_code == 0 || sys_combined.is_empty() {
+        return Ok(()); // 成功或静默成功
+    }
+
+    // 回退：尝试使用 nginx -s reload
+    let (ns_stdout, ns_stderr, ns_code) = crate::ssh::session_exec_with_output(session, "nginx -s reload 2>&1", 10)
+        .await?;
+    let ns_combined = format!("{} {}", ns_stdout, ns_stderr).trim().to_string();
+    if ns_code == 0 || ns_combined.is_empty() {
+        return Ok(());
+    }
+
+    // 两者都失败：检查 Nginx 错误日志以获取真实原因
+    let (log_out, _, _) = crate::ssh::session_exec_with_output(session, "tail -5 /var/log/nginx/error.log 2>/dev/null || journalctl -u nginx --no-pager -n 5 2>/dev/null || echo 'No error log accessible'", 5)
+        .await?;
+    let log_info = log_out.trim();
+
+    Err(format!("Nginx reload failed. systemctl output: '{}', nginx -s output: '{}'. Recent errors: {}",
+        sys_combined, ns_combined, log_info))
+}
+
+/// 使用 certbot 为站点配置 SSL 证书（通过事件流式传输输出）
+pub async fn setup_ssl(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    domain: &str,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    let safe_domain = domain.replace('\'', "'\\''");
+
+    let emit = |line: &str, status: &str| {
+        let _ = app_handle.emit("ssl-install-progress", serde_json::json!({
+            "sessionId": session_id,
+            "domain": domain,
+            "line": line,
+            "status": status,
+        }));
+    };
+
+    // 检查是否安装了 certbot 和 Nginx 插件
+    emit("Checking certbot...", "installing");
+    let (certbot_out, _, certbot_code) = crate::ssh::session_exec_with_output(session, "command -v certbot 2>/dev/null", 5)
+        .await?;
+    let certbot_installed = certbot_code == 0 && !certbot_out.trim().is_empty();
+
+    // 检查 Nginx 插件：certbot plugins 2>/dev/null | grep -q nginx
+    let (plugin_out, _, plugin_code) = crate::ssh::session_exec_with_output(session, "certbot plugins 2>/dev/null | grep -q nginx && echo OK", 10)
+        .await?;
+    let nginx_plugin_installed = plugin_code == 0 && plugin_out.contains("OK");
+
+    if !certbot_installed || !nginx_plugin_installed {
+        if !certbot_installed {
+            emit("Installing certbot...", "installing");
+        } else {
+            emit("Installing certbot-nginx plugin...", "installing");
+        }
+        let os = detect_os(session, cache, session_id).await?;
+        let install_cmd = if os.family == "debian" {
+            "apt-get install -y certbot python3-certbot-nginx"
+        } else {
+            "yum install -y --nogpgcheck --assumeyes certbot python3-certbot-nginx || dnf install -y --nogpgcheck --assumeyes certbot python3-certbot-nginx"
+        };
+        // 流式传输 certbot 安装输出
+        let mut install_channel = crate::ssh::session_open_channel(session).await?;
+        install_channel.exec(true, install_cmd).await
+            .map_err(|e| format!("Failed to install certbot: {}", e))?;
+        let install_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(180);
+        loop {
+            tokio::select! {
+                msg = install_channel.wait() => {
+                    match msg {
+                        Some(russh::ChannelMsg::Data { data }) | Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
+                            let text = String::from_utf8_lossy(&data);
+                            for line in text.lines() {
+                                if !line.trim().is_empty() { emit(line, "installing"); }
+                            }
+                        }
+                        Some(russh::ChannelMsg::ExitStatus { .. }) | Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => break,
+                        _ => {}
+                    }
+                }
+                _ = tokio::time::sleep_until(install_deadline) => {
+                    return Err("Certbot installation timed out".to_string());
+                }
+            }
+        }
+
+        // ponytail：如果包管理器未能提供 Nginx 插件，则回退尝试使用 pip
+        let (pip_check, _, pip_code) = crate::ssh::session_exec_with_output(session, "certbot plugins 2>/dev/null | grep -q nginx && echo OK", 10)
+            .await?;
+        if pip_code != 0 || !pip_check.contains("OK") {
+            emit("Package install didn't provide nginx plugin, trying pip...", "installing");
+            let pip_cmd = "pip3 install certbot-nginx 2>&1 || pip install certbot-nginx 2>&1";
+            let (pip_out, _, _) = crate::ssh::session_exec_with_output(session, pip_cmd, 120)
+                .await?;
+            for line in pip_out.lines() {
+                if !line.trim().is_empty() { emit(line, "installing"); }
+            }
+        }
+    }
+
+    // 检测宝塔面板的 nginx 路径：certbot 默认需要 /etc/nginx/nginx.conf
+    // 宝塔面板将配置存储在 /www/server/nginx/conf/nginx.conf
+    let (nginx_root_check, _, _) = crate::ssh::session_exec_with_output(session,
+            "if [ ! -f /etc/nginx/nginx.conf ] && [ -f /www/server/nginx/conf/nginx.conf ]; then echo /www/server/nginx/conf; fi",
+            5).await?;
+    let nginx_server_root = nginx_root_check.trim().to_string();
+    let root_flag = if !nginx_server_root.is_empty() {
+        emit(&format!("BT Panel nginx detected, server root: {}", nginx_server_root), "installing");
+        // 创建 /etc/nginx 符号链接，使 certbot 的内部路径检查能够通过
+        let _ = crate::ssh::session_exec_with_output(session,
+            "[ ! -e /etc/nginx ] && ln -sf /www/server/nginx/conf /etc/nginx || true",
+            5).await?;
+        format!("--nginx-server-root '{}'", nginx_server_root)
+    } else {
+        String::new()
+    };
+
+    // 运行 certbot 并流式传输输出
+    let cmd = format!(
+        "certbot --nginx {} -d '{}' --non-interactive --agree-tos --register-unsafely-without-email 2>&1",
+        root_flag, safe_domain
+    );
+    emit(&format!("Running: {}", cmd), "installing");
+
+    let mut channel = crate::ssh::session_open_channel(session).await?;
+    channel.exec(true, cmd.as_str()).await
+        .map_err(|e| format!("Failed to start certbot: {}", e))?;
+
+    let mut full_output = String::new();
+    let mut exit_code: i32 = -1;
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(120);
+
+    loop {
+        tokio::select! {
+            msg = channel.wait() => {
+                match msg {
+                    Some(russh::ChannelMsg::Data { data }) => {
+                        let text = String::from_utf8_lossy(&data);
+                        full_output.push_str(&text);
+                        for line in text.lines() {
+                            if !line.trim().is_empty() { emit(line, "installing"); }
+                        }
+                    }
+                    Some(russh::ChannelMsg::ExtendedData { data, ext }) => {
+                        if ext == 1 {
+                            let text = String::from_utf8_lossy(&data);
+                            full_output.push_str(&text);
+                            for line in text.lines() {
+                                if !line.trim().is_empty() { emit(line, "installing"); }
+                            }
+                        }
+                    }
+                    Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                        exit_code = exit_status as i32;
+                    }
+                    Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => break,
+                    _ => {}
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                return Err("SSL setup timed out (2 minutes)".to_string());
+            }
+        }
+    }
+
+    // ponytail：russh 可能在 Eof 或 Close 之后才发送 ExitStatus，因此 exit_code 会保持为 -1。
+    // 回退检查 certbot 输出中自身的成功标记。
+    let script_succeeded = full_output.contains("Successfully deployed certificate")
+        || full_output.contains("Certificate is saved at");
+
+    if exit_code == 0 || script_succeeded {
+        emit(&format!("SSL certificate installed for {}", domain), "done");
+        
+        // 验证 SSL 配置已添加到 Nginx vhost
+        emit("Verifying SSL configuration...", "installing");
+        
+        // 检查指定域名的配置文件是否包含 ssl_certificate
+        let check_ssl_cmd = format!(
+            r#"if [ -f '/etc/nginx/sites-enabled/{domain}' ] && grep -q 'ssl_certificate' '/etc/nginx/sites-enabled/{domain}' 2>/dev/null; then echo 'FOUND:/etc/nginx/sites-enabled/{domain}'; elif [ -f '/etc/nginx/conf.d/{domain}.conf' ] && grep -q 'ssl_certificate' '/etc/nginx/conf.d/{domain}.conf' 2>/dev/null; then echo 'FOUND:/etc/nginx/conf.d/{domain}.conf'; elif [ -f '/www/server/panel/vhost/nginx/{domain}.conf' ] && grep -q 'ssl_certificate' '/www/server/panel/vhost/nginx/{domain}.conf' 2>/dev/null; then echo 'FOUND:/www/server/panel/vhost/nginx/{domain}.conf'; elif [ -f '/www/server/nginx/conf/vhost/{domain}.conf' ] && grep -q 'ssl_certificate' '/www/server/nginx/conf/vhost/{domain}.conf' 2>/dev/null; then echo 'FOUND:/www/server/nginx/conf/vhost/{domain}.conf'; else echo 'NOT_FOUND'; fi"#,
+            domain = safe_domain
+        );
+        let (verify_out, _, _) = crate::ssh::session_exec_with_output(session, &check_ssl_cmd, 5)
+            .await?;
+        
+        if verify_out.trim().starts_with("FOUND:") {
+            let config_path = verify_out.trim().strip_prefix("FOUND:").unwrap_or("");
+            emit(&format!("SSL config verified in: {}", config_path), "done");
+            
+            // 重新加载 nginx：分开执行测试和重新加载
+            // SSH 退出码不可靠（-1 表示通道未收到 ExitStatus）
+            emit("Reloading Nginx to apply SSL config...", "installing");
+            let (test_out, test_err, _test_code) = crate::ssh::session_exec_with_output(session, "nginx -t 2>&1", 5)
+                .await?;
+            let test_combined = format!("{}{}", test_out, test_err);
+            let test_ok = test_combined.contains("syntax is ok") && test_combined.contains("test is successful");
+            
+            if !test_ok {
+                emit(&format!("Nginx config test failed: {}", test_combined.trim()), "error");
+            } else {
+                let (reload_out, reload_err, _reload_code) = crate::ssh::session_exec_with_output(session, "systemctl reload nginx 2>&1", 10)
+                    .await?;
+                let reload_combined = format!("{}{}", reload_out, reload_err);
+                if reload_combined.to_lowercase().contains("error") || reload_combined.to_lowercase().contains("fail") {
+                    emit(&format!("Nginx reload warning: {}", reload_combined.trim()), "error");
+                } else {
+                    emit("Nginx reloaded successfully", "done");
+                }
+            }
+        } else {
+            emit("Warning: SSL directives not found in expected vhost files. Checking all configs...", "error");
+            // 检查所有已启用的配置
+            let check_all_cmd = r#"for f in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*.conf /www/server/panel/vhost/nginx/*.conf /www/server/nginx/conf/vhost/*.conf; do [ -f "$f" ] && grep -q 'ssl_certificate' "$f" 2>/dev/null && echo "SSL found in: $f"; done 2>/dev/null || echo 'No SSL configs found'"#;
+            let (all_out, _, _) = crate::ssh::session_exec_with_output(session, check_all_cmd, 5)
+                .await?;
+            if !all_out.trim().is_empty() && all_out.trim() != "No SSL configs found" {
+                emit(&format!("Found SSL in other configs: {}", all_out.trim()), "installing");
+            } else {
+                emit(" No SSL configuration detected in any nginx vhost file", "error");
+            }
+        }
+        
+        Ok(format!("SSL certificate installed for {}", domain))
+    } else {
+        let err_msg = format!("SSL setup failed (exit code {})", exit_code);
+        emit(&err_msg, "error");
+        Err(format!("{}:\n{}", err_msg, full_output.trim()))
+    }
+}
+
+// ===== System Monitor =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MonitorData {
+    pub cpu_percent: u32,
+    pub mem_total_mb: u64,
+    pub mem_used_mb: u64,
+    pub swap_total_mb: u64,
+    pub swap_used_mb: u64,
+    pub load_avg: String,
+    pub net_rx: String,
+    pub net_tx: String,
+    pub disk_read: String,
+    pub disk_write: String,
+    pub top_processes: Vec<ProcessInfo>,
+    pub uptime: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ProcessInfo {
+    pub pid: String,
+    pub user: String,
+    pub cpu: String,
+    pub mem: String,
+    pub command: String,
+}
+
+/// 获取实时监控数据
+pub async fn get_monitor_data(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<MonitorData, String> {
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+# CPU usage (1-second sample)
+CPU_IDLE=$(top -bn1 | grep 'Cpu(s)' | awk '{print $8}' | tr -d '%,id,' 2>/dev/null)
+if [ -z "$CPU_IDLE" ]; then
+  CPU_IDLE=$(mpstat 1 1 2>/dev/null | tail -1 | awk '{print $NF}')
+fi
+CPU_USED=$(echo "$CPU_IDLE" | awk '{printf "%d", 100 - $1}')
+echo "CPU=$CPU_USED"
+
+# Memory
+free -m | awk '/^Mem:/ {print "MEM_TOTAL=" $2; print "MEM_USED=" $3}'
+free -m | awk '/^Swap:/ {print "SWAP_TOTAL=" $2; print "SWAP_USED=" $3}'
+
+# Load
+echo "LOAD=$(cat /proc/loadavg | awk '{print $1, $2, $3}')"
+
+# Uptime
+echo "UPTIME=$(uptime -p 2>/dev/null || uptime | sed 's/.*up /up /' | sed 's/,* *[0-9]* user.*//')"
+
+# Network (from /proc/net/dev)
+echo "---NET---"
+cat /proc/net/dev | grep -v 'lo:' | tail -n +3 | awk '{print $1, $2, $10}'
+
+# Disk I/O (from /proc/diskstats)
+echo "---DISK---"
+cat /proc/diskstats | grep -E '^(sd[a-z]|vd[a-z]|nvme[0-9]n[0-9]) ' | head -4
+
+# Top processes
+echo "---PROC---"
+ps aux --sort=-%cpu | head -11 | tail -10
+"#,
+            15,
+        )
+        .await?;
+
+    let mut data = MonitorData {
+        cpu_percent: 0,
+        mem_total_mb: 0,
+        mem_used_mb: 0,
+        swap_total_mb: 0,
+        swap_used_mb: 0,
+        load_avg: String::new(),
+        net_rx: "0 B".to_string(),
+        net_tx: "0 B".to_string(),
+        disk_read: "0 B".to_string(),
+        disk_write: "0 B".to_string(),
+        top_processes: Vec::new(),
+        uptime: String::new(),
+    };
+
+    let mut section = "";
+    let mut total_net_rx: u64 = 0;
+    let mut total_net_tx: u64 = 0;
+
+    for line in stdout.lines() {
+        if line.starts_with("---NET---") {
+            section = "net";
+            continue;
+        }
+        if line.starts_with("---DISK---") {
+            section = "disk";
+            continue;
+        }
+        if line.starts_with("---PROC---") {
+            section = "proc";
+            continue;
+        }
+
+        match section {
+            "net" => {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    total_net_rx += parts[1].parse::<u64>().unwrap_or(0);
+                    total_net_tx += parts[2].parse::<u64>().unwrap_or(0);
+                }
+            }
+            "disk" => {
+                // 简化处理：仅汇总已读写的扇区数
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 10 {
+                    let r_sectors = parts[5].parse::<u64>().unwrap_or(0);
+                    let w_sectors = parts[9].parse::<u64>().unwrap_or(0);
+                    let r_mb = r_sectors * 512 / 1024 / 1024;
+                    let w_mb = w_sectors * 512 / 1024 / 1024;
+                    data.disk_read = format!("{} MB", r_mb);
+                    data.disk_write = format!("{} MB", w_mb);
+                }
+            }
+            "proc" => {
+                // ps aux 输出：USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 11 {
+                    data.top_processes.push(ProcessInfo {
+                        pid: parts[1].to_string(),
+                        user: parts[0].to_string(),
+                        cpu: parts[2].to_string(),
+                        mem: parts[3].to_string(),
+                        command: parts[10..].join(" "),
+                    });
+                }
+            }
+            _ => {
+                if let Some((key, val)) = line.split_once('=') {
+                    let val = val.trim();
+                    match key.trim() {
+                        "CPU" => data.cpu_percent = val.parse().unwrap_or(0),
+                        "MEM_TOTAL" => data.mem_total_mb = val.parse().unwrap_or(0),
+                        "MEM_USED" => data.mem_used_mb = val.parse().unwrap_or(0),
+                        "SWAP_TOTAL" => data.swap_total_mb = val.parse().unwrap_or(0),
+                        "SWAP_USED" => data.swap_used_mb = val.parse().unwrap_or(0),
+                        "LOAD" => data.load_avg = val.to_string(),
+                        "UPTIME" => data.uptime = val.replace("up ", ""),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    data.net_rx = format_bytes(total_net_rx);
+    data.net_tx = format_bytes(total_net_tx);
+
+    Ok(data)
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes > 1024 * 1024 * 1024 {
+        format!("{:.1} GB", bytes as f64 / 1024.0 / 1024.0 / 1024.0)
+    } else if bytes > 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / 1024.0 / 1024.0)
+    } else if bytes > 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+// ===== Firewall Management =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FirewallRule {
+    pub id: String,          // 规则的唯一标识符
+    pub port: String,        // 例如 "80"、"8080-8090"
+    pub protocol: String,    // "tcp", "udp", "both"
+    pub action: String,      // "allow", "deny", "reject"
+    pub source: String,      // "Anywhere", specific IP, etc.
+    pub raw: String,         // 用于显示的原始规则行
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FirewallInfo {
+    pub firewall_type: String, // "ufw", "firewalld", "iptables", "none"
+    pub enabled: bool,
+    pub rules: Vec<FirewallRule>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FirewallToggleResult {
+    pub enabled: bool,
+    pub ssh_port_auto_opened: bool,
+    pub ssh_port: u16,
+}
+
+pub async fn get_firewall_rules(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<FirewallInfo, String> {
+    // ponytail：缓存防火墙规则 60 秒（仅在添加或删除时变化）
+    if let Some(cached) = cache.get(session_id, "firewall", 60) {
+        if let Ok(info) = serde_json::from_str::<FirewallInfo>(&cached) {
+            return Ok(info);
+        }
+    }
+    // ponytail：通过一次 SSH 往返同时完成防火墙检测和查询（原本需要 2 次调用）
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+if command -v ufw >/dev/null 2>&1; then
+  echo "FW_TYPE=ufw"
+  ufw status 2>/dev/null || echo "UFW_ERROR"
+elif command -v firewall-cmd >/dev/null 2>&1; then
+  echo "FW_TYPE=firewalld"
+  firewall-cmd --state 2>/dev/null
+  firewall-cmd --list-ports 2>/dev/null
+  echo "---"
+  firewall-cmd --list-rich-rules 2>/dev/null
+elif command -v iptables >/dev/null 2>&1; then
+  echo "FW_TYPE=iptables"
+  iptables -L -n --line-numbers 2>/dev/null
+else
+  echo "FW_TYPE=none"
+fi
+"#,
+            15,
+        )
+        .await?;
+
+    let fw_type = stdout
+        .lines()
+        .find(|l| l.starts_with("FW_TYPE="))
+        .map(|l| l.strip_prefix("FW_TYPE=").unwrap_or("none").to_string())
+        .unwrap_or_else(|| "none".to_string());
+
+    let result = match fw_type.as_str() {
+        "ufw" => parse_ufw_output(&stdout),
+        "firewalld" => parse_firewalld_output(&stdout),
+        "iptables" => parse_iptables_output(&stdout),
+        _ => Ok(FirewallInfo {
+            firewall_type: "none".to_string(),
+            enabled: false,
+            rules: vec![],
+        }),
+    };
+    // ponytail：缓存防火墙规则
+    if let Ok(ref info) = result {
+        if let Ok(json) = serde_json::to_string(info) {
+            cache.put(session_id, "firewall", json);
+        }
+    }
+    result
+}
+
+fn parse_ufw_output(stdout: &str) -> Result<FirewallInfo, String> {
+    if stdout.contains("UFW_ERROR") || stdout.contains("not found") {
+        return Ok(FirewallInfo { firewall_type: "none".to_string(), enabled: false, rules: vec![] });
+    }
+
+    let enabled = stdout.contains("Status: active");
+    let mut rules = Vec::new();
+    let mut id_counter = 0;
+    let mut past_separator = false;
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("FW_TYPE=") { continue; }
+        if line.starts_with("Status:") { continue; }
+        if line.starts_with("--") && line.contains("--") && line.len() > 10 {
+            past_separator = true;
+            continue;
+        }
+        if !past_separator { continue; }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 3 {
+            let port_proto = parts[0];
+            let action = parts[1];
+            let source = parts[2..].join(" ");
+            if action == "PROFILES:" || port_proto == "New" { continue; }
+            let (port, protocol) = if let Some((p, proto)) = port_proto.split_once('/') {
+                (p.to_string(), proto.to_string())
+            } else {
+                (port_proto.to_string(), "any".to_string())
+            };
+            id_counter += 1;
+            rules.push(FirewallRule {
+                id: id_counter.to_string(), port, protocol,
+                action: action.to_lowercase(), source, raw: line.to_string(),
+            });
+        }
+    }
+
+    Ok(FirewallInfo { firewall_type: "ufw".to_string(), enabled, rules })
+}
+
+fn parse_firewalld_output(stdout: &str) -> Result<FirewallInfo, String> {
+    let enabled = stdout.contains("running");
+    let mut rules = Vec::new();
+    let mut id_counter = 0;
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() || line == "running" || line == "not running" || line == "---" || line.starts_with("FW_TYPE=") { continue; }
+        for entry in line.split_whitespace() {
+            if entry.contains('/') {
+                let (port, protocol) = entry.split_once('/').unwrap_or((entry, "tcp"));
+                id_counter += 1;
+                rules.push(FirewallRule {
+                    id: id_counter.to_string(), port: port.to_string(),
+                    protocol: protocol.to_string(), action: "allow".to_string(),
+                    source: "Anywhere".to_string(), raw: entry.to_string(),
+                });
+            }
+        }
+        if line.starts_with("rule") {
+            id_counter += 1;
+            rules.push(FirewallRule {
+                id: id_counter.to_string(), port: "-".to_string(),
+                protocol: "-".to_string(), action: "allow".to_string(),
+                source: "Anywhere".to_string(), raw: line.to_string(),
+            });
+        }
+    }
+
+    Ok(FirewallInfo { firewall_type: "firewalld".to_string(), enabled, rules })
+}
+
+fn parse_iptables_output(stdout: &str) -> Result<FirewallInfo, String> {
+    let enabled = !stdout.contains("command not found") && !stdout.is_empty();
+    let mut rules = Vec::new();
+    let mut id_counter = 0;
+    let mut current_chain = String::new();
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("FW_TYPE=") { continue; }
+        if line.starts_with("Chain ") {
+            current_chain = line.split_whitespace().nth(1).unwrap_or("").to_string();
+            continue;
+        }
+        if line.starts_with("num") || line.starts_with("target") { continue; }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 6 {
+            let target = parts[1];
+            let protocol = parts[2];
+            let source = parts[4];
+            let dest = parts[5];
+            let extra = parts[6..].join(" ");
+            let port = if let Some(pos) = extra.find("dpt:") {
+                extra[pos + 4..].split_whitespace().next().unwrap_or("-").to_string()
+            } else if let Some(pos) = extra.find("dpts:") {
+                extra[pos + 5..].split_whitespace().next().unwrap_or("-").to_string()
+            } else {
+                "-".to_string()
+            };
+
+            if target == "ACCEPT" || target == "DROP" || target == "REJECT" {
+                id_counter += 1;
+                let action = match target {
+                    "ACCEPT" => "allow",
+                    "DROP" => "deny",
+                    "REJECT" => "reject",
+                    _ => target,
+                };
+                rules.push(FirewallRule {
+                    id: id_counter.to_string(),
+                    port,
+                    protocol: protocol.to_lowercase(),
+                    action: action.to_string(),
+                    source: if source == "0.0.0.0/0" { "Anywhere".to_string() } else { source.to_string() },
+                    raw: format!("[{}] {} {} {} -> {} {}", current_chain, target, protocol, source, dest, extra),
+                });
+            }
+        }
+    }
+
+    Ok(FirewallInfo { firewall_type: "iptables".to_string(), enabled: enabled || !rules.is_empty(), rules })
+}
+
+/// 规范化来自 UI 的源地址：空值、"anywhere" 或 "*" -> None（表示任意来源），
+/// 否则验证字符集（兼容 IPv4、IPv6、CIDR 和安全主机名）并返回该值。
+fn normalize_firewall_source(source: &str) -> Result<Option<String>, String> {
+    let s = source.trim();
+    if s.is_empty() || s.eq_ignore_ascii_case("anywhere") || s == "*" || s == "0.0.0.0/0" || s == "::/0" {
+        return Ok(None);
+    }
+    if !s.chars().all(|c| {
+        c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '/' | '-' | '_' | '*')
+    }) {
+        return Err("Invalid source address: only IP/CIDR/hostname characters are allowed".to_string());
+    }
+    Ok(Some(s.to_string()))
+}
+
+pub async fn add_firewall_rule(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    port: &str,
+    protocol: &str,
+    action: &str,
+    source: &str,
+) -> Result<String, String> {
+    // 检测防火墙类型
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session, "command -v ufw && echo HAS_UFW; command -v firewall-cmd && echo HAS_FIREWALLD", 10)
+        .await?;
+    let source = normalize_firewall_source(source)?;
+
+    let cmd = if stdout.contains("HAS_UFW") {
+        let proto = if protocol == "both" || protocol == "any" { "" } else { protocol };
+        let action_ufw = if action == "allow" { "allow" } else { "deny" };
+        match source {
+            Some(src) => match proto.is_empty() {
+                true => format!("ufw {} from {} to any port {}", action_ufw, src, port),
+                false => format!("ufw {} from {} to any port {} proto {}", action_ufw, src, port, proto),
+            },
+            None => match proto.is_empty() {
+                true => format!("ufw {} {}", action_ufw, port),
+                false => format!("ufw {} {}/{}", action_ufw, port, proto),
+            },
+        }
+    } else if stdout.contains("HAS_FIREWALLD") {
+        let proto = if protocol == "both" || protocol == "any" { "tcp" } else { protocol };
+        let fw_action = match action {
+            "allow" => "accept",
+            "deny" => "drop",
+            _ => "reject",
+        };
+        match source {
+            Some(src) => format!(
+                "firewall-cmd --permanent --add-rich-rule='rule family=\"ipv4\" source address=\"{}\" port port=\"{}\" protocol=\"{}\" {}'",
+                src, port, proto, fw_action
+            ),
+            None => format!("firewall-cmd --permanent --add-port={}/{}", port, proto),
+        }
+    } else {
+        let target = match action {
+            "allow" => "ACCEPT",
+            "deny" => "DROP",
+            _ => "REJECT",
+        };
+        let proto = if protocol == "both" || protocol == "any" { "tcp" } else { protocol };
+        match source {
+            Some(src) => format!("iptables -I INPUT -s {} -p {} --dport {} -j {}", src, proto, port, target),
+            None => format!("iptables -I INPUT -p {} --dport {} -j {}", proto, port, target),
+        }
+    };
+
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 15).await?;
+    // ponytail：ufw/firewalld 在出现警告时可能返回非零退出码；检查实际的错误文本
+    let combined = format!("{} {}", stdout, stderr);
+    let has_real_error = combined.contains("ERROR") || combined.contains("denied")
+        || combined.contains("failed") || combined.contains("iptables: ");
+    if code != 0 && has_real_error {
+        return Err(format!("Failed: {}", combined.trim()));
+    }
+
+    // 如果使用 firewalld，则重新加载
+    if stdout.contains("HAS_FIREWALLD") || cmd.starts_with("firewall-cmd") {
+        let _ = crate::ssh::session_exec_with_output(session, "firewall-cmd --reload", 15).await;
+    }
+
+    Ok(format!("Added rule: {}/{} ({})", port, protocol, action))
+}
+
+pub async fn remove_firewall_rule(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    port: &str,
+    protocol: &str,
+    action: &str,
+    source: &str,
+) -> Result<String, String> {
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session, "command -v ufw && echo HAS_UFW; command -v firewall-cmd && echo HAS_FIREWALLD", 10)
+        .await?;
+    let source = normalize_firewall_source(source)?;
+
+    let cmd = if stdout.contains("HAS_UFW") {
+        let proto = if protocol == "both" || protocol == "any" { "" } else { protocol };
+        let action_ufw = if action == "allow" { "allow" } else { "deny" };
+        match source {
+            Some(src) => match proto.is_empty() {
+                true => format!("ufw delete {} from {} to any port {}", action_ufw, src, port),
+                false => format!("ufw delete {} from {} to any port {} proto {}", action_ufw, src, port, proto),
+            },
+            None => match proto.is_empty() {
+                true => format!("ufw delete {} {}", action_ufw, port),
+                false => format!("ufw delete {} {}/{}", action_ufw, port, proto),
+            },
+        }
+    } else if stdout.contains("HAS_FIREWALLD") {
+        let proto = if protocol == "both" || protocol == "any" { "tcp" } else { protocol };
+        let fw_action = match action {
+            "allow" => "accept",
+            "deny" => "drop",
+            _ => "reject",
+        };
+        match source {
+            Some(src) => format!(
+                "firewall-cmd --permanent --remove-rich-rule='rule family=\"ipv4\" source address=\"{}\" port port=\"{}\" protocol=\"{}\" {}'",
+                src, port, proto, fw_action
+            ),
+            None => format!("firewall-cmd --permanent --remove-port={}/{}", port, proto),
+        }
+    } else {
+        let target = match action {
+            "allow" => "ACCEPT",
+            "deny" => "DROP",
+            _ => "REJECT",
+        };
+        let proto = if protocol == "both" || protocol == "any" { "tcp" } else { protocol };
+        match source {
+            Some(src) => format!("iptables -D INPUT -s {} -p {} --dport {} -j {}", src, proto, port, target),
+            None => format!("iptables -D INPUT -p {} --dport {} -j {}", proto, port, target),
+        }
+    };
+
+    let (stdout_out, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 15).await?;
+    let combined = format!("{} {}", stdout_out, stderr);
+    let has_real_error = combined.contains("ERROR") || combined.contains("denied")
+        || combined.contains("failed") || combined.contains("iptables: ");
+    if code != 0 && has_real_error {
+        return Err(format!("Failed: {}", combined.trim()));
+    }
+
+    // 如果使用 firewalld，则重新加载
+    if cmd.starts_with("firewall-cmd") {
+        let _ = crate::ssh::session_exec_with_output(session, "firewall-cmd --reload", 15).await;
+    }
+
+    Ok(format!("Removed rule: {}/{} ({})", port, protocol, action))
+}
+
+pub async fn toggle_firewall(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    enable: bool,
+) -> Result<FirewallToggleResult, String> {
+    let (detect, _, _) = crate::ssh::session_exec_with_output(session, "command -v ufw && echo HAS_UFW; command -v firewall-cmd && echo HAS_FIREWALLD", 10)
+        .await?;
+
+    let ssh_port = Some(session.connect_info.clone()).map(|i| i.port).unwrap_or(22);
+    let mut ssh_port_auto_opened = false;
+
+    let action = if enable { "enable" } else { "disable" };
+
+    // firewalld：必须在添加规则之前启动服务（未运行时 firewall-cmd 会失败）
+    if enable && detect.contains("HAS_FIREWALLD") && !detect.contains("HAS_UFW") {
+        let _ = crate::ssh::session_exec_with_output(session, "systemctl start firewalld", 15)
+            .await;
+    }
+
+    // 安全措施：启用时预先放行 SSH 端口，防止将自己锁在服务器外
+    if enable {
+        if detect.contains("HAS_UFW") {
+            let (out, err, code) = crate::ssh::session_exec_with_output(session, &format!("ufw allow {}/tcp", ssh_port), 15)
+                .await
+                .unwrap_or_else(|_| (String::new(), String::new(), 1));
+            if code == 0 && !format!("{} {}", out, err).contains("ERROR") {
+                ssh_port_auto_opened = true;
+            }
+        } else if detect.contains("HAS_FIREWALLD") {
+            let (out, err, code) = crate::ssh::session_exec_with_output(session,
+                    &format!("firewall-cmd --permanent --add-port={}/tcp", ssh_port),
+                    15,
+                )
+                .await
+                .unwrap_or_else(|_| (String::new(), String::new(), 1));
+            if code == 0 && !format!("{} {}", out, err).contains("Error") {
+                ssh_port_auto_opened = true;
+            }
+        }
+    }
+
+    let (stdout, stderr, code) = if detect.contains("HAS_UFW") {
+        let cmd = if enable {
+            "echo 'y' | ufw --force enable"
+        } else {
+            "ufw --force disable"
+        };
+        crate::ssh::session_exec_with_output(session, cmd, 15).await?
+    } else if detect.contains("HAS_FIREWALLD") {
+        let cmd = if enable {
+            // firewalld 已在上方启动；这里只需启用开机持久化
+            "systemctl enable firewalld"
+        } else {
+            "systemctl stop firewalld && systemctl disable firewalld"
+        };
+        crate::ssh::session_exec_with_output(session, cmd, 15).await?
+    } else {
+        return Err("No supported firewall found".to_string());
+    };
+
+    // firewalld：重新加载以应用预先添加的 SSH 端口规则
+    if enable && ssh_port_auto_opened && detect.contains("HAS_FIREWALLD") {
+        let _ = crate::ssh::session_exec_with_output(session, "firewall-cmd --reload", 15).await;
+    }
+
+    let combined = format!("{} {}", stdout, stderr);
+    if code != 0 && (combined.contains("ERROR") || combined.contains("failed")) {
+        return Err(format!("Failed to {} firewall: {}", action, combined.trim()));
+    }
+
+    Ok(FirewallToggleResult {
+        enabled: enable,
+        ssh_port_auto_opened,
+        ssh_port,
+    })
+}
+
+// ===== Software Repository =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SoftwareInfo {
+    pub name: String,
+    pub display_name: String,
+    pub category: String,
+    pub installed: bool,
+    pub version: String,
+    pub service_name: String,
+    pub running: bool,
+}
+
+/// 获取可用软件及其安装状态列表
+pub async fn get_software_list(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<Vec<SoftwareInfo>, String> {
+    // ponytail：在连接生命周期内缓存软件列表（仅在安装或卸载时变化）
+    if let Some(cached) = cache.get(session_id, "software_list", 0) {
+        if let Ok(list) = serde_json::from_str::<Vec<SoftwareInfo>>(&cached) {
+            return Ok(list);
+        }
+    }
+    // ponytail：通过一次 SSH 调用检查所有软件的状态
+    let cmd = r#"
+# Check Nginx (standard + BT Panel)
+if command -v nginx &>/dev/null || [ -x /www/server/nginx/sbin/nginx ]; then
+  echo "NGINX_INSTALLED=1"
+  echo "NGINX_VERSION=$(nginx -v 2>&1 || /www/server/nginx/sbin/nginx -v 2>&1 | grep -oP '[\d.]+' || echo '')"
+  echo "NGINX_RUNNING=$(systemctl is-active nginx 2>/dev/null || echo inactive)"
+else
+  echo "NGINX_INSTALLED=0"
+fi
+
+# Check Apache versions (standard + BT Panel)
+# Detect actual installed version by querying the binary
+_apache_installed=0
+_apache_version=""
+_apache_running="inactive"
+_apache_service="apache2"
+
+# Check standard Apache
+if command -v apache2 &>/dev/null || [ -x /usr/sbin/apache2 ]; then
+  _apache_installed=1
+  _apache_version=$(apache2 -v 2>/dev/null | grep -oP 'Apache/[\d.]+' | head -1 | sed 's/Apache\///' || echo '')
+  if systemctl is-active apache2 &>/dev/null; then
+    _apache_running="active"
+  fi
+# Check BT Panel Apache
+elif [ -x /www/server/apache/bin/httpd ]; then
+  _apache_installed=1
+  _apache_version=$(/www/server/apache/bin/httpd -v 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1 || echo '')
+  # BT Panel may use different service name
+  for _svc in apache httpd Baota-Apache; do
+    if systemctl is-active "$_svc" &>/dev/null; then
+      _apache_running="active"
+      _apache_service="$_svc"
+      break
+    fi
+  done
+fi
+
+# Output based on detected major version (2.2 or 2.4)
+if [ $_apache_installed -eq 1 ]; then
+  # Determine major version from full version string
+  if [[ "$_apache_version" == 2.4* ]]; then
+    echo "APACHE_2_4_INSTALLED=1"
+    echo "APACHE_2_4_VERSION=$_apache_version"
+    echo "APACHE_2_4_RUNNING=$_apache_running"
+    echo "APACHE_2_4_SERVICE=$_apache_service"
+    echo "APACHE_2_2_INSTALLED=0"
+  elif [[ "$_apache_version" == 2.2* ]]; then
+    echo "APACHE_2_2_INSTALLED=1"
+    echo "APACHE_2_2_VERSION=$_apache_version"
+    echo "APACHE_2_2_RUNNING=$_apache_running"
+    echo "APACHE_2_2_SERVICE=$_apache_service"
+    echo "APACHE_2_4_INSTALLED=0"
+  else
+    # Default to 2.4 if version detection fails
+    echo "APACHE_2_4_INSTALLED=1"
+    echo "APACHE_2_4_VERSION=${_apache_version:-2.4.x}"
+    echo "APACHE_2_4_RUNNING=$_apache_running"
+    echo "APACHE_2_4_SERVICE=$_apache_service"
+    echo "APACHE_2_2_INSTALLED=0"
+  fi
+else
+  echo "APACHE_2_4_INSTALLED=0"
+  echo "APACHE_2_2_INSTALLED=0"
+fi
+
+# Legacy single Apache detection (fallback)
+if command -v apache2 &>/dev/null || command -v httpd &>/dev/null || [ -x /www/server/apache/bin/httpd ]; then
+  echo "APACHE_INSTALLED=1"
+  echo "APACHE_VERSION=$(apache2 -v 2>/dev/null || httpd -v 2>/dev/null || /www/server/apache/bin/httpd -v 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1 || echo '')"
+  APACHE_SVC=$(systemctl list-units --type=service 2>/dev/null | grep -E 'apache|httpd' | awk '{print $1}' | head -1 | sed 's/.service//')
+  echo "APACHE_SERVICE=$APACHE_SVC"
+  if [ -n "$APACHE_SVC" ] && systemctl is-active "$APACHE_SVC" &>/dev/null; then
+    echo "APACHE_RUNNING=active"
+  else
+    echo "APACHE_RUNNING=inactive"
+  fi
+else
+  echo "APACHE_INSTALLED=0"
+fi
+
+# Check MySQL/MariaDB (standard + BT Panel)
+# Check for MySQL/MariaDB server specifically (not just client)
+# Use server binary + package state as primary checks; systemctl as fallback
+if command -v mysqld &>/dev/null || command -v mariadbd &>/dev/null || [ -x /www/server/mysql/bin/mysqld ] || dpkg -l mysql-server mysql-community-server mariadb-server 2>/dev/null | grep -q '^ii' || rpm -q mysql-community-server MariaDB-server 2>/dev/null | grep -q '^mysql\|^MariaDB'; then
+  echo "MYSQL_INSTALLED=1"
+  echo "MYSQL_VERSION=$(mysqld --version 2>/dev/null || mariadbd --version 2>/dev/null || /www/server/mysql/bin/mysql --version 2>/dev/null | head -1 || mysql --version 2>/dev/null | head -1 || echo '')"
+  if systemctl is-active mysql &>/dev/null; then
+    echo "MYSQL_RUNNING=active"
+    echo "MYSQL_SERVICE=mysql"
+  elif systemctl is-active mysqld &>/dev/null; then
+    echo "MYSQL_RUNNING=active"
+    echo "MYSQL_SERVICE=mysqld"
+  elif systemctl is-active mariadb &>/dev/null; then
+    echo "MYSQL_RUNNING=active"
+    echo "MYSQL_SERVICE=mariadb"
+  else
+    echo "MYSQL_RUNNING=inactive"
+    # ponytail: list-unit-files finds services even when stopped (list-units only shows loaded)
+    echo "MYSQL_SERVICE=$(systemctl list-unit-files --type=service 2>/dev/null | grep -E 'mysql|maria' | awk '{print $1}' | head -1 | sed 's/.service//')"
+  fi
+else
+  echo "MYSQL_INSTALLED=0"
+fi
+
+# Check PHP versions — dynamic scan for any installed PHP-FPM
+# ponytail: no hardcoded version list — detect whatever is on the system
+# Supports: php8.1-fpm (Debian/Ubuntu), php81-php-fpm (CentOS Remi SCL)
+_php_ver_found=0
+for _svc in $(systemctl list-unit-files --type=service 2>/dev/null | grep -oE 'php[0-9]+(\.[0-9]+)?-?(php-)?fpm' | sed 's/.service$//' | sort -uV); do
+  # Extract version: php8.1-fpm → 8.1, php81-php-fpm → 81
+  phpver=$(echo "$_svc" | sed -E 's/^php([0-9]+(\.[0-9]+)?)-?(php-)?fpm$/\1/')
+  _bin="/usr/sbin/php-fpm-${phpver}"
+  # Remi SCL binary: php81 → /usr/sbin/php81-php-fpm
+  _remibin="/usr/sbin/php${phpver}-php-fpm"
+  _btbin="/www/server/php/${phpver}/sbin/php-fpm"
+  if systemctl is-enabled "$_svc" &>/dev/null || [ -x "$_bin" ] || [ -x "$_remibin" ] || [ -x "$_btbin" ]; then
+    echo "PHP_DETECT_VERSION=${phpver}"
+    _php_ver_found=1
+    if [ -x "$_bin" ]; then
+      _fullver=$("$_bin" -v 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "${phpver}.x")
+    elif [ -x "$_remibin" ]; then
+      _fullver=$("$_remibin" -v 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "${phpver}.x")
+    elif [ -x "$_btbin" ]; then
+      _fullver=$("$_btbin" -v 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "${phpver}.x")
+    else
+      _fullver="${phpver}.x"
+    fi
+    echo "PHP_DETECT_FULLVER=${_fullver}"
+    echo "PHP_DETECT_SERVICE=${_svc}"
+    if systemctl is-active "$_svc" &>/dev/null; then
+      echo "PHP_DETECT_RUNNING=active"
+    else
+      echo "PHP_DETECT_RUNNING=inactive"
+    fi
+  fi
+done
+# BT Panel: scan for PHP versions not caught by systemd
+if [ -d /www/server/php ]; then
+  for _btdir in /www/server/php/*/; do
+    [ -d "$_btdir" ] || continue
+    phpver=$(basename "$_btdir")
+    echo "$phpver" | grep -qE '^[0-9]+\.[0-9]+$' || continue
+    _btbin="/www/server/php/${phpver}/sbin/php-fpm"
+    [ -x "$_btbin" ] || continue
+    # Skip if already detected by systemd
+    _svc="php${phpver}-fpm"
+    if ! systemctl list-unit-files --type=service 2>/dev/null | grep -q "${_svc}"; then
+      echo "PHP_DETECT_VERSION=${phpver}"
+      _php_ver_found=1
+      _fullver=$("$_btbin" -v 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "${phpver}.x")
+      echo "PHP_DETECT_FULLVER=${_fullver}"
+      echo "PHP_DETECT_SERVICE=$_svc"
+      echo "PHP_DETECT_RUNNING=inactive"
+    fi
+  done
+fi
+
+# Fallback: php-fpm service without version in name (CentOS default, Alibaba Cloud Linux 3 DNF module)
+# ponytail: only triggers if no versioned PHP was detected by the loops above
+if systemctl list-unit-files --type=service 2>/dev/null | grep -qE '^php-fpm\.service'; then
+  # ponytail: only if no versioned PHP was detected by the loops above
+  if [ "$_php_ver_found" = "0" ]; then
+    _fv=""
+    for _b in /usr/sbin/php-fpm /usr/bin/php-fpm; do
+      [ -x "$_b" ] && _fv=$("$_b" -v 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) && [ -n "$_fv" ] && break
+    done
+    [ -z "$_fv" ] && command -v php &>/dev/null && _fv=$(php -v 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+    if [ -n "$_fv" ]; then
+      _sv=$(echo "$_fv" | grep -oE '^[0-9]+\.[0-9]+')
+      echo "PHP_DETECT_VERSION=${_sv}"
+      echo "PHP_DETECT_FULLVER=${_fv}"
+      echo "PHP_DETECT_SERVICE=php-fpm"
+      if systemctl is-active php-fpm &>/dev/null; then
+        echo "PHP_DETECT_RUNNING=active"
+      else
+        echo "PHP_DETECT_RUNNING=inactive"
+      fi
+    fi
+  fi
+fi
+
+# Generic PHP detection (for always-visible install card)
+# ponytail: matches php-fpm (CentOS), php8.1-fpm (Debian), php81-php-fpm (Remi SCL)
+if command -v php &>/dev/null || ls /usr/sbin/php*-php-fpm /usr/sbin/php-fpm* /www/server/php/*/sbin/php-fpm &>/dev/null; then
+  echo "PHP_GENERIC_INSTALLED=1"
+  echo "PHP_GENERIC_VERSION=$(php -v 2>/dev/null || ls /usr/sbin/php*-php-fpm 2>/dev/null | head -1 | xargs -I{} {} -v 2>/dev/null || echo '' | head -1 | grep -oP '[\d]+\.[\d]+\.[\d]+' || echo '')"
+  PHP_GENERIC_SVC=$(systemctl list-unit-files --type=service 2>/dev/null | grep -E '^php[0-9.]*-?(php-)?fpm' | awk '{print $1}' | head -1 | sed 's/.service//')
+  echo "PHP_GENERIC_SERVICE=$PHP_GENERIC_SVC"
+  if [ -n "$PHP_GENERIC_SVC" ] && systemctl is-active "$PHP_GENERIC_SVC" &>/dev/null; then
+    echo "PHP_GENERIC_RUNNING=active"
+  else
+    echo "PHP_GENERIC_RUNNING=inactive"
+  fi
+else
+  echo "PHP_GENERIC_INSTALLED=0"
+fi
+
+# Check Redis
+if command -v redis-server &>/dev/null; then
+  echo "REDIS_INSTALLED=1"
+  echo "REDIS_VERSION=$(redis-server --version 2>/dev/null | grep -oP 'v=[\d.]+' | cut -d= -f2 || echo '')"
+  echo "REDIS_RUNNING=$(systemctl is-active redis 2>/dev/null || systemctl is-active redis-server 2>/dev/null || echo inactive)"
+else
+  echo "REDIS_INSTALLED=0"
+fi
+
+# Check Memcached
+if command -v memcached &>/dev/null; then
+  echo "MEMCACHED_INSTALLED=1"
+  echo "MEMCACHED_VERSION=$(memcached -h 2>/dev/null | head -1 | grep -oP '[\d.]+' || echo '')"
+  echo "MEMCACHED_RUNNING=$(systemctl is-active memcached 2>/dev/null || echo inactive)"
+else
+  echo "MEMCACHED_INSTALLED=0"
+fi
+
+# Check Node.js
+if command -v node &>/dev/null; then
+  echo "NODEJS_INSTALLED=1"
+  echo "NODEJS_VERSION=$(node -v 2>/dev/null | sed 's/^v//' || echo '')"
+  echo "NODEJS_RUNNING=n/a"
+else
+  echo "NODEJS_INSTALLED=0"
+fi
+
+# Check zip
+if command -v zip &>/dev/null; then
+  echo "ZIP_INSTALLED=1"
+  echo "ZIP_VERSION=$(zip -v 2>/dev/null | head -1 | grep -oP '[\d.]+' || echo '')"
+else
+  echo "ZIP_INSTALLED=0"
+fi
+
+# Check unzip
+if command -v unzip &>/dev/null; then
+  echo "UNZIP_INSTALLED=1"
+  echo "UNZIP_VERSION=$(unzip -v 2>/dev/null | head -1 | grep -oP '[\d.]+' || echo '')"
+else
+  echo "UNZIP_INSTALLED=0"
+fi
+
+# Check Docker
+if command -v docker &>/dev/null; then
+  echo "DOCKER_INSTALLED=1"
+  echo "DOCKER_VERSION=$(docker -v 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1 || echo '')"
+  echo "DOCKER_RUNNING=$(systemctl is-active docker 2>/dev/null || echo inactive)"
+else
+  echo "DOCKER_INSTALLED=0"
+fi
+
+# Check PostgreSQL
+# Check for PostgreSQL server specifically (not just psql client)
+# Use server binary + package state as primary checks; systemctl as fallback
+if command -v postgres &>/dev/null || [ -x /usr/lib/postgresql/*/bin/postgres ] || dpkg -l postgresql 2>/dev/null | grep -q '^ii' || rpm -q postgresql-server 2>/dev/null | grep -q '^postgresql'; then
+  echo "PGSQL_INSTALLED=1"
+  echo "PGSQL_VERSION=$(psql -V 2>/dev/null | grep -oP '[\d]+\.[\d]+' | head -1 || echo '')"
+  echo "PGSQL_RUNNING=$(systemctl is-active postgresql 2>/dev/null || echo inactive)"
+else
+  echo "PGSQL_INSTALLED=0"
+fi
+"#;
+
+    let (stdout, stderr, _) = crate::ssh::session_exec_with_output(session, cmd, 20).await?;
+    let combined = format!("{}{}", stdout, stderr);
+
+    let get = |key: &str| -> String {
+        combined
+            .lines()
+            .find(|l| l.starts_with(key))
+            .map(|l| l.split('=').nth(1).unwrap_or("").trim().to_string())
+            .unwrap_or_default()
+    };
+
+    let mut list = Vec::new();
+
+    // Nginx
+    list.push(SoftwareInfo {
+        name: "nginx".to_string(),
+        display_name: "Nginx".to_string(),
+        category: "web".to_string(),
+        installed: get("NGINX_INSTALLED") == "1",
+        version: get("NGINX_VERSION"),
+        service_name: "nginx".to_string(),
+        running: get("NGINX_RUNNING") == "active",
+    });
+
+    // Apache：检测所有已安装的版本
+    let apache_versions = ["2.2", "2.4"];
+    for apachever in &apache_versions {
+        let key = format!("APACHE_{}_INSTALLED", apachever.replace('.', "_"));
+        if get(&key) == "1" {
+            let ver_key = format!("APACHE_{}_VERSION", apachever.replace('.', "_"));
+            let run_key = format!("APACHE_{}_RUNNING", apachever.replace('.', "_"));
+            let svc_key = format!("APACHE_{}_SERVICE", apachever.replace('.', "_"));
+            list.push(SoftwareInfo {
+                name: format!("apache{}", apachever),
+                display_name: format!("Apache {}", apachever),
+                category: "web".to_string(),
+                installed: true,
+                version: get(&ver_key),
+                service_name: get(&svc_key),
+                running: get(&run_key) == "active",
+            });
+        }
+    }
+    // 回退：如果未找到带版本号的 Apache，但旧版 APACHE_INSTALLED=1，则添加通用条目
+    if list.iter().all(|s| !s.name.starts_with("apache")) && get("APACHE_INSTALLED") == "1" {
+        list.push(SoftwareInfo {
+            name: "apache".to_string(),
+            display_name: "Apache".to_string(),
+            category: "web".to_string(),
+            installed: true,
+            version: get("APACHE_VERSION"),
+            service_name: get("APACHE_SERVICE"),
+            running: get("APACHE_RUNNING") == "active",
+        });
+    }
+
+    // MySQL/MariaDB
+    list.push(SoftwareInfo {
+        name: "mysql".to_string(),
+        display_name: "MySQL / MariaDB".to_string(),
+        category: "database".to_string(),
+        installed: get("MYSQL_INSTALLED") == "1",
+        version: get("MYSQL_VERSION"),
+        service_name: get("MYSQL_SERVICE"),
+        running: get("MYSQL_RUNNING") == "active",
+    });
+
+    // PHP：检测所有已安装的版本（动态获取，不使用硬编码列表）
+    // ponytail：从检测脚本输出中解析 PHP_DETECT 分组
+    let output_lines: Vec<&str> = combined.lines().collect();
+    let mut i = 0;
+    while i < output_lines.len() {
+        if let Some(ver) = output_lines[i].strip_prefix("PHP_DETECT_VERSION=") {
+            let ver = ver.trim();
+            let fullver = output_lines.get(i + 1)
+                .and_then(|l| l.strip_prefix("PHP_DETECT_FULLVER="))
+                .unwrap_or("");
+            let svc = output_lines.get(i + 2)
+                .and_then(|l| l.strip_prefix("PHP_DETECT_SERVICE="))
+                .unwrap_or("");
+            let running = output_lines.get(i + 3)
+                .map(|l| l.trim() == "PHP_DETECT_RUNNING=active")
+                .unwrap_or(false);
+            list.push(SoftwareInfo {
+                name: format!("php{}", ver),
+                display_name: format!("PHP {} FPM", ver),
+                category: "web".to_string(),
+                installed: true,
+                version: fullver.to_string(),
+                service_name: svc.to_string(),
+                running,
+            });
+            i += 4;
+        } else {
+            i += 1;
+        }
+    }
+
+    // 通用 PHP 条目（安装卡片始终显示）
+    list.push(SoftwareInfo {
+        name: "php".to_string(),
+        display_name: "PHP-FPM".to_string(),
+        category: "web".to_string(),
+        installed: get("PHP_GENERIC_INSTALLED") == "1",
+        version: get("PHP_GENERIC_VERSION"),
+        service_name: get("PHP_GENERIC_SERVICE"),
+        running: get("PHP_GENERIC_RUNNING") == "active",
+    });
+
+    // Redis
+    list.push(SoftwareInfo {
+        name: "redis".to_string(),
+        display_name: "Redis".to_string(),
+        category: "database".to_string(),
+        installed: get("REDIS_INSTALLED") == "1",
+        version: get("REDIS_VERSION"),
+        service_name: "redis".to_string(),
+        running: get("REDIS_RUNNING") == "active",
+    });
+
+    // Memcached
+    list.push(SoftwareInfo {
+        name: "memcached".to_string(),
+        display_name: "Memcached".to_string(),
+        category: "database".to_string(),
+        installed: get("MEMCACHED_INSTALLED") == "1",
+        version: get("MEMCACHED_VERSION"),
+        service_name: "memcached".to_string(),
+        running: get("MEMCACHED_RUNNING") == "active",
+    });
+
+    // Node.js
+    list.push(SoftwareInfo {
+        name: "nodejs".to_string(),
+        display_name: "Node.js".to_string(),
+        category: "runtime".to_string(),
+        installed: get("NODEJS_INSTALLED") == "1",
+        version: get("NODEJS_VERSION"),
+        service_name: String::new(),
+        running: false,
+    });
+
+    // zip
+    list.push(SoftwareInfo {
+        name: "zip".to_string(),
+        display_name: "Zip".to_string(),
+        category: "tools".to_string(),
+        installed: get("ZIP_INSTALLED") == "1",
+        version: get("ZIP_VERSION"),
+        service_name: String::new(),
+        running: false,
+    });
+
+    // unzip
+    list.push(SoftwareInfo {
+        name: "unzip".to_string(),
+        display_name: "Unzip".to_string(),
+        category: "tools".to_string(),
+        installed: get("UNZIP_INSTALLED") == "1",
+        version: get("UNZIP_VERSION"),
+        service_name: String::new(),
+        running: false,
+    });
+
+    // Docker
+    list.push(SoftwareInfo {
+        name: "docker".to_string(),
+        display_name: "Docker".to_string(),
+        category: "container".to_string(),
+        installed: get("DOCKER_INSTALLED") == "1",
+        version: get("DOCKER_VERSION"),
+        service_name: "docker".to_string(),
+        running: get("DOCKER_RUNNING") == "active",
+    });
+
+    // PostgreSQL
+    list.push(SoftwareInfo {
+        name: "postgresql".to_string(),
+        display_name: "PostgreSQL".to_string(),
+        category: "database".to_string(),
+        installed: get("PGSQL_INSTALLED") == "1",
+        version: get("PGSQL_VERSION"),
+        service_name: "postgresql".to_string(),
+        running: get("PGSQL_RUNNING") == "active",
+    });
+
+    // ponytail：缓存软件列表
+    if let Ok(json) = serde_json::to_string(&list) {
+        cache.put(session_id, "software_list", json);
+    }
+    Ok(list)
+}
+
+/// 检测用户添加的自定义软件包状态
+pub async fn detect_custom_software(
+    session: &SshSession,
+    packages: &[String],
+) -> Result<Vec<SoftwareInfo>, String> {
+    if packages.is_empty() {
+        return Ok(Vec::new());
+    }
+    // ponytail：通过一次 SSH 调用检查所有自定义软件包
+    let mut script = String::from("#!/bin/bash\n");
+    for pkg in packages {
+        // 清理输入：仅允许字母数字、短横线、点、下划线和加号
+        let safe: String = pkg.chars().filter(|c| c.is_alphanumeric() || "-._+".contains(*c)).collect();
+        if safe.is_empty() || safe != *pkg { continue; }
+        script.push_str(&format!(
+            r#"
+# Check {safe}
+if dpkg -l {safe} 2>/dev/null | grep -q '^ii' || rpm -q {safe} &>/dev/null; then
+  echo "CUSTOM_{safe}_INSTALLED=1"
+  _ver=$(dpkg -l {safe} 2>/dev/null | grep '^ii' | awk '{{print $3}}' | head -1 || rpm -q --qf '%{{VERSION}}' {safe} 2>/dev/null || echo '')
+  echo "CUSTOM_{safe}_VERSION=$_ver"
+else
+  echo "CUSTOM_{safe}_INSTALLED=0"
+fi
+_svc=$(systemctl list-unit-files --type=service 2>/dev/null | grep -oP '^{safe}(?=[\d._-]*\.service)' | head -1 || echo '')
+if [ -n "$_svc" ]; then
+  echo "CUSTOM_{safe}_SERVICE=$_svc"
+  echo "CUSTOM_{safe}_RUNNING=$(systemctl is-active $_svc 2>/dev/null || echo inactive)"
+else
+  echo "CUSTOM_{safe}_SERVICE="
+  echo "CUSTOM_{safe}_RUNNING=inactive"
+fi
+"#,
+            safe = safe
+        ));
+    }
+
+    let (stdout, stderr, _) = crate::ssh::session_exec_with_output(session, &script, 15).await?;
+    let combined = format!("{}{}", stdout, stderr);
+
+    let get = |key: &str| -> String {
+        combined.lines()
+            .find(|l| l.starts_with(key))
+            .map(|l| l.split('=').nth(1).unwrap_or("").trim().to_string())
+            .unwrap_or_default()
+    };
+
+    let mut list = Vec::new();
+    for pkg in packages {
+        let safe: String = pkg.chars().filter(|c| c.is_alphanumeric() || "-._+".contains(*c)).collect();
+        if safe.is_empty() || safe != *pkg { continue; }
+        let prefix = format!("CUSTOM_{}_", safe);
+        list.push(SoftwareInfo {
+            name: pkg.clone(),
+            display_name: pkg.clone(),
+            category: "custom".to_string(),
+            installed: get(&format!("{}INSTALLED", prefix)) == "1",
+            version: get(&format!("{}VERSION", prefix)),
+            service_name: get(&format!("{}SERVICE", prefix)),
+            running: get(&format!("{}RUNNING", prefix)) == "active",
+        });
+    }
+    Ok(list)
+}
+
+/// 安装或卸载自定义软件包
+pub async fn custom_software_action(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    package_name: &str,
+    action: &str,
+    display_name: &str,
+    app_handle: &AppHandle,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    // ponytail：清理软件包名称，仅允许安全字符
+    let safe: String = package_name.chars().filter(|c| c.is_alphanumeric() || "-._+".contains(*c)).collect();
+    if safe.is_empty() || safe != package_name {
+        return Err("Invalid package name".to_string());
+    }
+
+    let script = format!(r#"#!/bin/bash
+echo "=== {} {} ==="
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+if [ "{}" = "install" ]; then
+  echo "Installing {}..."
+  for i in $(seq 1 20); do
+    if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && ! fuser /var/cache/apt/archives/lock >/dev/null 2>&1 && ! fuser /var/run/yum.pid >/dev/null 2>&1 && ! fuser /var/run/dnf.pid >/dev/null 2>&1; then
+      break
+    fi
+    echo "Waiting for package manager lock... ($i/20)"
+    sleep 5
+  done
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true
+    apt-get install -y {} 2>&1
+  else
+    yum install -y --nogpgcheck --assumeyes {} 2>&1
+  fi
+  # Try to enable and start service if exists
+  _svc=$(systemctl list-unit-files --type=service 2>/dev/null | grep -oP '^{}[\d._-]*\.service' | head -1 | sed 's/.service$//')
+  if [ -n "$_svc" ]; then
+    systemctl enable "$_svc" 2>/dev/null && systemctl start "$_svc" 2>/dev/null
+    echo "Service $_svc enabled and started"
+  fi
+else
+  echo "Removing {}..."
+  _svc=$(systemctl list-unit-files --type=service 2>/dev/null | grep -oP '^{}[\d._-]*\.service' | head -1 | sed 's/.service$//')
+  if [ -n "$_svc" ]; then
+    systemctl stop "$_svc" 2>/dev/null || true
+    systemctl disable "$_svc" 2>/dev/null || true
+  fi
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y {} 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+  else
+    yum remove -y --assumeyes {} 2>/dev/null || true
+  fi
+fi
+echo "ACTION_SUCCESS"
+"#,
+        action, safe, action, safe, safe, safe, safe, safe, safe, safe, safe
+    );
+
+    crate::ssh::session_write_file(session, "/tmp/software-action.sh", &script).await?;
+
+    let event_name = "software-action-progress";
+    let _ = app_handle.emit(event_name, serde_json::json!({
+        "sessionId": session_id,
+        "line": format!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"),
+        "status": "running",
+    }));
+    let _ = app_handle.emit(event_name, serde_json::json!({
+        "sessionId": session_id,
+        "line": format!("Executing: bash /tmp/software-action.sh"),
+        "status": "running",
+    }));
+    let _ = app_handle.emit(event_name, serde_json::json!({
+        "sessionId": session_id,
+        "line": format!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"),
+        "status": "running",
+    }));
+
+    let mut channel = crate::ssh::session_open_channel(session).await?;
+    // ponytail：将输出重定向到日志文件（而不是 SSH 通道），使安装在断开连接后仍能继续
+    // 写入用于恢复的操作信息："action:display_name"
+    let info_cmd: String = format!("echo $$ > /tmp/ohmypanel-install.pid; echo '{}:{}' > /tmp/ohmypanel-install.info; > /tmp/ohmypanel-install.log; bash /tmp/software-action.sh >> /tmp/ohmypanel-install.log 2>&1; rm -f /tmp/ohmypanel-install.pid /tmp/ohmypanel-install.info", action, display_name);
+    channel.exec(true, info_cmd).await
+        .map_err(|e| format!("Failed to start script: {}", e))?;
+    // ponytail：持续读取日志文件，以实时显示输出
+    let mut tail_channel = crate::ssh::session_open_channel(session).await?;
+    let _ = tail_channel.exec(true, "tail -f /tmp/ohmypanel-install.log").await;
+    let mut full_output = String::new();
+    let mut exit_code: i32 = -1;
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+    loop {
+        tokio::select! {
+            msg = tail_channel.wait() => {
+                match msg {
+                    Some(russh::ChannelMsg::Data { data }) => {
+                        let text = String::from_utf8_lossy(&data);
+                        full_output.push_str(&text);
+                        for line in text.lines() {
+                            if !line.trim().is_empty() {
+                                let _ = app_handle.emit(event_name, serde_json::json!({
+                                    "sessionId": session_id,
+                                    "line": line,
+                                    "status": "running",
+                                }));
+                            }
+                        }
+                    }
+                    Some(russh::ChannelMsg::ExtendedData { data, ext }) if ext == 1 => {
+                        let text = String::from_utf8_lossy(&data);
+                        full_output.push_str(&text);
+                        for line in text.lines() {
+                            if !line.trim().is_empty() {
+                                let _ = app_handle.emit(event_name, serde_json::json!({
+                                    "sessionId": session_id,
+                                    "line": line,
+                                    "status": "running",
+                                }));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            msg = channel.wait() => {
+                match msg {
+                    Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                        exit_code = exit_status as i32;
+                    }
+                    Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) => break,
+                    None => break,
+                    _ => {}
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                let _ = app_handle.emit(event_name, serde_json::json!({
+                    "sessionId": session_id,
+                    "line": format!("Operation timed out ({} minutes)", timeout_secs / 60),
+                    "status": "error",
+                }));
+                break;
+            }
+        }
+    }
+    tail_channel.close().await.ok();
+    channel.close().await.ok();
+    // ponytail：读取完整日志文件，获取最终输出
+    if let Ok((final_log, _, _)) = crate::ssh::session_exec_with_output(session, "cat /tmp/ohmypanel-install.log 2>/dev/null || true", 10).await {
+        if !final_log.is_empty() {
+            full_output = final_log;
+        }
+    }
+    crate::ssh::session_exec_with_output(session, "rm -f /tmp/ohmypanel-install.pid /tmp/ohmypanel-install.info", 5).await.ok();
+
+    cache.invalidate(session_id, &["software_list", "service_statuses"]);
+
+    if full_output.contains("ACTION_SUCCESS") {
+        let _ = app_handle.emit(event_name, serde_json::json!({
+            "sessionId": session_id,
+            "line": "Done",
+            "status": "done",
+        }));
+        Ok("OK".to_string())
+    } else {
+        let _ = app_handle.emit(event_name, serde_json::json!({
+            "sessionId": session_id,
+            "line": "Operation failed",
+            "status": "error",
+        }));
+        Err(format!("Exit code: {}\n{}", exit_code, full_output))
+    }
+}
+
+/// 从系统包管理器查询可用的 PHP 版本
+pub async fn get_available_php_versions(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<String>, String> {
+    let cmd = r#"
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+
+if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+  # Ubuntu/Debian: query apt-cache for php*-fpm packages
+  apt-cache search --names-only '^php[0-9]+\.[0-9]+-fpm$' 2>/dev/null | \
+    awk '{print $1}' | sed 's/^php//; s/-fpm$//' | sort -V | uniq
+else
+  # CentOS/RHEL: query multiple sources for available PHP versions
+  if command -v dnf &>/dev/null; then
+    # DNF module streams (RHEL 8+/CentOS 8+/Alibaba Cloud Linux 3)
+    dnf module list php 2>/dev/null | grep -E '^php[[:space:]]' | awk '{gsub(/\[.\]/, "", $2); print $2}' | grep -E '^[0-9]+\.[0-9]+$'
+    # Remi SCL packages (php81-php-fpm, php82-php-fpm, etc.)
+    dnf list available 'php*-php-fpm' 2>/dev/null | grep -oP 'php\K[0-9]+(?=-php-fpm)' | sed 's/^\([0-9]\{1,\}\)\([0-9]\)$/\1.\2/'
+    # Default php-fpm — extract version from package version field
+    dnf list available php-fpm 2>/dev/null | awk '/^php-fpm/ {print $2}' | grep -oE '^[0-9]+\.[0-9]+'
+  else
+    # yum fallback (CentOS 7, no dnf)
+    yum list available 'php*-php-fpm' 2>/dev/null | grep -oP 'php\K[0-9]+(?=-php-fpm)' | sed 's/^\([0-9]\{1,\}\)\([0-9]\)$/\1.\2/'
+    yum list available php-fpm 2>/dev/null | awk '/^php-fpm/ {print $2}' | grep -oE '^[0-9]+\.[0-9]+'
+  fi
+fi
+"#;
+
+    let (stdout, _stderr, _exit_code) = crate::ssh::session_exec_with_output(session, cmd, 30).await?;
+
+    let mut versions: Vec<String> = stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.trim().to_string())
+        .collect();
+
+    versions.sort();
+    versions.dedup();
+
+    Ok(versions)
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MysqlVariant {
+    pub variant: String,
+    pub version: String,
+}
+
+/// 获取系统仓库中可用的 MySQL/MariaDB 变体
+pub async fn get_available_mysql_versions(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<MysqlVariant>, String> {
+    // ponytail：输出 "variant:version" 格式的行（例如 "mariadb:11.8.6"）
+    let cmd = r#"
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+
+if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+  apt-get update -q --allow-releaseinfo-change 2>&1 || true
+  M_CAND=$(apt-cache policy mariadb-server 2>/dev/null | grep 'Candidate:' | awk '{print $2}')
+  if [ -n "$M_CAND" ] && [ "$M_CAND" != "(none)" ]; then
+    echo "mariadb:$M_CAND"
+  fi
+  MY_CAND=$(apt-cache policy mysql-server 2>/dev/null | grep 'Candidate:' | awk '{print $2}')
+  if [ -n "$MY_CAND" ] && [ "$MY_CAND" != "(none)" ]; then
+    echo "mysql:$MY_CAND"
+  fi
+else
+  if command -v dnf &>/dev/null; then
+    M_VER=$(dnf list available mariadb-server 2>/dev/null | grep mariadb | awk '{print $2}' | head -1)
+    [ -n "$M_VER" ] && echo "mariadb:$M_VER"
+    MY_VER=$(dnf list available mysql-server 2>/dev/null | grep mysql | awk '{print $2}' | head -1)
+    [ -n "$MY_VER" ] && echo "mysql:$MY_VER"
+  else
+    M_VER=$(yum list available mariadb-server 2>/dev/null | grep mariadb | awk '{print $2}' | head -1)
+    [ -n "$M_VER" ] && echo "mariadb:$M_VER"
+    MY_VER=$(yum list available mysql-server 2>/dev/null | grep mysql | awk '{print $2}' | head -1)
+    [ -n "$MY_VER" ] && echo "mysql:$MY_VER"
+  fi
+fi
+"#;
+
+    let (stdout, _stderr, _exit_code) = crate::ssh::session_exec_with_output(session, cmd, 60).await?;
+
+    let versions: Vec<MysqlVariant> = stdout
+        .lines()
+        .filter_map(|l| {
+            let l = l.trim();
+            let mut parts = l.splitn(2, ':');
+            let variant = parts.next()?.to_string();
+            let version = parts.next().unwrap_or("").to_string();
+            if variant == "mariadb" || variant == "mysql" {
+                Some(MysqlVariant { variant, version })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(versions)
+}
+
+/// 获取可移除的软件包源列表（第三方仓库）
+pub async fn get_removable_sources(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<String>, String> {
+    let cmd = r#"
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+
+if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+  # Ubuntu/Debian: list third-party sources in sources.list.d/
+  ls /etc/apt/sources.list.d/*.list 2>/dev/null | xargs -n1 basename | sed 's/.list$//' | sort
+else
+  # CentOS/RHEL: list repo files (exclude system repos)
+  ls /etc/yum.repos.d/*.repo 2>/dev/null | xargs -n1 basename | sed 's/.repo$//' | grep -vE '^epel$|^base$|^extras$|^updates$' | sort
+fi
+"#;
+
+    let (stdout, _stderr, _exit_code) = crate::ssh::session_exec_with_output(session, cmd, 10).await?;
+    
+    let mut sources: Vec<String> = stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.trim().to_string())
+        .collect();
+    
+    sources.sort();
+    Ok(sources)
+}
+
+/// 移除指定的软件包源
+pub async fn remove_sources(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    source_names: Vec<String>,
+) -> Result<String, String> {
+    if source_names.is_empty() {
+        return Err("No sources selected for removal".to_string());
+    }
+    
+    let cmd = format!(r#"
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+
+for src in {}; do
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    rm -f "/etc/apt/sources.list.d/${{src}}.list"
+  else
+    rm -f "/etc/yum.repos.d/${{src}}.repo"
+  fi
+done
+echo "Sources removed successfully"
+"#, source_names.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(" "));
+
+    let (_stdout, _stderr, _exit_code) = crate::ssh::session_exec_with_output(session, &cmd, 10).await?;
+    Ok(format!("Removed {} source(s)", source_names.len()))
+}
+
+/// 清理并更新软件包源，同时流式传输输出
+pub async fn clean_and_update_sources(
+    session: &SshSession,
+    _cache: &SshCache,
+    session_id: &str,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    let cmd = r#"
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+
+echo "=== Cleaning package source cache ==="
+if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+  rm -rf /var/lib/apt/lists/*
+  echo "Cache cleared"
+  
+  echo "=== Updating package sources ==="
+  apt-get update --allow-releaseinfo-change 2>&1 | tee /tmp/apt-update.log
+  
+  if [ $? -eq 0 ]; then
+    echo "ACTION_SUCCESS"
+  else
+    echo "ERROR: Failed to update package sources"
+    exit 1
+  fi
+else
+  yum clean all 2>&1 || dnf clean all 2>&1
+  echo "Cache cleared"
+  
+  echo "=== Updating package sources ==="
+  yum makecache 2>&1 || dnf makecache 2>&1 | tee /tmp/yum-makecache.log
+  
+  if [ $? -eq 0 ]; then
+    echo "ACTION_SUCCESS"
+  else
+    echo "ERROR: Failed to update package sources"
+    exit 1
+  fi
+fi
+"#;
+
+    // 将脚本写入远程服务器
+    crate::ssh::session_write_file(session, "/tmp/clean-sources.sh", cmd).await?;
+    
+    // 执行并流式传输输出
+    let mut channel = crate::ssh::session_open_channel(session).await?;
+    channel
+        .exec(true, "bash /tmp/clean-sources.sh")
+        .await
+        .map_err(|e| format!("Failed to start script: {}", e))?;
+    
+    let event_name = "sources-action-progress";
+    let mut full_output = String::new();
+    let mut exit_code: i32 = -1;
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(60);
+    
+    loop {
+        tokio::select! {
+            msg = channel.wait() => {
+                match msg {
+                    Some(russh::ChannelMsg::Data { data }) | Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
+                        let text = String::from_utf8_lossy(&data);
+                        for line in text.lines() {
+                            if !line.trim().is_empty() {
+                                full_output.push_str(line);
+                                full_output.push('\n');
+                                let _ = app_handle.emit(event_name, serde_json::json!({
+                                    "sessionId": session_id,
+                                    "line": line,
+                                    "status": "running",
+                                }));
+                            }
+                        }
+                    }
+                    Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                        exit_code = exit_status as i32;
+                    }
+                    Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => break,
+                    _ => {}
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                return Err("Operation timed out (60 seconds)".to_string());
+            }
+        }
+    }
+    
+    let success = full_output.contains("ACTION_SUCCESS");
+    
+    if exit_code == 0 || success {
+        let _ = app_handle.emit(event_name, serde_json::json!({
+            "sessionId": session_id,
+            "line": "Package sources updated successfully!",
+            "status": "done",
+        }));
+        Ok(full_output)
+    } else {
+        let _ = app_handle.emit(event_name, serde_json::json!({
+            "sessionId": session_id,
+            "line": "Failed to update package sources",
+            "status": "error",
+        }));
+        Err(format!("Operation failed (exit code {}):\n{}", exit_code, full_output))
+    }
+}
+
+/// 添加新的软件包源
+pub async fn add_source(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    name: &str,
+    url: &str,
+    gpg_key: Option<&str>,
+) -> Result<String, String> {
+    if name.is_empty() || url.is_empty() {
+        return Err("Source name and URL are required".to_string());
+    }
+
+    // 验证名称（仅允许字母数字、短横线和下划线）
+    if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        return Err("Source name can only contain letters, numbers, hyphens, and underscores".to_string());
+    }
+
+    let cmd = format!(r#"
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+
+echo "Adding package source: {}"
+
+if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+  # Debian/Ubuntu: Create .list file
+  SOURCE_FILE="/etc/apt/sources.list.d/{}.list"
+  
+  if [ -f "$SOURCE_FILE" ]; then
+    echo "ERROR: Source file already exists: $SOURCE_FILE"
+    exit 1
+  fi
+  
+  # Write the source line
+  echo '{}' > "$SOURCE_FILE"
+  
+  # Add GPG key if provided
+  if [ -n "{}" ]; then
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL "{}" | gpg --dearmor -o /etc/apt/keyrings/{}.gpg 2>/dev/null || true
+    chmod a+r /etc/apt/keyrings/{}.gpg 2>/dev/null || true
+  fi
+  
+  echo "Source added successfully"
+else
+  # CentOS/RHEL: Create .repo file
+  SOURCE_FILE="/etc/yum.repos.d/{}.repo"
+  
+  if [ -f "$SOURCE_FILE" ]; then
+    echo "ERROR: Source file already exists: $SOURCE_FILE"
+    exit 1
+  fi
+  
+  # Write repo configuration
+  cat > "$SOURCE_FILE" << 'EOF'
+[{}]
+name={}
+baseurl={}
+enabled=1
+gpgcheck=0
+EOF
+  
+  # Add GPG key if provided
+  if [ -n "{}" ]; then
+    sed -i "s/gpgcheck=0/gpgcheck=1\ngpgkey={}/" "$SOURCE_FILE"
+  fi
+  
+  echo "Source added successfully"
+fi
+"#, name, name, url, gpg_key.unwrap_or(""), gpg_key.unwrap_or(""), name, name, name, name, name, name, url, gpg_key.unwrap_or(""));
+
+    let (_stdout, _stderr, _exit_code) = crate::ssh::session_exec_with_output(session, &cmd, 15).await?;
+    Ok(format!("Package source '{}' added successfully", name))
+}
+
+/// 通过 SSH 安装或卸载软件，并实时输出结果
+pub async fn software_action(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    software: &str,
+    action: &str,
+    options: &str,
+    display_name: &str,
+    app_handle: &AppHandle,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let os = detect_os(session, cache, session_id).await?;
+    let is_debian = os.family == "debian";
+
+    let script = build_software_script(&os, software, action, options, is_debian);
+
+    crate::ssh::session_write_file(session, "/tmp/software-action.sh", &script)
+        .await?;
+
+    let event_name = "software-action-progress";
+    
+    // 记录正在执行的命令
+    let _ = app_handle.emit(event_name, serde_json::json!({
+        "sessionId": session_id,
+        "line": format!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"),
+        "status": "running",
+    }));
+    let _ = app_handle.emit(event_name, serde_json::json!({
+        "sessionId": session_id,
+        "line": format!("Executing: bash /tmp/software-action.sh"),
+        "status": "running",
+    }));
+    let _ = app_handle.emit(event_name, serde_json::json!({
+        "sessionId": session_id,
+        "line": format!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"),
+        "status": "running",
+    }));
+
+    let mut channel = crate::ssh::session_open_channel(session).await?;
+    // ponytail：将输出重定向到日志文件（而不是 SSH 通道），使安装在断开连接后仍能继续
+    // 写入用于恢复的操作信息："action:display_name"
+    let info_cmd: String = format!("echo $$ > /tmp/ohmypanel-install.pid; echo '{}:{}' > /tmp/ohmypanel-install.info; > /tmp/ohmypanel-install.log; bash /tmp/software-action.sh >> /tmp/ohmypanel-install.log 2>&1; rm -f /tmp/ohmypanel-install.pid /tmp/ohmypanel-install.info", action, display_name);
+    channel
+        .exec(true, info_cmd)
+        .await
+        .map_err(|e| format!("Failed to start script: {}", e))?;
+    // ponytail：持续读取日志文件，以实时显示输出
+    let mut tail_channel = crate::ssh::session_open_channel(session).await?;
+    let _ = tail_channel.exec(true, "tail -f /tmp/ohmypanel-install.log").await;
+
+    let mut full_output = String::new();
+    let mut exit_code: i32 = -1;
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+
+    loop {
+        tokio::select! {
+            msg = tail_channel.wait() => {
+                match msg {
+                    Some(russh::ChannelMsg::Data { data }) => {
+                        let text = String::from_utf8_lossy(&data);
+                        full_output.push_str(&text);
+                        for line in text.lines() {
+                            if !line.trim().is_empty() {
+                                let _ = app_handle.emit(event_name, serde_json::json!({
+                                    "sessionId": session_id,
+                                    "line": line,
+                                    "status": "running",
+                                }));
+                            }
+                        }
+                    }
+                    Some(russh::ChannelMsg::ExtendedData { data, ext }) if ext == 1 => {
+                        let text = String::from_utf8_lossy(&data);
+                        full_output.push_str(&text);
+                        for line in text.lines() {
+                            if !line.trim().is_empty() {
+                                let _ = app_handle.emit(event_name, serde_json::json!({
+                                    "sessionId": session_id,
+                                    "line": line,
+                                    "status": "running",
+                                }));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            msg = channel.wait() => {
+                match msg {
+                    Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                        exit_code = exit_status as i32;
+                    }
+                    Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => break,
+                    _ => {}
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                let _ = app_handle.emit(event_name, serde_json::json!({
+                    "sessionId": session_id,
+                    "line": format!("Operation timed out ({} minutes)", timeout_secs / 60),
+                    "status": "error",
+                }));
+                break;
+            }
+        }
+    }
+    tail_channel.close().await.ok();
+    channel.close().await.ok();
+    // ponytail：读取完整日志文件，获取最终输出
+    if let Ok((final_log, _, _)) = crate::ssh::session_exec_with_output(session, "cat /tmp/ohmypanel-install.log 2>/dev/null || true", 10).await {
+        if !final_log.is_empty() {
+            full_output = final_log;
+        }
+    }
+    crate::ssh::session_exec_with_output(session, "rm -f /tmp/ohmypanel-install.pid /tmp/ohmypanel-install.info", 5).await.ok();
+
+    // ponytail：russh 退出码不可靠，使用输出标记作为回退依据
+    let success = full_output.contains("ACTION_SUCCESS");
+
+    // 为“查看完整输出”折叠区域发送原始（未过滤的）终端输出
+    let _ = app_handle.emit("software-action-raw-output", serde_json::json!({
+        "sessionId": session_id,
+        "rawOutput": full_output,
+    }));
+
+    if exit_code == 0 || success {
+        let _ = app_handle.emit(event_name, serde_json::json!({
+            "sessionId": session_id,
+            "line": format!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"),
+            "status": "running",
+        }));
+        let _ = app_handle.emit(event_name, serde_json::json!({
+            "sessionId": session_id,
+            "line": format!("{} {} completed successfully!", action, software),
+            "status": "done",
+        }));
+        Ok(full_output)
+    } else {
+        // 提取关键错误行，便于查看
+        let error_lines: Vec<&str> = full_output
+            .lines()
+            .filter(|line| {
+                let lower = line.to_lowercase();
+                lower.contains("error") || 
+                lower.contains("failed") ||
+                lower.contains("fatal") ||
+                line.starts_with("E:")
+            })
+            .collect();
+        
+        // 先发送错误摘要
+        let _ = app_handle.emit(event_name, serde_json::json!({
+            "sessionId": session_id,
+            "line": format!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"),
+            "status": "running",
+        }));
+        
+        if !error_lines.is_empty() {
+            let _ = app_handle.emit(event_name, serde_json::json!({
+                "sessionId": session_id,
+                "line": format!("Key errors found ({}):", error_lines.len()),
+                "status": "running",
+            }));
+            for err_line in &error_lines {
+                let _ = app_handle.emit(event_name, serde_json::json!({
+                    "sessionId": session_id,
+                    "line": format!("   {}", err_line),
+                    "status": "running",
+                }));
+            }
+            let _ = app_handle.emit(event_name, serde_json::json!({
+                "sessionId": session_id,
+                "line": format!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"),
+                "status": "running",
+            }));
+        }
+        
+        let _ = app_handle.emit(event_name, serde_json::json!({
+            "sessionId": session_id,
+            "line": format!("{} {} failed (exit code {})", action, software, exit_code),
+            "status": "error",
+        }));
+        
+        Err(format!("Operation failed (exit code {}):\n{}", exit_code, full_output))
+    }
+}
+
+/// 生成 PHP 源码编译脚本（宝塔面板风格）
+fn build_php_source_compile_script(php_ver: &str, action: &str) -> String {
+    // ponytail：固定 PHP 源码 URL 的具体补丁版本，以确保结果可复现
+    let source_url = match php_ver {
+        "7.4" => "https://www.php.net/distributions/php-7.4.33.tar.gz",
+        "8.0" => "https://www.php.net/distributions/php-8.0.30.tar.gz",
+        "8.1" => "https://www.php.net/distributions/php-8.1.31.tar.gz",
+        "8.2" => "https://www.php.net/distributions/php-8.2.27.tar.gz",
+        "8.3" => "https://www.php.net/distributions/php-8.3.15.tar.gz",
+        "8.4" => "https://www.php.net/distributions/php-8.4.2.tar.gz",
+        _ => "https://www.php.net/distributions/php-8.3.15.tar.gz",
+    };
+    let full_ver = source_url.rsplit('/').next().unwrap().replace(".tar.gz", "").replace("php-", "");
+
+    format!(r#"#!/bin/bash
+# PHP source compile — dynamic detection (BT Panel style)
+# no set -e: extension failures must not abort the install
+PHP_VER="{php_ver}"
+PHP_FULL="{full_ver}"
+PHP_PREFIX="/www/server/php/$PHP_VER"
+PHP_SRC_URL="{source_url}"
+PHP_SRC_DIR="/tmp/php-build"
+SKIPPED=""
+MISSING=""
+
+echo "=== {action} PHP $PHP_VER (source compile) ==="
+
+# Detect OS
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+OS_ID="${{ID:-unknown}}"
+OS_VER="${{VERSION_ID:-0}}"
+
+install_deps() {{
+  echo "Installing build dependencies..."
+  if [ "$OS_ID" = "ubuntu" ] || [ "$OS_ID" = "debian" ]; then
+    for i in $(seq 1 20); do
+      if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && ! fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then break; fi
+      echo "Waiting for package manager lock... ($i/20)"
+      sleep 5
+    done
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true
+    # Core build tools (always install)
+    apt-get install -y build-essential autoconf pkg-config libtool re2c bison flex
+    # Each lib individually — failures recorded but not fatal
+    for pkg in libxml2-dev libssl-dev libcurl4-openssl-dev libsqlite3-dev \
+               libpng-dev libjpeg-dev libfreetype6-dev libzip-dev \
+               libonig-dev libsodium-dev libreadline-dev libxslt1-dev \
+               zlib1g-dev libbz2-dev libicu-dev libgmp-dev \
+               libwebp-dev libtidy-dev libmemcached-dev \
+               libenchant-dev libavif-dev; do
+      apt-get install -y "$pkg" 2>/dev/null || MISSING="$MISSING $pkg"
+    done
+  else
+    # CentOS / RHEL / Alma / Rocky
+    if command -v dnf >/dev/null 2>&1; then
+      PM="dnf"
+      # Enable CRB / PowerTools for devel packages
+      dnf install -y dnf-plugins-core 2>/dev/null
+      dnf config-manager --set-enabled crb 2>/dev/null \
+        || dnf config-manager --set-enabled powertools 2>/dev/null \
+        || dnf config-manager --set-enabled PowerTools 2>/dev/null || true
+    else
+      PM="yum"
+    fi
+    $PM install -y --nogpgcheck epel-release 2>/dev/null || true
+    # Core build tools
+    $PM install -y --nogpgcheck gcc gcc-c++ make autoconf automake libtool re2c bison flex pkgconf-pkg-config
+    # Each lib individually — CentOS 9 compatible names
+    for pkg in libxml2-devel openssl-devel libcurl-devel sqlite-devel \
+               libpng-devel libjpeg-devel freetype-devel libzip-devel \
+               oniguruma-devel libsodium-devel readline-devel libxslt-devel \
+               zlib-devel bzip2-devel libicu-devel gmp-devel \
+               libwebp-devel libtidy-devel enchant2-devel; do
+      $PM install -y --nogpgcheck "$pkg" 2>/dev/null || MISSING="$MISSING $pkg"
+    done
+  fi
+  [ -n "$MISSING" ] && echo "INFO: Some packages not available (non-fatal):$MISSING"
+}}
+
+# ponytail: detect lib availability — returns 0 if any marker found
+check_lib() {{
+  local name="$1"; shift
+  for f in "$@"; do
+    [ -f "$f" ] && return 0
+  done
+  pkg-config --exists "$name" 2>/dev/null && return 0
+  return 1
+}}
+
+if [ "{action}" = "install" ]; then
+  # Check if already installed
+  if [ -x "$PHP_PREFIX/sbin/php-fpm" ]; then
+    echo "PHP $PHP_VER is already installed at $PHP_PREFIX"
+    echo "ACTION_SUCCESS"
+    exit 0
+  fi
+
+  # Download source
+  echo "Downloading PHP $PHP_FULL source..."
+  mkdir -p "$PHP_SRC_DIR"
+  cd "$PHP_SRC_DIR"
+  if [ ! -f "php-$PHP_FULL.tar.gz" ]; then
+    curl -fSL "$PHP_SRC_URL" -o "php-$PHP_FULL.tar.gz" || {{ echo "ERROR: download failed"; exit 1; }}
+  fi
+  tar xzf "php-$PHP_FULL.tar.gz"
+  cd "php-$PHP_FULL"
+
+  # Build configure flags dynamically based on detected libraries
+  echo "Detecting available libraries..."
+  install_deps
+
+  CF="--prefix=$PHP_PREFIX"
+  CF="$CF --with-config-file-path=$PHP_PREFIX/etc"
+  CF="$CF --with-config-file-scan-dir=$PHP_PREFIX/etc/php.d"
+  CF="$CF --enable-fpm --with-fpm-user=www --with-fpm-group=www"
+  # Core extensions (always available, compiled into PHP)
+  CF="$CF --with-mysqli --with-pdo-mysql --enable-opcache"
+  CF="$CF --enable-bcmath --enable-calendar --enable-exif --enable-ftp"
+  CF="$CF --enable-pcntl --enable-shmop --enable-soap"
+  CF="$CF --enable-sysvmsg --enable-sysvsem --enable-sysvshm"
+  CF="$CF --enable-sockets --with-gettext --with-mhash"
+  # Optional: openssl
+  check_lib openssl /usr/include/openssl/ssl.h /usr/local/include/openssl/ssl.h \
+    && CF="$CF --with-openssl" || echo "SKIP: openssl"
+  # Optional: curl
+  check_lib libcurl /usr/include/curl/curl.h /usr/local/include/curl/curl.h \
+    && CF="$CF --with-curl" || echo "SKIP: curl"
+  # Optional: zlib
+  check_lib zlib /usr/include/zlib.h /usr/local/include/zlib.h \
+    && CF="$CF --with-zlib" || echo "SKIP: zlib"
+  # Optional: bz2 — explicit path for CentOS 9
+  check_lib bz2 /usr/include/bzlib.h /usr/local/include/bzlib.h \
+    && CF="$CF --with-bz2=/usr" || echo "SKIP: bz2"
+  # Optional: readline
+  check_lib readline /usr/include/readline/readline.h /usr/local/include/readline/readline.h \
+    && CF="$CF --with-readline" || echo "SKIP: readline"
+  # Optional: mbstring (needs oniguruma)
+  check_lib oniguruma /usr/include/oniguruma.h /usr/local/include/oniguruma.h \
+    && CF="$CF --enable-mbstring" || echo "SKIP: mbstring"
+  # Optional: zip
+  check_lib libzip /usr/include/zip.h /usr/local/include/zip.h \
+    && CF="$CF --with-zip" || echo "SKIP: zip"
+  # Optional: intl (needs ICU)
+  (check_lib icu-uc /usr/include/unicode/utypes.h /usr/local/include/unicode/utypes.h \
+    || [ -f /usr/bin/icu-config ]) \
+    && CF="$CF --enable-intl" || echo "SKIP: intl"
+  # Optional: xsl
+  check_lib libxslt /usr/include/libxslt/xslt.h /usr/local/include/libxslt/xslt.h \
+    && CF="$CF --with-xsl" || echo "SKIP: xsl"
+  # Optional: sodium
+  check_lib libsodium /usr/include/sodium.h /usr/local/include/sodium.h \
+    && CF="$CF --with-sodium" || echo "SKIP: sodium"
+  # Optional: tidy
+  check_lib tidy /usr/include/tidy.h /usr/include/tidy/tidybuffio.h /usr/local/include/tidy.h \
+    && CF="$CF --with-tidy" || echo "SKIP: tidy"
+  # Optional: enchant
+  (check_lib enchant-2 /usr/include/enchant-2/enchant.h /usr/local/include/enchant-2/enchant.h \
+    || check_lib enchant /usr/include/enchant.h /usr/local/include/enchant.h) \
+    && CF="$CF --enable-enchant" || echo "SKIP: enchant"
+  # Optional: avif (PHP 8.1+)
+  if [ "$PHP_VER" != "7.4" ] && [ "$PHP_VER" != "8.0" ]; then
+    check_lib libavif /usr/include/avif/avif.h /usr/local/include/avif/avif.h \
+      && CF="$CF --with-avif" || echo "SKIP: avif"
+  fi
+  # Optional: gmp
+  check_lib gmp /usr/include/gmp.h /usr/include/x86_64-linux-gnu/gmp.h /usr/local/include/gmp.h \
+    && CF="$CF --with-gmp" || echo "SKIP: gmp"
+  # GD + image libs — version-dependent flags
+  if check_lib libpng /usr/include/png.h /usr/include/libpng16/png.h /usr/local/include/png.h; then
+    if [ "$PHP_VER" = "7.4" ]; then
+      CF="$CF --with-gd --enable-gd-native-ttf"
+      [ -f /usr/include/jpeglib.h ] && CF="$CF --with-jpeg-dir=/usr"
+      [ -f /usr/include/freetype2/freetype/freetype.h ] || [ -f /usr/include/freetype/freetype.h ] \
+        && CF="$CF --with-freetype-dir=/usr"
+      check_lib libwebp /usr/include/webp/encode.h /usr/local/include/webp/encode.h \
+        && CF="$CF --with-webp-dir=/usr" || true
+    else
+      CF="$CF --enable-gd --with-jpeg --with-freetype"
+      check_lib libwebp /usr/include/webp/encode.h /usr/local/include/webp/encode.h \
+        && CF="$CF --with-webp" || echo "SKIP: webp"
+    fi
+  else
+    echo "SKIP: gd"
+  fi
+
+  echo "Configuring PHP $PHP_FULL..."
+  echo "Configure flags: $CF"
+  eval ./configure $CF 2>&1 | tail -10
+  if [ ${{PIPESTATUS[0]}} -ne 0 ]; then
+    echo "ERROR: configure failed"
+    exit 1
+  fi
+
+  # Compile & install
+  echo "Compiling PHP $PHP_FULL (this may take 5-15 minutes)..."
+  make -j$(nproc)
+  if [ $? -ne 0 ]; then
+    echo "ERROR: make failed"
+    exit 1
+  fi
+  make install
+  if [ $? -ne 0 ]; then
+    echo "ERROR: make install failed"
+    exit 1
+  fi
+
+  # Create user/group if not exists
+  id -u www &>/dev/null || useradd -r -s /sbin/nologin www
+
+  # Setup config files
+  echo "Setting up configuration..."
+  mkdir -p "$PHP_PREFIX/etc/php.d"
+  cp php.ini-production "$PHP_PREFIX/etc/php.ini"
+  cp "$PHP_PREFIX/etc/php-fpm.conf.default" "$PHP_PREFIX/etc/php-fpm.conf"
+  mkdir -p "$PHP_PREFIX/etc/php-fpm.d"
+  cp sapi/fpm/php-fpm.conf "$PHP_PREFIX/etc/php-fpm.conf" 2>/dev/null || true
+  cat > "$PHP_PREFIX/etc/php-fpm.d/www.conf" << 'WCONF'
+[www]
+user = www
+group = www
+listen = /tmp/php-cgi-VER.sock
+listen.owner = www
+listen.group = www
+pm = dynamic
+pm.max_children = 50
+pm.start_servers = 5
+pm.min_spare_servers = 2
+pm.max_spare_servers = 10
+pm.max_requests = 500
+request_terminate_timeout = 300
+WCONF
+  sed -i "s/VER.sock/$PHP_VER.sock/g" "$PHP_PREFIX/etc/php-fpm.d/www.conf"
+
+  # Create systemd service
+  SVC_NAME="php$(echo $PHP_VER | tr -d '.')-fpm"
+  cat > "/etc/systemd/system/$SVC_NAME.service" << SVCEOF
+[Unit]
+Description=PHP $PHP_VER FPM (source compile)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$PHP_PREFIX/sbin/php-fpm --nodaemonize --fpm-config $PHP_PREFIX/etc/php-fpm.conf
+ExecReload=/bin/kill -USR2 $MAINPID
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+  systemctl daemon-reload
+  systemctl enable "$SVC_NAME"
+  systemctl start "$SVC_NAME"
+  echo "PHP $PHP_VER installed to $PHP_PREFIX"
+
+  # Install PECL extensions (each one independent, failures are non-fatal)
+  echo "Installing PECL extensions..."
+  export PATH="$PHP_PREFIX/bin:$PHP_PREFIX/sbin:$PATH"
+  "$PHP_PREFIX/bin/pecl" channel-update pecl.php.net 2>/dev/null || true
+
+  for ext in redis imagick swoole memcached mongodb; do
+    echo "--- Installing $ext ---"
+    if yes | "$PHP_PREFIX/bin/pecl" install "$ext" 2>&1 | tail -5; then
+      SO_FILE=$(find "$PHP_PREFIX/lib/php/extensions" -name "${{ext}}.so" 2>/dev/null | head -1)
+      if [ -n "$SO_FILE" ]; then
+        echo "extension=$SO_FILE" >> "$PHP_PREFIX/etc/php.ini"
+        echo "OK: $ext installed"
+      else
+        echo "SKIP: $ext .so not found after install"
+        SKIPPED="$SKIPPED $ext"
+      fi
+    else
+      echo "SKIP: $ext install failed"
+      SKIPPED="$SKIPPED $ext"
+    fi
+  done
+
+  # Enable opcache in php.ini
+  grep -q 'zend_extension.*opcache' "$PHP_PREFIX/etc/php.ini" 2>/dev/null || {{
+    OP_SO=$(find "$PHP_PREFIX/lib/php/extensions" -name "opcache.so" 2>/dev/null | head -1)
+    [ -n "$OP_SO" ] && echo "zend_extension=$OP_SO" >> "$PHP_PREFIX/etc/php.ini"
+  }}
+
+  # Restart to load extensions
+  systemctl restart "$SVC_NAME"
+
+  [ -n "$SKIPPED" ] && echo "WARNING: skipped extensions:$SKIPPED"
+  echo "PHP $PHP_VER source compile complete"
+else
+  # Uninstall
+  echo "Removing PHP $PHP_VER (source compile)..."
+  SVC_NAME="php$(echo $PHP_VER | tr -d '.')-fpm"
+  systemctl stop "$SVC_NAME" 2>/dev/null || true
+  systemctl disable "$SVC_NAME" 2>/dev/null || true
+  rm -f "/etc/systemd/system/$SVC_NAME.service"
+  systemctl daemon-reload
+  rm -rf "$PHP_PREFIX"
+  rm -rf /tmp/php-build
+  echo "PHP $PHP_VER removed"
+fi
+echo "ACTION_SUCCESS"
+"#, php_ver = php_ver, full_ver = full_ver, source_url = source_url, action = action)
+}
+
+fn build_software_script(
+    _os: &OsInfo,
+    software: &str,
+    action: &str,
+    options: &str,
+    is_debian: bool,
+) -> String {
+    let (pkg_mgr, pkg_install, pkg_remove) = if is_debian {
+        ("apt-get", "apt-get install -y", "apt-get purge -y")
+    } else {
+        ("yum", "yum install -y --nogpgcheck --assumeyes", "yum remove -y --assumeyes")
+    };
+
+    let (packages, service_name, post_install, post_remove) = match software {
+        "redis" => {
+            // ponytail：已移除版本选择；由系统包管理器选择版本
+            return format!(r#"#!/bin/bash
+echo "=== {} Redis ==="
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+if [ "{}" = "install" ]; then
+  if command -v redis-server &>/dev/null; then
+    echo "Redis is already installed: $(redis-server --version 2>/dev/null | head -1)"
+    echo "ACTION_SUCCESS"
+    exit 0
+  fi
+  echo "Installing Redis..."
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    # Wait for apt lock
+    for i in $(seq 1 20); do
+      if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && ! fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
+        break
+      fi
+      echo "Waiting for package manager lock... ($i/20)"
+      sleep 5
+    done
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true
+    apt-get install -y redis-server
+  else
+    yum install -y --nogpgcheck --assumeyes epel-release
+    yum install -y --nogpgcheck --assumeyes redis
+  fi
+  systemctl enable redis-server && systemctl start redis-server 2>/dev/null || systemctl enable redis && systemctl start redis
+else
+  echo "Removing Redis..."
+  systemctl stop redis-server 2>/dev/null || systemctl stop redis 2>/dev/null || true
+  systemctl disable redis-server 2>/dev/null || systemctl disable redis 2>/dev/null || true
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    apt-get purge -y redis-server 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+  else
+    yum remove -y redis 2>/dev/null || true
+  fi
+fi
+echo "ACTION_SUCCESS"
+"#, action, action);
+        }
+        "memcached" => (
+            "memcached",
+            "memcached",
+            "systemctl enable memcached && systemctl start memcached",
+            "systemctl stop memcached 2>/dev/null; systemctl disable memcached 2>/dev/null",
+        ),
+        "nodejs" => {
+            // ponytail：已移除版本选择；由系统包管理器选择版本
+            return format!(r#"#!/bin/bash
+echo "=== {} Node.js ==="
+if [ "{}" = "install" ]; then
+  if command -v node &>/dev/null; then
+    echo "Node.js is already installed: $(node -v 2>/dev/null)"
+    echo "ACTION_SUCCESS"
+    exit 0
+  fi
+  echo "Installing Node.js..."
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+      # Wait for apt lock
+      for i in $(seq 1 20); do
+        if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && ! fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
+          break
+        fi
+        echo "Waiting for package manager lock... ($i/20)"
+        sleep 5
+      done
+      apt-get update -q --allow-releaseinfo-change 2>&1 || true
+      apt-get install -y nodejs npm
+    else
+      yum install -y --nogpgcheck --assumeyes nodejs npm
+    fi
+  fi
+else
+  echo "Removing Node.js..."
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+      apt-get purge -y nodejs npm 2>/dev/null || true
+      apt-get autoremove -y 2>/dev/null || true
+    else
+      yum remove -y nodejs npm 2>/dev/null || true
+    fi
+  fi
+fi
+echo "ACTION_SUCCESS"
+"#, action, action);
+        }
+        "docker" => {
+            // ponytail：等待 dpkg 锁；必须在 get-docker.sh 内部调用 apt-get 之前运行
+            let lock_wait = r#"for _i in $(seq 1 20); do
+    if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && ! fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then break; fi
+    echo "Waiting for package manager lock... ($_i/20)"
+    sleep 5
+  done"#;
+            let install_cmd = if options == "aliyun" {
+                // ponytail：绕过 get.docker.com（被 GFW 阻断）；直接使用阿里云 Docker CE 仓库
+                format!(r#"{} && . /etc/os-release
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true; apt-get install -y ca-certificates curl gnupg
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/$ID/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/$ID $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  else
+    yum install -y --nogpgcheck --assumeyes yum-utils
+    yum-config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+    sed -i 's+download.docker.com+mirrors.aliyun.com/docker-ce+' /etc/yum.repos.d/docker-ce.repo
+    yum install -y --nogpgcheck --assumeyes docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  fi"#, lock_wait)
+            } else {
+                // 官方源的直接管道
+                format!("{} && curl -fsSL https://get.docker.com | sh", lock_wait)
+            };
+            return format!(r#"#!/bin/bash
+echo "=== {} Docker ==="
+if [ "{}" = "install" ]; then
+  if command -v docker &>/dev/null; then
+    echo "Docker already installed: $(docker -v)"
+    echo "ACTION_SUCCESS"
+    exit 0
+  fi
+  echo "Installing Docker..."
+  {}
+  systemctl enable docker && systemctl start docker
+  usermod -aG docker $(whoami) 2>/dev/null || true
+else
+  echo "Removing Docker..."
+  systemctl stop docker 2>/dev/null || true
+  systemctl disable docker 2>/dev/null || true
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+      apt-get purge -y docker-ce docker-ce-cli containerd.io docker-compose-plugin 2>/dev/null || true
+      apt-get autoremove -y 2>/dev/null || true
+    else
+      yum remove -y docker-ce docker-ce-cli containerd.io docker-compose-plugin 2>/dev/null || true
+    fi
+  fi
+  rm -rf /var/lib/docker 2>/dev/null || true
+  rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg /etc/yum.repos.d/docker-ce.repo 2>/dev/null || true
+fi
+echo "ACTION_SUCCESS"
+"#, action, action, install_cmd);
+        }
+        "zip" => (
+            "zip",
+            "zip",
+            "",
+            "",
+        ),
+        "unzip" => (
+            "unzip",
+            "unzip",
+            "",
+            "",
+        ),
+        "nginx" => (
+            "nginx",
+            "nginx",
+            "systemctl enable nginx && systemctl start nginx",
+            "systemctl stop nginx 2>/dev/null; systemctl disable nginx 2>/dev/null",
+        ),
+        "mysql" => {
+            // ponytail：options = "mariadb" 或 "mysql" 用于强制指定变体；为空则自动检测
+            let script = r#"#!/bin/bash
+set -e
+echo "=== __ACTION__ MySQL/MariaDB ==="
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+
+if [ "__ACTION__" = "install" ]; then
+  VARIANT="__OPTIONS__"
+  
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    # Wait for apt lock
+    for i in $(seq 1 20); do
+      if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && ! fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
+        break
+      fi
+      echo "Waiting for package manager lock... ($i/20)"
+      sleep 5
+    done
+    apt-get update -q --allow-releaseinfo-change 2>&1 || true
+    
+    # Auto-detect variant if not specified
+    if [ -z "$VARIANT" ]; then
+      M_CAND=$(apt-cache policy mariadb-server 2>/dev/null | grep 'Candidate:' | awk '{print $2}')
+      MY_CAND=$(apt-cache policy mysql-server 2>/dev/null | grep 'Candidate:' | awk '{print $2}')
+      if [ -n "$M_CAND" ] && [ "$M_CAND" != "(none)" ]; then
+        VARIANT="mariadb"
+      elif [ -n "$MY_CAND" ] && [ "$MY_CAND" != "(none)" ]; then
+        VARIANT="mysql"
+      else
+        err "No MySQL or MariaDB package available in system repos"
+      fi
+    fi
+    
+    if [ "$VARIANT" = "mysql" ]; then
+      apt-get install -y debconf-utils
+      echo "mysql-server mysql-server/root_password password " | debconf-set-selections
+      echo "mysql-server mysql-server/root_password_again password " | debconf-set-selections
+      DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server
+      SVC_NAME="mysql"
+    else
+      apt-get install -y mariadb-server
+      SVC_NAME="mariadb"
+    fi
+  else
+    # Auto-detect variant if not specified
+    if [ -z "$VARIANT" ]; then
+      if yum list available mariadb-server 2>/dev/null | grep -q mariadb; then
+        VARIANT="mariadb"
+      elif yum list available mysql-server 2>/dev/null | grep -q mysql; then
+        VARIANT="mysql"
+      else
+        err "No MySQL or MariaDB package available in system repos"
+      fi
+    fi
+    
+    if [ "$VARIANT" = "mysql" ]; then
+      yum install -y --nogpgcheck --assumeyes mysql-server
+      SVC_NAME="mysqld"
+    else
+      yum install -y --nogpgcheck --assumeyes mariadb-server
+      SVC_NAME="mariadb"
+    fi
+  fi
+  
+  echo "Installed variant: $VARIANT (service: $SVC_NAME)"
+  
+  systemctl enable $SVC_NAME
+  systemctl start $SVC_NAME
+  
+  echo "Waiting for database to be ready..."
+  for i in $(seq 1 30); do
+    if mysqladmin ping 2>/dev/null | grep -q alive; then
+      echo "Database is ready"
+      break
+    fi
+    sleep 1
+  done
+  
+  echo "Generating random root password..."
+  # ponytail: alphanumeric only — avoids shell/SQL escaping issues with special chars
+  ROOT_PASS=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 20)
+  
+  # ponytail: single mysql invocation handles all setup; works on fresh install (unix_socket auth)
+  # Uses generic IDENTIFIED BY which is compatible with both MariaDB and MySQL
+  mysql -u root <<SETUP_EOF
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${ROOT_PASS}';
+DELETE FROM mysql.user WHERE User='';
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost','127.0.0.1','::1');
+FLUSH PRIVILEGES;
+SETUP_EOF
+  
+  echo "$ROOT_PASS" > /tmp/mysql_root_password.txt
+  chmod 600 /tmp/mysql_root_password.txt
+  printf '[client]\nuser=root\npassword=%s\n' "$ROOT_PASS" > /root/.my.cnf
+  chmod 600 /root/.my.cnf
+  echo "========================================="
+  echo "Root password: $ROOT_PASS"
+  echo "Saved to /tmp/mysql_root_password.txt and /root/.my.cnf"
+  echo "========================================="
+else
+  echo "Removing MySQL/MariaDB..."
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+  fi
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    SVC=$(systemctl list-unit-files | grep -E '^mysql|^mariadb' | awk '{print $1}' | head -1)
+    systemctl stop $SVC 2>/dev/null || true
+    systemctl disable $SVC 2>/dev/null || true
+    apt-get install -y debconf-utils 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y mysql-server mysql-client mysql-common mariadb-server 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null || true
+    rm -rf /var/lib/mysql /etc/mysql 2>/dev/null || true
+  else
+    SVC=$(systemctl list-unit-files | grep -E '^mysql|^mariadb' | awk '{print $1}' | head -1)
+    systemctl stop $SVC 2>/dev/null || true
+    systemctl disable $SVC 2>/dev/null || true
+    yum remove -y mysql-server mariadb-server 2>/dev/null || true
+    rm -rf /var/lib/mysql /etc/my.cnf 2>/dev/null || true
+  fi
+fi
+echo "ACTION_SUCCESS"
+"#;
+            return script.replace("__ACTION__", action).replace("__OPTIONS__", options);
+        }
+        "php" => {
+            // ponytail：源码编译模式；options = "source:X.Y"，例如 "source:8.3"
+            if let Some(php_ver) = options.strip_prefix("source:") {
+                return build_php_source_compile_script(php_ver, action);
+            }
+            // ponytail：通用 PHP；options 包含版本（例如 "8.2"），为空表示使用默认版本
+            let version = if options.is_empty() {
+                "".to_string()
+            } else {
+                options.to_string()
+            };
+
+            let script = r#"#!/bin/bash
+# ponytail: no set -e — optional extensions may be missing from repos
+echo "=== __ACTION__ PHP __VERSION__ ==="
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+SKIPPED=""
+if [ "__ACTION__" = "install" ]; then
+  echo "Installing PHP..."
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    # Wait for apt lock
+    for i in $(seq 1 20); do
+      if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && ! fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
+        break
+      fi
+      echo "Waiting for package manager lock... ($i/20)"
+      sleep 5
+    done
+    apt-get update -q 2>&1
+    if [ -n "__VERSION__" ]; then
+      # Core package — must succeed
+      apt-get install -y php__VERSION__-fpm || { echo "ERROR: php__VERSION__-fpm install failed"; exit 1; }
+      # Optional extensions — skip if missing
+      for pkg in php__VERSION__-mysql php__VERSION__-curl php__VERSION__-mbstring php__VERSION__-xml php__VERSION__-zip php__VERSION__-gd php__VERSION__-bcmath php__VERSION__-opcache; do
+        apt-get install -y "$pkg" || { echo "SKIP: $pkg not available"; SKIPPED="$SKIPPED $pkg"; }
+      done
+    else
+      apt-get install -y php-fpm || { echo "ERROR: php-fpm install failed"; exit 1; }
+      for pkg in php-mysql php-curl php-mbstring php-xml php-zip php-gd php-bcmath php-opcache; do
+        apt-get install -y "$pkg" || { echo "SKIP: $pkg not available"; SKIPPED="$SKIPPED $pkg"; }
+      done
+    fi
+    # ponytail: use exact versioned service name when version is known — avoids picking older php from list-units
+    if [ -n "__VERSION__" ]; then
+      SVC="php__VERSION__-fpm"
+    else
+      SVC=$(systemctl list-units --type=service | grep -E 'php[0-9.]*-fpm' | awk '{print $1}' | head -1 | sed 's/.service//')
+    fi
+  else
+    yum install -y --nogpgcheck --assumeyes epel-release 2>/dev/null || true
+    if [ -n "__VERSION__" ]; then
+      VER_NODOT=$(echo "__VERSION__" | tr -d '.')
+      # ponytail: try DNF module stream first (RHEL 8+/CentOS 8+), fallback to Remi SCL
+      if command -v dnf &>/dev/null && dnf module list php 2>/dev/null | grep -qE '^php[[:space:]]'; then
+        dnf module enable -y php:__VERSION__ 2>/dev/null || true
+        if dnf list available php-fpm 2>/dev/null | grep -q '^php-fpm'; then
+          dnf install -y php-fpm || { echo "ERROR: php-fpm install failed"; exit 1; }
+          for pkg in php-mysqlnd php-curl php-mbstring php-xml php-zip php-gd php-bcmath php-opcache; do
+            dnf install -y "$pkg" || { echo "SKIP: $pkg not available"; SKIPPED="$SKIPPED $pkg"; }
+          done
+          SVC="php-fpm"
+        else
+          # Fallback to Remi SCL
+          yum install -y --nogpgcheck --assumeyes https://rpms.remirepo.net/enterprise/remi-release-$(rpm -E %{rhel}).rpm 2>/dev/null || true
+          yum module enable -y php:remi-__VERSION__ 2>/dev/null || true
+          yum install -y --nogpgcheck --assumeyes php${VER_NODOT}-php-fpm || { echo "ERROR: php${VER_NODOT}-php-fpm install failed"; exit 1; }
+          for pkg in php${VER_NODOT}-php-mysqlnd php${VER_NODOT}-php-curl php${VER_NODOT}-php-mbstring php${VER_NODOT}-php-xml php${VER_NODOT}-php-zip php${VER_NODOT}-php-gd php${VER_NODOT}-php-bcmath php${VER_NODOT}-php-opcache; do
+            yum install -y --nogpgcheck --assumeyes "$pkg" || { echo "SKIP: $pkg not available"; SKIPPED="$SKIPPED $pkg"; }
+          done
+          SVC="php${VER_NODOT}-php-fpm"
+        fi
+      else
+        # yum (CentOS 7) or no module: use Remi SCL directly
+        yum install -y --nogpgcheck --assumeyes https://rpms.remirepo.net/enterprise/remi-release-$(rpm -E %{rhel}).rpm 2>/dev/null || true
+        yum install -y --nogpgcheck --assumeyes php${VER_NODOT}-php-fpm || { echo "ERROR: php${VER_NODOT}-php-fpm install failed"; exit 1; }
+        for pkg in php${VER_NODOT}-php-mysqlnd php${VER_NODOT}-php-curl php${VER_NODOT}-php-mbstring php${VER_NODOT}-php-xml php${VER_NODOT}-php-zip php${VER_NODOT}-php-gd php${VER_NODOT}-php-bcmath php${VER_NODOT}-php-opcache; do
+          yum install -y --nogpgcheck --assumeyes "$pkg" || { echo "SKIP: $pkg not available"; SKIPPED="$SKIPPED $pkg"; }
+        done
+        SVC="php${VER_NODOT}-php-fpm"
+      fi
+    else
+      yum install -y --nogpgcheck --assumeyes php-fpm || { echo "ERROR: php-fpm install failed"; exit 1; }
+      for pkg in php-mysqlnd php-curl php-mbstring php-xml php-zip php-gd php-bcmath php-opcache; do
+        yum install -y --nogpgcheck --assumeyes "$pkg" || { echo "SKIP: $pkg not available"; SKIPPED="$SKIPPED $pkg"; }
+      done
+      SVC="php-fpm"
+    fi
+  fi
+  if [ -n "$SVC" ]; then
+    systemctl enable "$SVC" && systemctl start "$SVC"
+  fi
+  [ -n "$SKIPPED" ] && echo "WARNING: skipped packages (not in repo):$SKIPPED"
+else
+  echo "Removing PHP..."
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    systemctl list-units --type=service | grep -E 'php[0-9.]*-fpm' | awk '{print $1}' | xargs -r systemctl stop 2>/dev/null || true
+    systemctl list-units --type=service | grep -E 'php[0-9.]*-fpm' | awk '{print $1}' | xargs -r systemctl disable 2>/dev/null || true
+    apt-get purge -y 'php*' 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+  else
+    systemctl list-units --type=service | grep -E 'php' | awk '{print $1}' | xargs -r systemctl stop 2>/dev/null || true
+    systemctl list-units --type=service | grep -E 'php' | awk '{print $1}' | xargs -r systemctl disable 2>/dev/null || true
+    yum remove -y 'php*' 2>/dev/null || true
+  fi
+fi
+echo "ACTION_SUCCESS"
+"#;
+            return script
+                .replace("__ACTION__", action)
+                .replace("__VERSION__", &version);
+        }
+        _ if software.starts_with("php") => {
+            // ponytail：动态 PHP 版本；统一处理任意 phpX.Y 名称
+            let php_ver = software.strip_prefix("php").unwrap_or("8.2");
+            // ponytail：保留完整扩展列表用于卸载清理；安装时按软件包逐个处理
+            let extensions = format!(
+                "php{}-fpm php{}-mysql php{}-curl php{}-mbstring php{}-xml php{}-zip php{}-gd php{}-bcmath php{}-opcache",
+                php_ver, php_ver, php_ver, php_ver, php_ver, php_ver, php_ver, php_ver, php_ver
+            );
+            let svc_name = format!("php{}-fpm", php_ver);
+            let script = "#!/bin/bash\n\
+# ponytail: no set -e — optional extensions may be missing from repos\n\
+SKIPPED=\"\"\n\
+echo \"=== __ACTION__ PHP __VER__ ===\"\n\
+if [ -f /etc/os-release ]; then\n\
+  . /etc/os-release\n\
+fi\n\
+if [ \"__ACTION__\" = \"install\" ]; then\n\
+  echo \"Installing PHP __VER__...\"\n\
+  if [ \"$ID\" = \"ubuntu\" ] || [ \"$ID\" = \"debian\" ]; then\n\
+    # Wait for apt lock\n\
+    for i in $(seq 1 20); do\n\
+      if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && ! fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then\n\
+        break\n\
+      fi\n\
+      echo \"Waiting for package manager lock... ($i/20)\"\n\
+      sleep 5\n\
+    done\n\
+    apt-get update -q 2>&1\n\
+    apt-get install -y software-properties-common\n\
+    add-apt-repository -y ppa:ondrej/php 2>/dev/null || true\n\
+    apt-get update -q 2>&1\n\
+    apt-get install -y php__VER__-fpm || { echo \"ERROR: php__VER__-fpm install failed\"; exit 1; }\n\
+    for pkg in php__VER__-mysql php__VER__-curl php__VER__-mbstring php__VER__-xml php__VER__-zip php__VER__-gd php__VER__-bcmath php__VER__-opcache; do\n\
+      apt-get install -y \"$pkg\" || { echo \"SKIP: $pkg not available\"; SKIPPED=\"$SKIPPED $pkg\"; }\n\
+    done\n\
+    SVC_NAME=php__VER__-fpm\n\
+  else\n\
+    # RHEL: try default DNF module stream first (RHEL 8+/Alibaba Cloud Linux 3)\n\
+    SVC_NAME=php-fpm\n\
+    dnf module enable -y php:__VER__ 2>/dev/null\n\
+    if dnf list available php-fpm 2>/dev/null | grep -q '^php-fpm'; then\n\
+      dnf install -y php-fpm || { echo \"ERROR: php-fpm install failed\"; exit 1; }\n\
+      for pkg in php-mysqlnd php-curl php-mbstring php-xml php-zip php-gd php-bcmath php-opcache; do\n\
+        dnf install -y \"$pkg\" || { echo \"SKIP: $pkg not available\"; SKIPPED=\"$SKIPPED $pkg\"; }\n\
+      done\n\
+    else\n\
+      # Fallback to Remi SCL\n\
+      yum install -y --nogpgcheck --assumeyes epel-release 2>/dev/null || true\n\
+      yum install -y --nogpgcheck --assumeyes https://rpms.remirepo.net/enterprise/remi-release-$(rpm -E %{rhel}).rpm 2>/dev/null || true\n\
+      yum module enable -y php:remi-__VER__ 2>/dev/null || true\n\
+      REMI_VER=$(echo __VER__ | tr -d '.')\n\
+      yum install -y --nogpgcheck --assumeyes php${REMI_VER}-php-fpm || { echo \"ERROR: php${REMI_VER}-php-fpm install failed\"; exit 1; }\n\
+      SVC_NAME=php${REMI_VER}-php-fpm\n\
+      for pkg in php${REMI_VER}-php-mysqlnd php${REMI_VER}-php-curl php${REMI_VER}-php-mbstring php${REMI_VER}-php-xml php${REMI_VER}-php-zip php${REMI_VER}-php-gd php${REMI_VER}-php-bcmath php${REMI_VER}-php-opcache; do\n\
+        yum install -y --nogpgcheck --assumeyes \"$pkg\" || { echo \"SKIP: $pkg not available\"; SKIPPED=\"$SKIPPED $pkg\"; }\n\
+      done\n\
+    fi\n\
+  fi\n\
+  systemctl enable $SVC_NAME && systemctl start $SVC_NAME\n\
+  [ -n \"$SKIPPED\" ] && echo \"WARNING: skipped packages (not in repo):$SKIPPED\"\n\
+else\n\
+  echo \"Removing PHP __VER__...\"\n\
+  systemctl stop $SVC_NAME 2>/dev/null || true\n\
+  systemctl disable $SVC_NAME 2>/dev/null || true\n\
+  if [ \"$ID\" = \"ubuntu\" ] || [ \"$ID\" = \"debian\" ]; then\n\
+    apt-get purge -y __EXT__ 2>/dev/null || true\n\
+  else\n\
+    yum remove -y php__VER__-fpm php__VER__-mysqlnd php__VER__-curl php__VER__-mbstring php__VER__-xml php__VER__-zip php__VER__-gd php__VER__-bcmath php__VER__-opcache 2>/dev/null || true\n\
+  fi\n\
+fi\n\
+echo \"ACTION_SUCCESS\"\n";
+            return script
+                .replace("__ACTION__", action)
+                .replace("__VER__", php_ver)
+                .replace("__EXT__", &extensions)
+                .replace("__SVC__", &svc_name);
+        }
+        "apache" | "apache2.2" | "apache2.4" => {
+            // ponytail：已移除版本选择；由系统包管理器选择版本
+            let svc_name = "apache2";
+            let script = r#"#!/bin/bash
+set -e
+echo "=== __ACTION__ Apache ==="
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+
+if [ "__ACTION__" = "install" ]; then
+  echo "Installing Apache..."
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    apt-get update -q 2>&1
+    apt-get install -y apache2 apache2-utils
+  else
+    yum install -y httpd httpd-tools mod_ssl
+  fi
+  systemctl enable __SVC__ && systemctl start __SVC__
+else
+  echo "Removing Apache..."
+  systemctl stop __SVC__ 2>/dev/null || true
+  systemctl disable __SVC__ 2>/dev/null || true
+  for alt_svc in apache httpd Baota-Apache; do
+    systemctl stop "$alt_svc" 2>/dev/null || true
+    systemctl disable "$alt_svc" 2>/dev/null || true
+  done
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y apache2 apache2-bin apache2-data apache2-utils libapache2-mod-* 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+  else
+    yum remove -y httpd httpd-tools mod_ssl httpd-manual 2>/dev/null || true
+    yum autoremove -y 2>/dev/null || true
+  fi
+  rm -rf /etc/apache2 2>/dev/null || true
+  rm -rf /var/www/html 2>/dev/null || true
+  rm -rf /etc/httpd 2>/dev/null || true
+fi
+echo "ACTION_SUCCESS"
+"#;
+            return script
+                .replace("__ACTION__", action)
+                .replace("__SVC__", svc_name);
+        }
+        "postgresql" => {
+            return format!(r#"#!/bin/bash
+echo "=== {} PostgreSQL ==="
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+fi
+if [ "{}" = "install" ]; then
+  if command -v postgres &>/dev/null; then
+    echo "PostgreSQL already installed: $(psql -V 2>/dev/null | head -1)"
+    echo "ACTION_SUCCESS"
+    exit 0
+  fi
+  echo "Installing PostgreSQL..."
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    apt-get update -q 2>&1
+    apt-get install -y postgresql postgresql-contrib
+  else
+    yum install -y --nogpgcheck --assumeyes postgresql-server postgresql-contrib
+    postgresql-setup --initdb 2>/dev/null || true
+  fi
+  systemctl enable postgresql && systemctl start postgresql
+else
+  echo "Removing PostgreSQL..."
+  systemctl stop postgresql 2>/dev/null || true
+  systemctl disable postgresql 2>/dev/null || true
+  if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    echo "postgresql-* postgresql/remove_data_directory boolean true" | debconf-set-selections 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y postgresql postgresql-* 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+    rm -rf /var/lib/postgresql /etc/postgresql 2>/dev/null || true
+  else
+    yum remove -y postgresql-server postgresql-contrib postgresql 2>/dev/null || true
+    rm -rf /var/lib/pgsql /etc/postgresql 2>/dev/null || true
+  fi
+fi
+echo "ACTION_SUCCESS"
+"#, action, action);
+        }
+        _ => return format!("echo 'Unknown software: {}'", software),
+    };
+
+    format!(r#"#!/bin/bash
+echo "=== {} {} ==="
+if [ "{}" = "install" ]; then
+  if command -v {} &>/dev/null || dpkg -l {} 2>/dev/null | grep -q ^ii; then
+    echo "{} is already installed"
+  else
+    echo "Installing {}..."
+    # Wait for apt/yum/dnf/rpm lock to be released (max 60s)
+    for i in $(seq 1 20); do
+      if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && ! fuser /var/cache/apt/archives/lock >/dev/null 2>&1 && ! fuser /var/run/yum.pid >/dev/null 2>&1 && ! fuser /var/run/dnf.pid >/dev/null 2>&1 && ! fuser /var/cache/yum >/dev/null 2>&1 && ! fuser /var/lib/rpm/.rpm.lock >/dev/null 2>&1; then
+        break
+      fi
+      echo "Waiting for package manager lock... ($i/20)"
+      sleep 5
+    done
+    {} update -y -q 2>&1 || true
+    {} {} 2>&1
+    {}
+  fi
+else
+  echo "Removing {}..."
+  systemctl stop {} 2>/dev/null || true
+  {} {} 2>&1
+  {}
+  # Clean up auto-installed dependencies
+  {} autoremove -y 2>/dev/null || true
+fi
+echo "ACTION_SUCCESS"
+"#,
+        action, software, action,
+        if software == "mysql" { "mysql" } else { software },
+        packages,
+        software,
+        software,
+        pkg_mgr,
+        pkg_install, packages,
+        if action == "install" { post_install } else { "" },
+        software,
+        service_name,
+        pkg_remove, packages,
+        post_remove,
+        pkg_mgr,
+    )
+}
+
+// ===== Server Settings =====
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SshKeyPair {
+    pub public_key_openssh: String,
+    pub private_key_path: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SshAuthMode {
+    pub password: bool,
+    pub pubkey: bool,
+}
+
+/// 在本地生成 SSH 密钥对（无需 SSH 连接）
+pub fn generate_ssh_keypair(
+    algorithm: &str,
+    destination: &std::path::Path,
+) -> Result<SshKeyPair, String> {
+    use std::io::Write;
+
+    if let Ok(metadata) = std::fs::symlink_metadata(destination) {
+        if metadata.file_type().is_symlink() {
+            return Err("Refusing to overwrite a symbolic link".to_string());
+        }
+        if !metadata.is_file() {
+            return Err("Private key destination is not a file".to_string());
+        }
+    }
+
+    let mut rng = rand::rng();
+    let key_pair = match algorithm {
+        "ed25519" => PrivateKey::random(&mut rng, Algorithm::Ed25519)
+            .map_err(|e| format!("Failed to generate Ed25519 key pair: {}", e))?,
+        _ => return Err(format!("Unsupported algorithm: {}. Use 'ed25519'.", algorithm)),
+    };
+
+    let private_key_openssh = key_pair
+        .to_openssh(russh::keys::ssh_key::LineEnding::LF)
+        .map_err(|e| format!("Failed to encode private key: {}", e))?;
+    let public_key_openssh = key_pair
+        .public_key()
+        .to_openssh()
+        .map_err(|e| format!("Failed to encode public key: {}", e))?;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(destination)
+        .map_err(|e| format!("Failed to open private key destination: {}", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to secure private key permissions: {}", e))?;
+    }
+    #[cfg(windows)]
+    {
+        // Do not place key material in the file until inherited ACLs have been
+        // removed. Reopen only after icacls has secured the empty destination.
+        drop(file);
+        let whoami = std::process::Command::new("whoami")
+            .output()
+            .map_err(|e| format!("Failed to identify the current Windows user: {}", e))?;
+        if !whoami.status.success() {
+            return Err("Failed to identify the current Windows user".to_string());
+        }
+        let user = String::from_utf8_lossy(&whoami.stdout).trim().to_string();
+        let grant = format!("{}:(R,W)", user);
+        let status = std::process::Command::new("icacls")
+            .arg(destination)
+            .args(["/inheritance:r", "/grant:r", &grant])
+            .status()
+            .map_err(|e| format!("Failed to secure private key ACL: {}", e))?;
+        if !status.success() {
+            return Err("Failed to secure private key ACL".to_string());
+        }
+        file = options
+            .open(destination)
+            .map_err(|e| format!("Failed to reopen secured private key destination: {}", e))?;
+    }
+
+    file.write_all(private_key_openssh.as_bytes())
+        .map_err(|e| format!("Failed to write private key: {}", e))?;
+    file.sync_all()
+        .map_err(|e| format!("Failed to finalize private key: {}", e))?;
+
+    Ok(SshKeyPair {
+        public_key_openssh,
+        private_key_path: destination.to_string_lossy().into_owned(),
+    })
+}
+
+/// 重启服务器
+pub async fn reboot_server(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    force: bool,
+) -> Result<String, String> {
+    let cmd = if force { "reboot -f" } else { "reboot" };
+    // ponytail：重启会断开 SSH，因此超时或连接丢失表示预期的成功结果
+    match crate::ssh::session_exec_with_output(session, cmd, 10).await {
+        Ok((_, stderr, code)) => {
+            if code != 0 && !stderr.is_empty() && !stderr.contains("Connection") && !stderr.contains("closed") {
+                return Err(format!("Reboot failed: {}", stderr.trim()));
+            }
+        }
+        Err(e) => {
+            let el = e.to_lowercase();
+            if !(el.contains("timed out") || el.contains("timeout") || el.contains("connection") || el.contains("closed") || el.contains("broken pipe") || el.contains("eof")) {
+                return Err(format!("Reboot failed: {}", e));
+            }
+        }
+    }
+    Ok(format!("[{}] Server is rebooting. SSH connection will be disconnected.", cmd))
+}
+
+/// 获取服务器启动时间和运行时长
+pub async fn get_server_uptime(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<(String, String), String> {
+    // 获取 ISO 时间戳格式的启动时间
+    let (boot_stdout, _, boot_code) = crate::ssh::session_exec_with_output(session, "date -d \"$(uptime -s)\" +\"%Y-%m-%d %H:%M:%S\" 2>/dev/null || who -b 2>/dev/null | awk '{print $3, $4}' || echo 'unknown'", 5)
+        .await?;
+    let boot_time = boot_stdout.trim().to_string();
+    if boot_code != 0 || boot_time.is_empty() || boot_time == "unknown" {
+        return Err("Failed to get boot time".to_string());
+    }
+
+    // 使用 /proc/uptime 获取运行时长（秒）
+    let (up_stdout, _, _) = crate::ssh::session_exec_with_output(session, "cat /proc/uptime 2>/dev/null | awk '{print int($1)}'", 5)
+        .await?;
+    let total_secs: u64 = up_stdout.trim().parse().unwrap_or(0);
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let mins = (total_secs % 3600) / 60;
+    let uptime_str = if days > 0 {
+        format!("{}d {}h {}m", days, hours, mins)
+    } else if hours > 0 {
+        format!("{}h {}m", hours, mins)
+    } else {
+        format!("{}m", mins)
+    };
+
+    Ok((boot_time, uptime_str))
+}
+
+/// 修改 SSH 用户密码
+pub async fn change_ssh_password(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    username: &str,
+    new_password: &str,
+) -> Result<String, String> {
+    // 转义密码中的单引号，防止 Shell 注入
+    let safe_password = new_password.replace('\'', "'\\''");
+    let cmd = format!("echo '{}:{}' | chpasswd", username, safe_password);
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 15).await?;
+    if code != 0 {
+        return Err(format!("Failed to change password: {}", stderr.trim()));
+    }
+    let _ = stdout;
+    Ok(format!("Password changed successfully for user '{}'.", username))
+}
+
+/// 将 SSH 公钥部署到远程服务器的 authorized_keys
+fn parse_ssh_public_key(pubkey: &str) -> Result<PublicKey, String> {
+    let trimmed = pubkey.trim();
+    if trimmed.is_empty() || trimmed.len() > 16 * 1024 || trimmed.lines().count() != 1 {
+        return Err("Invalid SSH public key".to_string());
+    }
+    let key = PublicKey::from_openssh(trimmed)
+        .map_err(|_| "Invalid SSH public key".to_string())?;
+    let comment = key
+        .comment()
+        .as_str()
+        .map_err(|_| "Invalid SSH public key comment".to_string())?;
+    if comment.len() > 128
+        || !comment
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.' | '@'))
+    {
+        return Err("Invalid SSH public key comment".to_string());
+    }
+    Ok(key)
+}
+
+pub async fn deploy_ssh_pubkey(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    pubkey: &str,
+) -> Result<String, String> {
+    let canonical = parse_ssh_public_key(pubkey)?
+        .to_openssh()
+        .map_err(|e| format!("Failed to encode SSH public key: {e}"))?;
+    // The encoded payload contains only base64 characters, so no untrusted key
+    // material is interpolated into the remote shell program.
+    let encoded = B64.encode(canonical.as_bytes());
+    let cmd = format!(
+        "key=$(printf '%s' '{}' | base64 -d) && mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && (grep -qxF \"$key\" ~/.ssh/authorized_keys || printf '%s\\n' \"$key\" >> ~/.ssh/authorized_keys) && echo KEY_DEPLOYED",
+        encoded
+    );
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 15).await?;
+    if code != 0 || !stdout.contains("KEY_DEPLOYED") {
+        return Err(format!("Failed to deploy public key: {}", stderr.trim()));
+    }
+    Ok("Public key deployed successfully.".to_string())
+}
+
+/// Remove a specific SSH key from authorized_keys. Matching uses the key blob,
+/// so the key is revoked even if its comment was changed on the server.
+pub async fn remove_ssh_pubkey(session: &SshSession, pubkey: &str) -> Result<(), String> {
+    let key_blob = parse_ssh_public_key(pubkey)?.public_key_base64();
+    let cmd = format!(
+        "set -eu; file=~/.ssh/authorized_keys; [ -f \"$file\" ] || {{ echo KEY_REMOVED; exit 0; }}; tmp=$(mktemp ~/.ssh/authorized_keys.XXXXXX); trap 'rm -f \"$tmp\"' EXIT; awk -v key='{}' '{{ keep=1; for(i=1;i<=NF;i++) if($i==key) keep=0; if(keep) print }}' \"$file\" > \"$tmp\"; chmod 600 \"$tmp\"; mv \"$tmp\" \"$file\"; trap - EXIT; echo KEY_REMOVED",
+        key_blob
+    );
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 15).await?;
+    if code != 0 || !stdout.contains("KEY_REMOVED") {
+        return Err(format!("Failed to revoke public key: {}", stderr.trim()));
+    }
+    Ok(())
+}
+
+/// 从 sshd_config 获取 SSH 身份验证模式
+pub async fn get_ssh_auth_mode(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<SshAuthMode, String> {
+    // ponytail：在连接生命周期内缓存 SSH 身份验证模式
+    if let Some(cached) = cache.get(session_id, "ssh_auth_mode", 0) {
+        if let Ok(mode) = serde_json::from_str::<SshAuthMode>(&cached) {
+            return Ok(mode);
+        }
+    }
+    // ponytail：使用 sshd -T 读取生效配置（处理 Debian 13+ 上的 Include 和 sshd_config.d/ 覆盖项）
+    let cmd = r#"
+sshd -T 2>/dev/null | grep -iE '^(passwordauthentication|pubkeyauthentication)\s' | head -2
+echo "DONE"
+"#;
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, cmd, 10).await?;
+    if code != 0 && !stderr.is_empty() && !stdout.contains("DONE") {
+        return Err(format!("Failed to read sshd config: {}", stderr.trim()));
+    }
+
+    let mut password = true; // 默认：启用
+    let mut pubkey = true;   // 默认：启用
+
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_lowercase();
+        if lower.starts_with("passwordauthentication") {
+            password = lower.contains("yes");
+        } else if lower.starts_with("pubkeyauthentication") {
+            pubkey = lower.contains("yes");
+        }
+    }
+
+    let result = SshAuthMode { password, pubkey };
+    // ponytail：缓存 SSH 身份验证模式
+    if let Ok(json) = serde_json::to_string(&result) {
+        cache.put(session_id, "ssh_auth_mode", json);
+    }
+    Ok(result)
+}
+
+/// 修改 sshd_config 并重启 sshd，以设置 SSH 身份验证模式
+pub async fn set_ssh_auth_mode(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    password_enabled: bool,
+    pubkey_enabled: bool,
+) -> Result<String, String> {
+    if !password_enabled && !pubkey_enabled {
+        return Err("At least one SSH authentication method must remain enabled".to_string());
+    }
+    let pw_val = if password_enabled { "yes" } else { "no" };
+    let pk_val = if pubkey_enabled { "yes" } else { "no" };
+
+    // Put the managed block first because sshd uses the first obtained value.
+    // Existing distribution/user configuration remains intact. Validate the
+    // candidate and restore the exact previous file if validation or restart
+    // fails, so a settings change cannot silently lock out the next login.
+    let cmd = format!(r#"
+set -eu
+CONFIG=/etc/ssh/sshd_config
+BACKUP=$(mktemp /tmp/ohmypanel-sshd-backup.XXXXXX)
+CANDIDATE=$(mktemp /tmp/ohmypanel-sshd-candidate.XXXXXX)
+cp -p "$CONFIG" "$BACKUP"
+
+{{
+  printf '%s\n' '# BEGIN OHMYPANEL AUTH' 'PasswordAuthentication {}' 'PubkeyAuthentication {}' '# END OHMYPANEL AUTH'
+  awk '
+    /^# BEGIN OHMYPANEL AUTH$/ {{ skip=1; next }}
+    /^# END OHMYPANEL AUTH$/ {{ skip=0; next }}
+    !skip {{ print }}
+  ' "$CONFIG"
+}} > "$CANDIDATE"
+cat "$CANDIDATE" > "$CONFIG"
+
+if ! sshd -t; then
+  cp -p "$BACKUP" "$CONFIG"
+  rm -f "$BACKUP" "$CANDIDATE"
+  echo 'The new sshd configuration is invalid; the previous configuration was restored.' >&2
+  exit 1
+fi
+
+if ! (systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service sshd restart 2>/dev/null || service ssh restart 2>/dev/null); then
+  cp -p "$BACKUP" "$CONFIG"
+  sshd -t
+  systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service sshd restart 2>/dev/null || service ssh restart 2>/dev/null || true
+  rm -f "$BACKUP" "$CANDIDATE"
+  echo 'SSH restart failed; the previous configuration was restored.' >&2
+  exit 1
+fi
+
+rm -f "$BACKUP" "$CANDIDATE"
+echo "MODE_UPDATED"
+"#,
+        pw_val, pk_val
+    );
+
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 20).await?;
+    if code != 0 || !stdout.contains("MODE_UPDATED") {
+        return Err(format!("Failed to update SSH auth mode: {}", stderr.trim()));
+    }
+    Ok("SSH authentication mode updated successfully.".to_string())
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct BbrStatus {
+    pub enabled: bool,
+    pub congestion_control: String,
+    pub qdisc: String,
+}
+
+/// 获取 BBR 拥塞控制状态
+pub async fn get_bbr_status(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<BbrStatus, String> {
+    // ponytail：在连接生命周期内缓存 BBR 状态
+    if let Some(cached) = cache.get(session_id, "bbr_status", 0) {
+        if let Ok(status) = serde_json::from_str::<BbrStatus>(&cached) {
+            return Ok(status);
+        }
+    }
+    let cmd = r#"
+CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)
+QD=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown)
+echo "CC=$CC"
+echo "QD=$QD"
+"#;
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, cmd, 10).await?;
+    if code != 0 && stderr.contains("No such file") {
+        return Ok(BbrStatus { enabled: false, congestion_control: "unknown".into(), qdisc: "unknown".into() });
+    }
+    let mut cc = "unknown".to_string();
+    let mut qd = "unknown".to_string();
+    for line in stdout.lines() {
+        if let Some(v) = line.strip_prefix("CC=") { cc = v.trim().to_string(); }
+        if let Some(v) = line.strip_prefix("QD=") { qd = v.trim().to_string(); }
+    }
+    let result = BbrStatus {
+        enabled: cc == "bbr",
+        congestion_control: cc,
+        qdisc: qd,
+    };
+    // ponytail：缓存 BBR 状态
+    if let Ok(json) = serde_json::to_string(&result) {
+        cache.put(session_id, "bbr_status", json);
+    }
+    Ok(result)
+}
+
+/// 启用或禁用 BBR 拥塞控制
+pub async fn set_bbr_status(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    enable: bool,
+) -> Result<String, String> {
+    let cmd = if enable {
+        r#"
+# Check kernel version (BBR requires 4.9+)
+KVER=$(uname -r | cut -d'-' -f1)
+MAJOR=$(echo "$KVER" | cut -d'.' -f1)
+MINOR=$(echo "$KVER" | cut -d'.' -f2)
+if [ "$MAJOR" -lt 4 ] || ([ "$MAJOR" -eq 4 ] && [ "$MINOR" -lt 9 ]); then
+  echo "BBR_ERROR: Kernel $KVER too old, BBR requires 4.9+"
+  exit 1
+fi
+
+# Load BBR module
+modprobe tcp_bbr 2>/dev/null || true
+
+# Apply BBR settings
+sysctl -w net.core.default_qdisc=fq
+sysctl -w net.ipv4.tcp_congestion_control=bbr
+
+# Persist to sysctl.conf
+sed -i '/^net\.core\.default_qdisc/d' /etc/sysctl.conf 2>/dev/null
+sed -i '/^net\.ipv4\.tcp_congestion_control/d' /etc/sysctl.conf 2>/dev/null
+echo 'net.core.default_qdisc=fq' >> /etc/sysctl.conf
+echo 'net.ipv4.tcp_congestion_control=bbr' >> /etc/sysctl.conf
+
+echo "BBR_ENABLED"
+"#
+    } else {
+        r#"
+# Restore default congestion control
+sysctl -w net.core.default_qdisc=fq_codel
+sysctl -w net.ipv4.tcp_congestion_control=cubic
+
+# Remove BBR from sysctl.conf
+sed -i '/^net\.core\.default_qdisc=fq$/d' /etc/sysctl.conf 2>/dev/null
+sed -i '/^net\.ipv4\.tcp_congestion_control=bbr$/d' /etc/sysctl.conf 2>/dev/null
+
+echo "BBR_DISABLED"
+"#
+    };
+
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, cmd, 15).await?;
+    if stdout.contains("BBR_ERROR") {
+        let err_msg = stdout.lines()
+            .find(|l| l.contains("BBR_ERROR"))
+            .unwrap_or("Unknown error");
+        return Err(err_msg.replace("BBR_ERROR: ", ""));
+    }
+    if code != 0 {
+        return Err(format!("Failed to {} BBR: {}", if enable { "enable" } else { "disable" }, stderr.trim()));
+    }
+    if enable && !stdout.contains("BBR_ENABLED") {
+        return Err("Failed to enable BBR".to_string());
+    }
+    if !enable && !stdout.contains("BBR_DISABLED") {
+        return Err("Failed to disable BBR".to_string());
+    }
+    Ok(if enable { "BBR enabled successfully." } else { "BBR disabled successfully." }.to_string())
+}
+
+// ===== SSH GatewayPorts (public access for remote forwarding) =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct GatewayPortsStatus {
+    pub enabled: bool,
+    pub value: String,
+}
+
+/// 读取远程转发的生效 GatewayPorts 设置。
+/// `sshd -T` 会输出生效配置（需要 root 权限）；不可用时回退解析
+/// sshd_config。
+pub async fn get_gateway_ports_status(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<GatewayPortsStatus, String> {
+    // ponytail：在连接生命周期内缓存状态
+    if let Some(cached) = cache.get(session_id, "gateway_ports", 0) {
+        if let Ok(status) = serde_json::from_str::<GatewayPortsStatus>(&cached) {
+            return Ok(status);
+        }
+    }
+    let cmd = r#"
+SUDO=""
+if [ "$(id -u)" != "0" ]; then SUDO="sudo -n "; fi
+GP=$($SUDO sshd -T 2>/dev/null | grep -i '^gatewayports' | awk '{print $2; exit}')
+if [ -z "$GP" ]; then
+  GP=$(grep -iE '^[[:space:]]*[^#]*gatewayports' /etc/ssh/sshd_config 2>/dev/null | tail -1 | awk '{print $2}' | tr 'A-Z' 'a-z')
+fi
+echo "GP=${GP:-unknown}"
+"#;
+    let (stdout, _stderr, _code) = crate::ssh::session_exec_with_output(session, cmd, 10).await?;
+    let mut value = "unknown".to_string();
+    for line in stdout.lines() {
+        if let Some(v) = line.strip_prefix("GP=") {
+            value = v.trim().to_string();
+        }
+    }
+    let result = GatewayPortsStatus {
+        enabled: value == "yes",
+        value,
+    };
+    // ponytail：缓存状态
+    if let Ok(json) = serde_json::to_string(&result) {
+        cache.put(session_id, "gateway_ports", json);
+    }
+    Ok(result)
+}
+
+/// 在 sshd_config 中启用或禁用 GatewayPorts，使用 `sshd -t` 验证，
+/// 然后重启 sshd。先备份 sshd_config，配置测试失败时恢复备份。
+/// 适用于 root 用户或无需密码的 sudo 用户。
+pub async fn set_gateway_ports(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    enable: bool,
+) -> Result<String, String> {
+    let setting = if enable { "yes" } else { "no" };
+    let cmd = format!(r#"
+SUDO=""
+if [ "$(id -u)" != "0" ]; then SUDO="sudo -n "; fi
+CFG=/etc/ssh/sshd_config
+BK="$CFG.gw.$(date +%Y%m%d%H%M%S)"
+if ! $SUDO cp "$CFG" "$BK" 2>/dev/null; then
+  echo "GATEWAY_ERROR:need_root: cannot write $CFG — login as root or configure passwordless sudo"
+  exit 1
+fi
+if $SUDO grep -qE '^[[:space:]]*#?[[:space:]]*GatewayPorts' "$CFG"; then
+  $SUDO sed -i -E 's/^[[:space:]]*#?[[:space:]]*GatewayPorts.*/GatewayPorts {setting}/' "$CFG"
+else
+  echo 'GatewayPorts {setting}' | $SUDO tee -a "$CFG" > /dev/null
+fi
+if ! $SUDO sshd -t; then
+  echo "GATEWAY_ERROR:config_test_failed: sshd config test failed — original config restored"
+  $SUDO cp "$BK" "$CFG"
+  exit 1
+fi
+if ! ($SUDO systemctl restart sshd 2>/dev/null || $SUDO systemctl restart ssh 2>/dev/null || $SUDO service sshd restart 2>/dev/null || $SUDO service ssh restart 2>/dev/null); then
+  echo "GATEWAY_ERROR:restart_failed: failed to restart sshd — config changed but not applied"
+  exit 1
+fi
+echo "GATEWAY_OK"
+"#);
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 30).await?;
+    if stdout.contains("GATEWAY_ERROR") {
+        let msg = stdout
+            .lines()
+            .find(|l| l.contains("GATEWAY_ERROR"))
+            .unwrap_or("GATEWAY_ERROR:unknown")
+            .replace("GATEWAY_ERROR:", "");
+        return Err(msg);
+    }
+    if code != 0 {
+        return Err(format!("Failed to set GatewayPorts: {}", stderr.trim()));
+    }
+    if !stdout.contains("GATEWAY_OK") {
+        return Err("Failed to set GatewayPorts".to_string());
+    }
+    Ok(if enable {
+        "GatewayPorts enabled successfully."
+    } else {
+        "GatewayPorts disabled successfully."
+    }
+    .to_string())
+}
+
+// ===== Site Logs =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SiteLogInfo {
+    pub path: String,
+    pub log_type: String,  // "access" or "error"
+    pub size: u64,
+}
+
+/// 获取站点可用的日志文件
+pub async fn get_site_logs(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    domain: &str,
+) -> Result<Vec<SiteLogInfo>, String> {
+    let safe_domain = domain.replace('\'', "'\\''");
+    // ponytail：采用简单的 find+grep 方式，扫描所有已知日志目录中包含域名的文件
+    let cmd = format!(r#"
+for dir in /var/log/nginx /www/wwwlogs; do
+  [ -d "$dir" ] || continue
+  find "$dir" -maxdepth 1 -type f -name "*{safe_domain}*" 2>/dev/null | while read -r f; do
+    SIZE=$(stat -c%s "$f" 2>/dev/null || echo 0)
+    case "$(basename "$f")" in
+      *error*) echo "LOG|$f|error|$SIZE" ;;
+      *)       echo "LOG|$f|access|$SIZE" ;;
+    esac
+  done
+done
+
+# Also extract log paths from nginx config (access_log / error_log directives)
+for dir in /etc/nginx/sites-enabled /etc/nginx/conf.d /www/server/panel/vhost/nginx /www/server/nginx/conf/vhost; do
+  [ -d "$dir" ] || continue
+  for conf in "$dir"/*; do
+    [ -f "$conf" ] || continue
+    grep -q '{safe_domain}' "$conf" 2>/dev/null || continue
+    sed -n 's/.*access_log[[:space:]][[:space:]]*\([^ ;]*\).*/\1/p' "$conf" 2>/dev/null | while read -r p; do
+      [ -f "$p" ] && echo "LOG|$p|access|$(stat -c%s "$p" 2>/dev/null || echo 0)"
+    done
+    sed -n 's/.*error_log[[:space:]][[:space:]]*\([^ ;]*\).*/\1/p' "$conf" 2>/dev/null | while read -r p; do
+      [ -f "$p" ] && echo "LOG|$p|error|$(stat -c%s "$p" 2>/dev/null || echo 0)"
+    done
+  done
+done
+echo "DONE"
+"#, safe_domain = safe_domain);
+
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 15).await?;
+    if code != 0 && !stdout.contains("DONE") {
+        return Err(format!("Failed to get site logs: {}", stderr.trim()));
+    }
+
+    let mut logs = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in stdout.lines() {
+        if let Some(rest) = line.strip_prefix("LOG|") {
+            let parts: Vec<&str> = rest.splitn(3, '|').collect();
+            if parts.len() != 3 { continue; }
+            let path = parts[0].to_string();
+            if !seen.insert(path.clone()) { continue; }
+            let log_type = parts[1].to_string();
+            let size = parts[2].parse::<u64>().unwrap_or(0);
+            logs.push(SiteLogInfo { path, log_type, size });
+        }
+    }
+
+    Ok(logs)
+}
+
+/// 读取日志文件的最后 N 行，可按日期范围过滤
+pub async fn read_site_log(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    log_path: &str,
+    lines: usize,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+) -> Result<String, String> {
+    let safe_path = log_path.replace('\'', "'\\''");
+    
+    // 检查文件是否为 gzip 压缩文件（以 .gz 结尾）
+    let is_gzipped = log_path.to_lowercase().ends_with(".gz");
+    
+    // 根据压缩格式选择合适的命令
+    // 使用 gunzip -c，因为它比 zcat 更普遍可用
+    let read_cmd = if is_gzipped {
+        "gunzip -c"  // 解压并输出到 stdout
+    } else {
+        "cat"        // 读取普通文件
+    };
+    
+    let cmd = if date_from.is_some() || date_to.is_some() {
+        // 使用 awk 按日期范围过滤。
+        // 将 Nginx 日志日期 [DD/Mon/YYYY:HH:MM:SS +ZZZZ] 转换为 "YYYY-MM-DD HH:MM:SS"
+        // 然后进行字符串比较（因为 YYYY-MM-DD HH:MM:SS 按字典序排列时也是按时间顺序）。
+        let from = date_from.unwrap_or("");
+        let to = date_to.unwrap_or("");
+        // 使用 [\\/] 字符类匹配 awk 正则中的正斜杠
+        format!(
+            "{} '{}' | tail -n {} | awk 'BEGIN{{split(\"Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec\",m,\" \");for(i=1;i<=12;i++)mn[m[i]]=sprintf(\"%02d\",i)}}{{if(match($0,/\\[([0-9]+)[\\/ ]([A-Za-z]+)[\\/ ]([0-9]+):([0-9:]+)/,a)){{d=sprintf(\"%s-%s-%s %s\",a[3],mn[a[2]],a[1],a[4]);if(\"{}\"==\"\"||d>=\"{}\"){{if(\"{}\"==\"\"||d<=\"{}\")print}}}}}}'",
+            read_cmd, safe_path, lines.min(10000), from, from, to, to
+        )
+    } else {
+        format!("{} '{}' | tail -n {}", read_cmd, safe_path, lines.min(10000))
+    };
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 30).await?;
+    if code != 0 {
+        let err_msg = if !stderr.trim().is_empty() { stderr.trim() } else { stdout.trim() };
+        return Err(format!("Failed to read log: {}", err_msg));
+    }
+    Ok(stdout)
+}
+
+// ===== Docker Management =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DockerStatus {
+    pub installed: bool,
+    pub version: String,
+    pub compose_version: String,
+    pub running: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DockerContainer {
+    pub id: String,
+    pub name: String,
+    pub image: String,
+    pub status: String,
+    pub state: String,
+    pub ports: String,
+    pub created: String,
+}
+
+/// 批量操作中单个容器的结果，便于 UI 列出成功或失败的详细信息。
+#[derive(Serialize, Clone, Debug)]
+pub struct DockerBatchResult {
+    pub id: String,
+    pub ok: bool,
+    pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DockerImage {
+    pub id: String,
+    pub repository: String,
+    pub tag: String,
+    pub size: String,
+    pub created: String,
+}
+
+/// 检查 Docker 安装状态
+pub async fn check_docker(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<DockerStatus, String> {
+    // ponytail：不使用缓存；systemctl is-active 执行很快，因此始终实时检查
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+            r#"
+if command -v docker &>/dev/null; then
+    echo "INSTALLED=true"
+    echo "VERSION=$(docker --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    echo "RUNNING=$(systemctl is-active docker 2>/dev/null || echo false)"
+else
+    echo "INSTALLED=false"
+    echo "VERSION="
+    echo "RUNNING=false"
+fi
+
+if command -v docker-compose &>/dev/null; then
+    echo "COMPOSE=$(docker-compose --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+elif docker compose version &>/dev/null 2>&1; then
+    echo "COMPOSE=$(docker compose version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+else
+    echo "COMPOSE="
+fi
+"#,
+            15,
+        )
+        .await?;
+
+    let mut status = DockerStatus {
+        installed: false,
+        version: String::new(),
+        compose_version: String::new(),
+        running: false,
+    };
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("INSTALLED=") {
+            status.installed = v == "true";
+        } else if let Some(v) = line.strip_prefix("VERSION=") {
+            status.version = v.to_string();
+        } else if let Some(v) = line.strip_prefix("COMPOSE=") {
+            status.compose_version = v.to_string();
+        } else if let Some(v) = line.strip_prefix("RUNNING=") {
+            status.running = v == "active";
+        }
+    }
+
+    Ok(status)
+}
+
+/// 辅助函数：通过 Tauri 事件运行 SSH 命令并流式传输输出
+async fn docker_stream_exec(
+    session: &SshSession,
+    _cache: &SshCache,
+    session_id: &str,
+    cmd: &str,
+    timeout_secs: u64,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    let mut channel = crate::ssh::session_open_channel(session).await?;
+    channel
+        .exec(true, cmd)
+        .await
+        .map_err(|e| format!("Failed to execute command: {}", e))?;
+
+    let mut full_output = String::new();
+    let mut exit_code: i32 = -1;
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+
+    loop {
+        tokio::select! {
+            msg = channel.wait() => {
+                match msg {
+                    Some(russh::ChannelMsg::Data { data }) => {
+                        let text = String::from_utf8_lossy(&data);
+                        full_output.push_str(&text);
+                        for line in text.lines() {
+                            if !line.trim().is_empty() {
+                                let _ = app_handle.emit("docker-action-progress", serde_json::json!({
+                                    "sessionId": session_id,
+                                    "line": line,
+                                    "status": "running",
+                                }));
+                            }
+                        }
+                    }
+                    Some(russh::ChannelMsg::ExtendedData { data, ext }) => {
+                        if ext == 1 {
+                            let text = String::from_utf8_lossy(&data);
+                            full_output.push_str(&text);
+                            for line in text.lines() {
+                                if !line.trim().is_empty() {
+                                    let _ = app_handle.emit("docker-action-progress", serde_json::json!({
+                                        "sessionId": session_id,
+                                        "line": line,
+                                        "status": "running",
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                    Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                        exit_code = exit_status as i32;
+                    }
+                    Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => break,
+                    _ => {}
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                return Err(format!("Command timed out after {} seconds", timeout_secs));
+            }
+        }
+    }
+
+    if exit_code != 0 {
+        // ponytail：russh 可能在 Eof 或 Close 之后才发送 ExitStatus，因此 exit_code 会保持为 -1。
+        // 只有实际收到非零退出码时才视为失败。
+        if exit_code > 0 {
+            return Err(full_output);
+        }
+    }
+
+    Ok(full_output)
+}
+
+/// 通用辅助函数：通过自定义事件名称流式传输 SSH 命令输出
+async fn stream_ssh_command(
+    session: &SshSession,
+    _cache: &SshCache,
+    session_id: &str,
+    cmd: &str,
+    timeout_secs: u64,
+    app_handle: &AppHandle,
+    event_name: &str,
+) -> Result<(String, i32), String> {
+    let mut channel = crate::ssh::session_open_channel(session).await?;
+    channel
+        .exec(true, cmd)
+        .await
+        .map_err(|e| format!("Failed to execute command: {}", e))?;
+
+    let mut full_output = String::new();
+    let mut exit_code: i32 = -1;
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+
+    loop {
+        tokio::select! {
+            msg = channel.wait() => {
+                match msg {
+                    Some(russh::ChannelMsg::Data { data }) => {
+                        let text = String::from_utf8_lossy(&data);
+                        full_output.push_str(&text);
+                        for line in text.lines() {
+                            if !line.trim().is_empty() {
+                                let _ = app_handle.emit(event_name, serde_json::json!({
+                                    "sessionId": session_id,
+                                    "line": line,
+                                    "status": "running",
+                                }));
+                            }
+                        }
+                    }
+                    Some(russh::ChannelMsg::ExtendedData { data, ext }) => {
+                        if ext == 1 {
+                            let text = String::from_utf8_lossy(&data);
+                            full_output.push_str(&text);
+                            for line in text.lines() {
+                                if !line.trim().is_empty() {
+                                    let _ = app_handle.emit(event_name, serde_json::json!({
+                                        "sessionId": session_id,
+                                        "line": line,
+                                        "status": "running",
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                    Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                        exit_code = exit_status as i32;
+                    }
+                    Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => break,
+                    _ => {}
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                return Err(format!("Command timed out after {} seconds", timeout_secs));
+            }
+        }
+    }
+
+    Ok((full_output.trim().to_string(), exit_code))
+}
+
+/// 安装 Docker
+pub async fn install_docker(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    use_mirror: bool,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    let script = if use_mirror {
+        r#"
+set -e
+if command -v docker &>/dev/null; then
+    echo "Docker is already installed: $(docker --version)"
+    exit 0
+fi
+export CHANNEL=stable
+curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+sh /tmp/get-docker.sh --mirror Aliyun
+rm -f /tmp/get-docker.sh
+systemctl enable docker
+systemctl start docker
+usermod -aG docker $(whoami) 2>/dev/null || true
+echo "Docker installed successfully: $(docker --version)"
+"#
+    } else {
+        r#"
+set -e
+if command -v docker &>/dev/null; then
+    echo "Docker is already installed: $(docker --version)"
+    exit 0
+fi
+curl -fsSL https://get.docker.com | sh
+systemctl enable docker
+systemctl start docker
+usermod -aG docker $(whoami) 2>/dev/null || true
+echo "Docker installed successfully: $(docker --version)"
+"#
+    };
+
+    let output = docker_stream_exec(session, cache, session_id, script, 300, app_handle).await
+        .map_err(|e| format!("Docker installation failed: {}", e))?;
+
+    let _ = app_handle.emit("docker-action-progress", serde_json::json!({
+        "sessionId": session_id,
+        "line": "Installation completed!",
+        "status": "done",
+    }));
+
+    Ok(output)
+}
+
+/// 卸载 Docker
+pub async fn uninstall_docker(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    let script = r#"
+set -e
+if ! command -v docker &>/dev/null; then
+    echo "Docker is not installed"
+    exit 0
+fi
+
+# Stop all running containers
+echo "Stopping containers..."
+docker ps -q | xargs -r docker stop 2>/dev/null || true
+docker ps -aq | xargs -r docker rm -f 2>/dev/null || true
+
+# Detect package manager and uninstall
+echo "Removing Docker packages..."
+if command -v apt-get &>/dev/null; then
+    apt-get remove -y docker-ce docker-ce-cli docker-ce-rootless-extras docker-buildx-plugin docker-compose-plugin containerd.io 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+elif command -v yum &>/dev/null; then
+    yum remove -y docker-ce docker-ce-cli docker-ce-rootless-extras docker-buildx-plugin docker-compose-plugin containerd.io 2>/dev/null || true
+fi
+
+systemctl daemon-reload 2>/dev/null || true
+
+# Cleanup Docker apt/yum source
+rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg /etc/yum.repos.d/docker-ce.repo 2>/dev/null || true
+
+echo "Docker uninstalled successfully"
+"#;
+
+    let output = docker_stream_exec(session, cache, session_id, script, 120, app_handle).await
+        .map_err(|e| format!("Docker uninstall failed: {}", e))?;
+
+    let _ = app_handle.emit("docker-action-progress", serde_json::json!({
+        "sessionId": session_id,
+        "line": "Uninstall completed!",
+        "status": "done",
+    }));
+
+    Ok(output)
+}
+
+/// 列出 Docker 容器
+pub async fn docker_container_list(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<DockerContainer>, String> {
+    let cmd = r#"docker ps -a --format '{{.ID}}|||{{.Names}}|||{{.Image}}|||{{.Status}}|||{{.State}}|||{{.Ports}}|||{{.CreatedAt}}'"#;
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, cmd, 30).await?;
+
+    let mut containers = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.splitn(7, "|||").collect();
+        if parts.len() >= 7 {
+            containers.push(DockerContainer {
+                id: parts[0].to_string(),
+                name: parts[1].to_string(),
+                image: parts[2].to_string(),
+                status: parts[3].to_string(),
+                state: parts[4].to_string(),
+                ports: parts[5].to_string(),
+                created: parts[6].to_string(),
+            });
+        }
+    }
+
+    // ponytail：docker 可能在出现警告时返回非零退出码，但仍会输出有效数据
+    // exit_code 为 -1 表示未收到 ExitStatus（russh 可能在 Eof 或 Close 之后才发送它）
+    if containers.is_empty() && code > 0 {
+        let err = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            format!("Command failed with exit code {}", code)
+        };
+        return Err(format!("Failed to list containers: {}", err));
+    }
+
+    Ok(containers)
+}
+
+/// 对容器执行操作（启动、停止、重启、暂停或取消暂停）
+pub async fn docker_container_action(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    container_id: &str,
+    action: &str,
+) -> Result<String, String> {
+    let valid_actions = ["start", "stop", "restart", "pause", "unpause"];
+    if !valid_actions.contains(&action) {
+        return Err(format!("Invalid action: {}", action));
+    }
+
+    let safe_id = container_id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
+    let cmd = format!("docker {} {}", action, safe_id);
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 30).await?;
+    // ponytail：exit_code 为 -1 表示未收到 ExitStatus（russh 的行为）
+    if code > 0 {
+        let err = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            format!("Command failed with exit code {}", code)
+        };
+        return Err(format!(
+            "Failed to {} container: {}",
+            action, err
+        ));
+    }
+    Ok(format!("Container {} {}ed successfully", safe_id, action))
+}
+
+/// 删除容器
+pub async fn docker_container_remove(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    container_id: &str,
+    force: bool,
+) -> Result<String, String> {
+    let safe_id = container_id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
+    let cmd = if force {
+        format!("docker rm -f {}", safe_id)
+    } else {
+        format!("docker rm {}", safe_id)
+    };
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 30).await?;
+    // ponytail：exit_code 为 -1 表示未收到 ExitStatus（russh 的行为）
+    if code > 0 {
+        let err = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            format!("Command failed with exit code {}", code)
+        };
+        return Err(format!("Failed to remove container: {}", err));
+    }
+    Ok(format!("Container {} removed successfully", safe_id))
+}
+
+/// 对多个容器执行批量操作（启动、停止、重启、暂停或取消暂停）。
+/// 按容器逐个执行，使每个结果都能单独报告，避免 docker 多参数的快速失败行为中止整个批次。
+pub async fn docker_container_batch_action(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    container_ids: Vec<String>,
+    action: &str,
+) -> Result<Vec<DockerBatchResult>, String> {
+    let valid_actions = ["start", "stop", "restart", "pause", "unpause"];
+    if !valid_actions.contains(&action) {
+        return Err(format!("Invalid action: {}", action));
+    }
+
+    let mut results = Vec::with_capacity(container_ids.len());
+    for id in container_ids {
+        let safe_id = id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
+        if safe_id.is_empty() {
+            results.push(DockerBatchResult { id, ok: false, message: "Invalid container id".into() });
+            continue;
+        }
+        let cmd = format!("docker {} {}", action, safe_id);
+        let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 30).await?;
+        if code > 0 {
+            let err = if !stderr.trim().is_empty() {
+                stderr.trim().to_string()
+            } else if !stdout.trim().is_empty() {
+                stdout.trim().to_string()
+            } else {
+                format!("Command failed with exit code {}", code)
+            };
+            results.push(DockerBatchResult { id: safe_id.clone(), ok: false, message: err });
+        } else {
+            results.push(DockerBatchResult { id: safe_id, ok: true, message: format!("{}ed", action) });
+        }
+    }
+    Ok(results)
+}
+
+/// 批量删除多个容器（docker rm [-f]）。
+pub async fn docker_container_batch_remove(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    container_ids: Vec<String>,
+    force: bool,
+) -> Result<Vec<DockerBatchResult>, String> {
+    let mut results = Vec::with_capacity(container_ids.len());
+    for id in container_ids {
+        let safe_id = id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
+        if safe_id.is_empty() {
+            results.push(DockerBatchResult { id, ok: false, message: "Invalid container id".into() });
+            continue;
+        }
+        let cmd = if force {
+            format!("docker rm -f {}", safe_id)
+        } else {
+            format!("docker rm {}", safe_id)
+        };
+        let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 30).await?;
+        if code > 0 {
+            let err = if !stderr.trim().is_empty() {
+                stderr.trim().to_string()
+            } else if !stdout.trim().is_empty() {
+                stdout.trim().to_string()
+            } else {
+                format!("Command failed with exit code {}", code)
+            };
+            results.push(DockerBatchResult { id: safe_id.clone(), ok: false, message: err });
+        } else {
+            results.push(DockerBatchResult { id: safe_id, ok: true, message: "removed".into() });
+        }
+    }
+    Ok(results)
+}
+
+/// 将容器提交为新镜像
+pub async fn docker_container_commit(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    container_id: &str,
+    image_name: &str,
+    message: &str,
+    mode: &str,
+    export_cmd: &str,
+    export_expose: &str,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    let safe_id = container_id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
+    // ponytail：清理镜像名称，仅允许 [a-z0-9._/:-]
+    let safe_image: String = image_name.chars().filter(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '/' | ':' | '-')).collect();
+    if safe_image.is_empty() {
+        return Err("Image name cannot be empty".to_string());
+    }
+
+    match mode {
+        "export" => {
+            // ponytail：为 CMD 和 EXPOSE 构建 --change 参数
+            let mut changes = String::new();
+            if !export_cmd.trim().is_empty() {
+                changes.push_str(&format!("--change 'CMD {}' ", export_cmd.trim()));
+            }
+            if !export_expose.trim().is_empty() {
+                for port in export_expose.split(',') {
+                    let port = port.trim();
+                    if !port.is_empty() {
+                        changes.push_str(&format!("--change 'EXPOSE {}' ", port));
+                    }
+                }
+            }
+            let cmd = format!(
+                "echo '[export] Exporting container...'; docker export {} | docker import {} - {}",
+                safe_id, changes.trim(), safe_image
+            );
+            docker_stream_exec(session, cache, session_id, &cmd, 300, app_handle).await?;
+            Ok(format!("Container exported as {}", safe_image))
+        }
+        "clean" => {
+            let clean_cmd = format!(
+                "docker exec {} sh -c 'echo \"[clean] Clearing package cache...\"; apt-get clean 2>/dev/null; yum clean all 2>/dev/null; rm -rf /var/cache/apt/archives/* /var/cache/yum/* /tmp/* /var/tmp/* /var/log/*.log /var/log/*.gz 2>/dev/null; echo \"[clean] Done.\"'",
+                safe_id
+            );
+            docker_stream_exec(session, cache, session_id, &clean_cmd, 120, app_handle).await?;
+
+            let cmd = if message.is_empty() {
+                format!("docker commit {} {}", safe_id, safe_image)
+            } else {
+                let safe_msg = message.replace('"', "\\\"");
+                format!("docker commit -m \"{}\" {} {}", safe_msg, safe_id, safe_image)
+            };
+            let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 120).await?;
+            if code > 0 {
+                let err = if !stderr.trim().is_empty() { stderr.trim().to_string() } else if !stdout.trim().is_empty() { stdout.trim().to_string() } else { format!("Command failed with exit code {}", code) };
+                return Err(format!("Failed to commit container: {}", err));
+            }
+            Ok(format!("Container committed as {}", safe_image))
+        }
+        _ => {
+            // 直接模式
+            let cmd = if message.is_empty() {
+                format!("docker commit {} {}", safe_id, safe_image)
+            } else {
+                let safe_msg = message.replace('"', "\\\"");
+                format!("docker commit -m \"{}\" {} {}", safe_msg, safe_id, safe_image)
+            };
+            let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 120).await?;
+            if code > 0 {
+                let err = if !stderr.trim().is_empty() { stderr.trim().to_string() } else if !stdout.trim().is_empty() { stdout.trim().to_string() } else { format!("Command failed with exit code {}", code) };
+                return Err(format!("Failed to commit container: {}", err));
+            }
+            Ok(format!("Container committed as {}", safe_image))
+        }
+    }
+}
+
+/// 获取容器日志
+pub async fn docker_container_logs(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    container_id: &str,
+    lines: usize,
+) -> Result<String, String> {
+    let safe_id = container_id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
+    let cmd = format!("docker logs --tail {} {} 2>&1", lines.min(5000), safe_id);
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 30).await?;
+    if code != 0 {
+        return Err(format!(
+            "Failed to get logs: {}",
+            if stderr.trim().is_empty() { stdout.trim() } else { stderr.trim() }
+        ));
+    }
+    Ok(stdout)
+}
+
+/// 列出 Docker 镜像
+pub async fn docker_image_list(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<DockerImage>, String> {
+    let cmd = r#"docker images --format '{{.ID}}|||{{.Repository}}|||{{.Tag}}|||{{.Size}}|||{{.CreatedAt}}'"#;
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, cmd, 30).await?;
+
+    let mut images = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.splitn(5, "|||").collect();
+        if parts.len() >= 5 {
+            images.push(DockerImage {
+                id: parts[0].to_string(),
+                repository: parts[1].to_string(),
+                tag: parts[2].to_string(),
+                size: parts[3].to_string(),
+                created: parts[4].to_string(),
+            });
+        }
+    }
+
+    // ponytail：docker 可能在出现警告时返回非零退出码，但仍会输出有效数据
+    // exit_code 为 -1 表示未收到 ExitStatus（russh 可能在 Eof 或 Close 之后才发送它）
+    if images.is_empty() && code > 0 {
+        let err = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            format!("Command failed with exit code {}", code)
+        };
+        return Err(format!("Failed to list images: {}", err));
+    }
+
+    Ok(images)
+}
+
+/// 拉取 Docker 镜像
+pub async fn docker_image_pull(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    image_name: &str,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    // 验证镜像名称格式
+    if image_name.is_empty() || image_name.contains(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&') {
+        return Err("Invalid image name".to_string());
+    }
+
+    // ponytail：Docker 要求仓库名称使用小写，自动转换以避免用户输入错误
+    let image_name_lower = image_name.to_lowercase();
+    let cmd = format!("docker pull {}", image_name_lower);
+    let output = docker_stream_exec(session, cache, session_id, &cmd, 600, app_handle).await
+        .map_err(|e| format!("Failed to pull image: {}", e))?;
+
+    let _ = app_handle.emit("docker-action-progress", serde_json::json!({
+        "sessionId": session_id,
+        "line": format!("Image {} pulled successfully!", image_name),
+        "status": "done",
+    }));
+
+    Ok(output)
+}
+
+/// 删除 Docker 镜像
+pub async fn docker_image_remove(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    image_id: &str,
+) -> Result<String, String> {
+    let safe_id = image_id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ':' || *c == '/' || *c == '.').collect::<String>();
+    let cmd = format!("docker rmi {}", safe_id);
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &cmd, 30).await?;
+    // ponytail：exit_code 为 -1 表示未收到 ExitStatus（russh 的行为）
+    if code > 0 {
+        let err = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            format!("Command failed with exit code {}", code)
+        };
+        return Err(format!("Failed to remove image: {}", err));
+    }
+    Ok(format!("Image {} removed successfully", safe_id))
+}
+
+/// 从服务器上的 tar 文件加载镜像
+pub async fn docker_image_load(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    file_path: &str,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    // ponytail：清理路径，仅允许字母数字、/、点、短横线和下划线
+    let safe_path: String = file_path.chars().filter(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '-' | '_')).collect();
+    if safe_path.is_empty() || !safe_path.starts_with('/') {
+        return Err("Invalid file path".to_string());
+    }
+    let cmd = format!("docker load -i {}", safe_path);
+    docker_stream_exec(session, cache, session_id, &cmd, 600, app_handle).await?;
+    Ok(format!("Image loaded from {}", safe_path))
+}
+
+/// 根据镜像运行容器
+pub async fn docker_image_run(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    image_name: &str,
+    run_args: &str,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    // 验证镜像名称
+    if image_name.is_empty() || image_name.contains(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&' || c == '`' || c == '$') {
+        return Err("Invalid image name".to_string());
+    }
+
+    // 验证运行参数：阻止 Shell 注入字符
+    if run_args.contains(';') || run_args.contains('|') || run_args.contains('&') || run_args.contains('`') || run_args.contains('$') || run_args.contains('\n') {
+        return Err("Invalid arguments: dangerous characters detected".to_string());
+    }
+
+    // ponytail：自动转换为小写，与拉取操作保持一致
+    let image_lower = image_name.to_lowercase();
+    
+    // 构建命令：docker run {args} {image}
+    let cmd = if run_args.trim().is_empty() {
+        format!("docker run -d {}", image_lower)
+    } else {
+        format!("docker run {} {}", run_args.trim(), image_lower)
+    };
+
+    let output = docker_stream_exec(session, cache, session_id, &cmd, 600, app_handle).await
+        .map_err(|e| format!("Failed to run container: {}", e))?;
+
+    let _ = app_handle.emit("docker-action-progress", serde_json::json!({
+        "sessionId": session_id,
+        "line": format!("Container started from {}!", image_lower),
+        "status": "done",
+    }));
+
+    Ok(output)
+}
+
+/// 获取 Docker 镜像源或仓库配置
+pub async fn docker_get_mirror_config(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<String>, String> {
+    let cmd = r#"cat /etc/docker/daemon.json 2>/dev/null | python3 -c "import sys,json;d=json.load(sys.stdin);print('\n'.join(d.get('registry-mirrors',[])))" 2>/dev/null || echo """#;
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session, cmd, 10).await?;
+    let mirrors: Vec<String> = stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    Ok(mirrors)
+}
+
+/// 设置 Docker 镜像源或仓库配置
+pub async fn docker_set_mirror_config(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    mirrors: &[String],
+) -> Result<String, String> {
+    // 为 daemon.json 构建 JSON
+    let mirrors_json: Vec<String> = mirrors.iter().map(|m| format!("\"{}\"" , m)).collect();
+    let mirrors_array = mirrors_json.join(",");
+
+    let script = format!(r#"
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json << 'DAEMON_EOF'
+{{
+  "registry-mirrors": [{mirrors}]
+}}
+DAEMON_EOF
+systemctl daemon-reload
+systemctl restart docker
+echo "Docker mirror configured: {mirrors}"
+"#, mirrors = mirrors_array);
+
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &script, 30).await?;
+    if code != 0 {
+        return Err(format!(
+            "Failed to configure mirror: {}",
+            if stderr.trim().is_empty() { stdout.trim() } else { stderr.trim() }
+        ));
+    }
+    Ok("Docker mirror configured successfully. Docker service restarted.".to_string())
+}
+
+// ===== Database Management =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DbInfo {
+    pub name: String,
+    pub size_mb: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct BackupInfo {
+    pub filename: String,
+    pub size_bytes: u64,
+    pub created_at: String,
+}
+
+/// 尝试获取带凭据的 mysql 命令前缀。
+/// 按优先级依次尝试多种身份验证方式。
+async fn get_mysql_cmd(session: &SshSession, _cache: &SshCache, _session_id: &str) -> String {
+    // 方法 1：检查 /root/.my.cnf 中的密码
+    let (cnf, _, _) = crate::ssh::session_exec_with_output(session, "cat /root/.my.cnf 2>/dev/null", 5)
+        .await
+        .unwrap_or((String::new(), String::new(), -1));
+    
+    for line in cnf.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("password") {
+            // 格式：password=xxx、password = xxx、password="xxx"
+            let val = rest.trim_start_matches([' ', '=', '"', '\'']).trim_end_matches(['"', '\'']).to_string();
+            if !val.is_empty() {
+                return format!("mysql -u root -p'{}'", val);
+            }
+        }
+    }
+    
+    // 方法 1.5：检查 /tmp/mysql_root_password.txt（由我们的安装脚本写入）
+    let (tmp_pw, _, _) = crate::ssh::session_exec_with_output(session, "cat /tmp/mysql_root_password.txt 2>/dev/null", 5)
+        .await
+        .unwrap_or((String::new(), String::new(), -1));
+    let pw = tmp_pw.trim().to_string();
+    if !pw.is_empty() {
+        return format!("mysql -u root -p'{}'", pw.replace('\'', "'\\''"));
+    }
+
+    // 方法 2：尝试 debian-sys-maint 用户（仅适用于 Debian/Ubuntu）
+    let (debian_cnf, _, _) = crate::ssh::session_exec_with_output(session, "cat /etc/mysql/debian.cnf 2>/dev/null", 5)
+        .await
+        .unwrap_or((String::new(), String::new(), -1));
+    
+    let mut debian_user = String::new();
+    let mut debian_pass = String::new();
+    for line in debian_cnf.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("user") {
+            debian_user = rest.trim_start_matches([' ', '=']).trim().to_string();
+        } else if let Some(rest) = trimmed.strip_prefix("password") {
+            debian_pass = rest.trim_start_matches([' ', '=', '"', '\'']).trim_end_matches(['"', '\'']).to_string();
+        }
+    }
+    
+    if !debian_user.is_empty() && !debian_pass.is_empty() {
+        return format!("mysql -u {} -p'{}'", debian_user, debian_pass);
+    }
+    
+    // 方法 3：尝试直接使用 mysql（配置了套接字认证或以 root 身份运行时有效）
+    // 先进行测试
+    let (_, _, test_code) = crate::ssh::session_exec_with_output(session, "mysql -e 'SELECT 1' 2>&1", 5)
+        .await
+        .unwrap_or((String::new(), String::new(), -1));
+    
+    if test_code == 0 {
+        return "mysql".to_string();
+    }
+    
+    // 方法 4：使用 sudo 以 root 身份运行 mysql（绕过密码要求）
+    // SSH 用户具有 sudo 权限时有效
+    "sudo mysql".to_string()
+}
+
+/// 列出所有用户数据库（不包括系统数据库）
+pub async fn list_databases(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<Vec<DbInfo>, String> {
+    // 先检查缓存（数据库列表的 TTL 为 30 秒）
+    if let Some(cached) = cache.get(session_id, "database_list", 30) {
+        // 解析缓存的 JSON
+        if let Ok(dbs) = serde_json::from_str::<Vec<DbInfo>>(&cached) {
+            return Ok(dbs);
+        }
+    }
+
+    let mysql_cmd = get_mysql_cmd(session, cache, session_id).await;
+
+    // 使用 SQL 查询直接获取用户数据库（排除系统数据库）
+    // 这样可以避免 SHOW DATABASES 输出格式差异导致的解析问题
+    let query = r#"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys') ORDER BY SCHEMA_NAME"#;
+    
+    let (stdout, stderr, code) = crate::ssh::session_exec_with_output(session,
+            &format!("{} --batch --skip-column-names -e \"{}\"", mysql_cmd, query),
+            5,
+        )
+        .await?;
+
+    // 从输出中解析数据库名称（每行一个；由于使用 --skip-column-names，不包含表头）
+    // 即使退出码非零，只要有 stdout 内容且没有 stderr，也视为成功
+    let mut dbs = Vec::new();
+    
+    for line in stdout.lines() {
+        let db_name = line.trim();
+        if !db_name.is_empty() {
+            // 不查询大小，按要求直接以 0.0 大小添加数据库
+            dbs.push(DbInfo { name: db_name.to_string(), size_mb: 0.0 });
+        }
+    }
+    
+    // 如果获取到了数据库，即使退出码非零也缓存并返回结果
+    // (MySQL may return warnings but still succeed)
+    if !dbs.is_empty() {
+        // 缓存结果 60 秒，以加快重复加载
+        if let Ok(json) = serde_json::to_string(&dbs) {
+            cache.put(session_id, "database_list", json);
+        }
+        return Ok(dbs);
+    }
+    
+    // 仅在没有结果且确实存在错误时报告错误
+    if code != 0 {
+        let err_msg = if !stderr.trim().is_empty() {
+            format!("Failed to list databases: {}", stderr.trim())
+        } else {
+            "Failed to list databases: unknown error".to_string()
+        };
+        return Err(err_msg);
+    }
+    
+    Ok(dbs)
+}
+
+/// 验证 IP 地址或 CIDR 表示法（例如 192.168.1.100、192.168.1.%、10.0.0.0/8）
+fn is_valid_ip_or_cidr(ip: &str) -> bool {
+    // 允许通配符 %
+    if ip == "%" {
+        return true;
+    }
+    
+    // 检查 CIDR 表示法（例如 10.0.0.0/8）
+    if let Some((ip_part, cidr_part)) = ip.split_once('/') {
+        // 验证 CIDR 部分是 0 到 32 之间的数字
+        if let Ok(cidr) = cidr_part.parse::<u32>() {
+            if cidr > 32 {
+                return false;
+            }
+        } else {
+            return false;
+        }
+        // 验证 IP 部分
+        return is_valid_ipv4(ip_part);
+    }
+    
+    // 检查通配符模式（例如 192.168.1.%）
+    if ip.contains('%') {
+        let parts: Vec<&str> = ip.split('.').collect();
+        if parts.len() != 4 {
+            return false;
+        }
+    // 每个部分应为数字（0-255）或 %
+        for part in parts {
+            if part == "%" {
+                continue;
+            }
+            if let Ok(num) = part.parse::<u32>() {
+                if num > 255 {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+    
+    // 标准 IPv4 验证
+    is_valid_ipv4(ip)
+}
+
+/// 验证 IPv4 地址
+fn is_valid_ipv4(ip: &str) -> bool {
+    let parts: Vec<&str> = ip.split('.').collect();
+    if parts.len() != 4 {
+        return false;
+    }
+    for part in parts {
+        if let Ok(num) = part.parse::<u32>() {
+            if num > 255 {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+/// 将 bind-address 设置为 0.0.0.0，确保 MySQL 接受远程连接
+/// ponytail：幂等操作；仅在 bind-address 不是 0.0.0.0 时修改配置并重启
+async fn ensure_mysql_remote_access(session: &SshSession) -> Result<(), String> {
+    // 查找活动的 MySQL/MariaDB 配置文件
+    let check_cmd = r#"
+for f in /etc/mysql/mysql.conf.d/mysqld.cnf /etc/mysql/mariadb.conf.d/50-server.cnf /etc/my.cnf /etc/mysql/my.cnf; do
+  if [ -f "$f" ]; then
+    CURRENT=$(grep -E '^\s*bind-address' "$f" 2>/dev/null | tail -1 | sed 's/.*=\s*//' | tr -d ' ')
+    if [ "$CURRENT" = "0.0.0.0" ]; then
+      echo "ALREADY_OK"
+      exit 0
+    fi
+    echo "CONFIG_FILE=$f"
+    exit 0
+  fi
+done
+echo "NO_CONFIG"
+"#;
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session, check_cmd, 10).await?;
+    
+    if stdout.contains("ALREADY_OK") {
+        return Ok(());
+    }
+    
+    let config_file = stdout.lines()
+        .find(|l| l.starts_with("CONFIG_FILE="))
+        .map(|l| l.trim_start_matches("CONFIG_FILE=").to_string());
+    
+    if let Some(cfg) = config_file {
+    // 设置 bind-address = 0.0.0.0（替换现有配置或追加）
+        let fix_cmd = format!(
+            r#"if grep -qE '^\s*bind-address' '{cfg}'; then
+  sed -i 's/^\s*bind-address\s*=.*/bind-address = 0.0.0.0/' '{cfg}'
+else
+  echo 'bind-address = 0.0.0.0' >> '{cfg}'
+fi
+# Restart MySQL/MariaDB
+for svc in mysql mysqld mariadb; do
+  if systemctl is-active $svc >/dev/null 2>&1; then
+    systemctl restart $svc
+    break
+  fi
+done
+echo "DONE"
+"#,
+            cfg = cfg
+        );
+        let (out, _, _) = crate::ssh::session_exec_with_output(session, &fix_cmd, 30).await?;
+        if !out.contains("DONE") {
+            return Err("Failed to configure MySQL bind-address".to_string());
+        }
+    }
+    // 如果未找到配置文件则跳过（不常见的配置方式）
+    Ok(())
+}
+
+/// 创建数据库、用户并授予权限
+pub async fn create_database(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    db_name: &str,
+    db_user: &str,
+    db_pass: &str,
+    charset: &str,
+    access_type: &str,
+    allowed_ip: &str,
+) -> Result<String, String> {
+    // ponytail：跳过多余的 `command -v mysql` 检查；下面的 SQL 执行会在 mysql 客户端缺失时
+    // 返回明确错误，每次调用可节省 5 秒
+    let safe_db = db_name.replace('`', "");
+    let safe_user = db_user.replace('`', "");
+    // ponytail：转义密码中的单引号，防止 SQL 语法错误
+    let safe_pw = db_pass.replace('\'', "\\'");
+    
+    // 验证并清理字符集（白名单方式）
+    let valid_charsets = ["utf8mb4", "utf8", "gbk", "big5", "latin1"];
+    let safe_charset = if valid_charsets.contains(&charset) {
+        charset
+    } else {
+        "utf8mb4" // 默认回退值
+    };
+    
+    // 从 allowed_ip 解析多个 IP（以换行分隔）
+    let access_hosts: Vec<&str> = match access_type {
+        "local" => vec!["localhost"],
+        "any" => vec!["%"],
+        "ip" => {
+            // 按换行拆分，清理每行首尾空白，并过滤空行
+            let ips: Vec<&str> = allowed_ip
+                .split('\n')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            
+            if ips.is_empty() {
+                return Err("No IP addresses provided".to_string());
+            }
+            
+            // 对每个 IP 进行基本验证
+            for ip in &ips {
+                if !is_valid_ip_or_cidr(ip) {
+                    return Err(format!("Invalid IP address format: {}", ip));
+                }
+            }
+            ips
+        },
+        _ => vec!["localhost"], // 默认回退值
+    };
+    
+    // 为多个访问主机构建 SQL
+    let mut sql = format!(
+        "CREATE DATABASE IF NOT EXISTS `{}` CHARACTER SET {} COLLATE {}_general_ci;\n",
+        safe_db, safe_charset, safe_charset
+    );
+    
+    // 为每个访问主机创建用户并授予权限
+    for host in &access_hosts {
+        sql.push_str(&format!(
+            "CREATE USER IF NOT EXISTS '{}'@'{}' IDENTIFIED BY '{}';\n\
+             GRANT ALL PRIVILEGES ON `{}`.* TO '{}'@'{}';\n",
+            safe_user, host, safe_pw, safe_db, safe_user, host
+        ));
+    }
+    
+    sql.push_str("FLUSH PRIVILEGES;\n");
+
+    // ponytail：当访问范围不只限于 localhost 时，配置 MySQL bind-address 以支持远程访问
+    if access_type != "local" {
+        ensure_mysql_remote_access(session).await.ok();
+    }
+
+    let mysql_cmd = get_mysql_cmd(session, cache, session_id).await;
+
+    // 通过 SFTP 写入 SQL（转义可靠，与 create_site 使用相同模式）
+    let tmp_sql = "/tmp/db_setup.sql";
+    crate::ssh::session_write_file(session, tmp_sql, &sql).await?;
+
+    let (db_out, db_err, db_code) = crate::ssh::session_exec_with_output(session, &format!("{} < {} 2>&1", mysql_cmd, tmp_sql), 30)
+        .await?;
+
+    // 验证数据库已创建
+    let verify_cmd = format!("{} -e 'SHOW DATABASES' 2>&1 | grep -iw '{}'", mysql_cmd, safe_db.replace('\'', ""));
+    let (verify_out, _, _) = crate::ssh::session_exec_with_output(session, &verify_cmd, 10)
+        .await?;
+    let db_exists = !verify_out.trim().is_empty();
+
+    // 清理临时文件
+    let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {}", tmp_sql), 5).await;
+
+    if db_code != 0 && !db_exists {
+        let full_output = format!("{} {}", db_out, db_err).trim().to_string();
+        return Err(if full_output.is_empty() {
+            "Database creation failed (unknown error)".to_string()
+        } else {
+            full_output
+        });
+    }
+
+    // 使数据库列表缓存失效，确保下一次列表查询反映新数据库
+    cache.invalidate(session_id, &["database_list"]);
+    Ok(format!("Database '{}' created successfully", db_name))
+}
+
+/// 删除数据库及其关联用户
+pub async fn delete_database(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    db_name: &str,
+    db_user: &str,
+) -> Result<String, String> {
+    let safe_db = db_name.replace('`', "");
+    let safe_user = db_user.replace('`', "");
+    // ponytail：删除所有主机对应的用户；使用包含逗号分隔列表的单条 DROP USER（PREPARE 仅支持单条语句）
+    let sql = format!(
+        "DROP DATABASE IF EXISTS `{}`;\n\
+         SET @sql = (SELECT CONCAT('DROP USER IF EXISTS ', GROUP_CONCAT(CONCAT('''', user, '''@''', host, '''') SEPARATOR ', ')) FROM mysql.user WHERE user = '{}');\n\
+         SET @sql = IFNULL(@sql, 'SELECT 1');\n\
+         PREPARE stmt FROM @sql;\n\
+         EXECUTE stmt;\n\
+         DEALLOCATE PREPARE stmt;\n\
+         FLUSH PRIVILEGES;\n",
+        safe_db, safe_user
+    );
+
+    let mysql_cmd = get_mysql_cmd(session, cache, session_id).await;
+
+    let tmp_sql = "/tmp/db_drop.sql";
+    crate::ssh::session_write_file(session, tmp_sql, &sql).await?;
+
+    let (db_out, db_err, db_code) = crate::ssh::session_exec_with_output(session, &format!("{} < {} 2>&1", mysql_cmd, tmp_sql), 30)
+        .await?;
+
+    let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {}", tmp_sql), 5).await;
+
+    // 任意非零退出码都表示错误
+    if db_code != 0 {
+        let combined = format!("{} {}", db_out, db_err).trim().to_string();
+        return Err(if combined.is_empty() {
+            "Database deletion failed (unknown error)".to_string()
+        } else {
+            combined
+        });
+    }
+
+    // 使数据库列表缓存失效，确保下一次列表查询反映删除结果
+    cache.invalidate(session_id, &["database_list"]);
+    Ok(format!("Database '{}' deleted successfully", db_name))
+}
+
+/// 清空数据库（截断其中的所有表），但不删除数据库
+pub async fn clear_database(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    db_name: &str,
+) -> Result<String, String> {
+    let safe_db = db_name.replace('`', "");
+    // ponytail：使用带游标的存储过程逐个 TRUNCATE 表
+    // (PREPARE only supports single statement, so GROUP_CONCAT approach fails)
+    let sql = format!(
+        "SET FOREIGN_KEY_CHECKS = 0;\n\
+         USE `{db}`;\n\
+         DELIMITER //\n\
+         CREATE PROCEDURE `clear_{db}`()\n\
+         BEGIN\n\
+             DECLARE done INT DEFAULT FALSE;\n\
+             DECLARE tname VARCHAR(255);\n\
+             DECLARE cur CURSOR FOR SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = '{db}';\n\
+             DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;\n\
+             OPEN cur;\n\
+             read_loop: LOOP\n\
+                 FETCH cur INTO tname;\n\
+                 IF done THEN LEAVE read_loop; END IF;\n\
+                 SET @s = CONCAT('TRUNCATE TABLE `{db}`.', tname);\n\
+                 PREPARE stmt FROM @s;\n\
+                 EXECUTE stmt;\n\
+                 DEALLOCATE PREPARE stmt;\n\
+             END LOOP;\n\
+             CLOSE cur;\n\
+         END //\n\
+         DELIMITER ;\n\
+         CALL `clear_{db}`();\n\
+         DROP PROCEDURE `clear_{db}`;\n\
+         SET FOREIGN_KEY_CHECKS = 1;\n",
+        db = safe_db
+    );
+
+    let mysql_cmd = get_mysql_cmd(session, cache, session_id).await;
+
+    let tmp_sql = "/tmp/db_clear.sql";
+    crate::ssh::session_write_file(session, tmp_sql, &sql).await?;
+
+    let (db_out, db_err, db_code) = crate::ssh::session_exec_with_output(session, &format!("{} < {} 2>&1", mysql_cmd, tmp_sql), 30)
+        .await?;
+
+    let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {}", tmp_sql), 5).await;
+
+    if db_code != 0 {
+        let combined = format!("{} {}", db_out, db_err).trim().to_string();
+        return Err(if combined.is_empty() {
+            "Database clear failed (unknown error)".to_string()
+        } else {
+            combined
+        });
+    }
+
+    Ok(format!("Database '{}' cleared successfully (all tables truncated)", db_name))
+}
+
+/// 修改数据库访问权限
+pub async fn change_db_access(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    db_name: &str,
+    db_user: &str,
+    db_pass: &str,
+    access_type: &str,
+    allowed_ip: &str,
+) -> Result<String, String> {
+    let safe_db = db_name.replace('`', "");
+    let safe_user = db_user.replace('`', "");
+    // ponytail：转义密码中的单引号
+    let safe_pw = db_pass.replace('\'', "\\'");
+    
+    // 从 allowed_ip 解析多个 IP（以换行分隔）
+    let access_hosts: Vec<&str> = match access_type {
+        "local" => vec!["localhost"],
+        "any" => vec!["%"],
+        "ip" => {
+            // 按换行拆分，清理每行首尾空白，并过滤空行
+            let ips: Vec<&str> = allowed_ip
+                .split('\n')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            
+            if ips.is_empty() {
+                return Err("No IP addresses provided".to_string());
+            }
+            
+            // 对每个 IP 进行基本验证
+            for ip in &ips {
+                if !is_valid_ip_or_cidr(ip) {
+                    return Err(format!("Invalid IP address format: {}", ip));
+                }
+            }
+            ips
+        },
+        _ => vec!["localhost"], // 默认回退值
+    };
+    
+    // ponytail：动态删除所有旧用户；使用包含逗号分隔列表的单条 DROP USER
+    let mut sql = String::new();
+    sql.push_str(&format!(
+        "SET @drop_sql = (SELECT CONCAT('DROP USER IF EXISTS ', GROUP_CONCAT(CONCAT('''', user, '''@''', host, '''') SEPARATOR ', ')) FROM mysql.user WHERE user = '{}');\n\
+         SET @drop_sql = IFNULL(@drop_sql, 'SELECT 1');\n\
+         PREPARE stmt FROM @drop_sql;\n\
+         EXECUTE stmt;\n\
+         DEALLOCATE PREPARE stmt;\n",
+        safe_user
+    ));
+    
+    // 为每个新的访问主机创建用户并授予权限
+    for host in &access_hosts {
+        sql.push_str(&format!(
+            "CREATE USER IF NOT EXISTS '{}'@'{}' IDENTIFIED BY '{}';\n\
+             GRANT ALL PRIVILEGES ON `{}`.* TO '{}'@'{}';\n",
+            safe_user, host, safe_pw, safe_db, safe_user, host
+        ));
+    }
+    
+    sql.push_str("FLUSH PRIVILEGES;\n");
+
+    // ponytail：当访问范围不只限于 localhost 时，配置 MySQL bind-address 以支持远程访问
+    if access_type != "local" {
+        ensure_mysql_remote_access(session).await.ok();
+    }
+
+    let mysql_cmd = get_mysql_cmd(session, cache, session_id).await;
+
+    let tmp_sql = "/tmp/db_access.sql";
+    crate::ssh::session_write_file(session, tmp_sql, &sql).await?;
+
+    let (db_out, db_err, db_code) = crate::ssh::session_exec_with_output(session, &format!("{} < {} 2>&1", mysql_cmd, tmp_sql), 30)
+        .await?;
+
+    let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {}", tmp_sql), 5).await;
+
+    // 任意非零退出码都表示错误
+    if db_code != 0 {
+        let combined = format!("{} {}", db_out, db_err).trim().to_string();
+        return Err(if combined.is_empty() {
+            "Failed to change database access permission (unknown error)".to_string()
+        } else {
+            combined
+        });
+    }
+
+    Ok(format!("Database '{}' access permission changed to {}", db_name, access_type))
+}
+
+// ===== Redis Management =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RedisKeyInfo {
+    pub key: String,
+    pub value_preview: String,
+    pub data_type: String,
+    pub length: usize,
+    pub ttl: i64, // -1 means no expiry
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RedisDbSize {
+    pub db_index: u8,
+    pub key_count: usize,
+}
+
+/// 检查 Redis 是否已安装并正在运行
+/// 返回值：运行时为 Ok(true)，已安装但停止时为 Ok(false)，未安装时为 Err("not_installed")
+pub async fn check_redis_status(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<bool, String> {
+    // 直接尝试执行 redis-cli ping
+    let (out, stderr, code) = crate::ssh::session_exec_with_output(session, "redis-cli ping 2>&1", 5)
+        .await?;
+
+    log::info!("[REDIS] ping => stdout='{}' stderr='{}' exit_code={}", out, stderr, code);
+
+    let combined = format!("{}{}", out, stderr).to_lowercase();
+
+    // 收到 PONG 响应，Redis 正在运行
+    if combined.contains("pong") {
+        log::info!("[REDIS] RUNNING (PONG received)");
+        return Ok(true);
+    }
+
+    // 找不到 redis-cli 命令，表示未安装
+    if combined.contains("command not found")
+        || combined.contains("no such file or directory")
+        || combined.contains("not found")
+    {
+        log::info!("[REDIS] NOT INSTALLED");
+        return Err("not_installed".to_string());
+    }
+
+    // redis-cli 存在但 ping 失败（连接被拒绝、需要身份验证等）
+    // 回退：检查 redis-server 进程是否正在运行
+    let (p_out, _, _) = crate::ssh::session_exec_with_output(session, "pgrep -x redis-server || pgrep redis-server", 3)
+        .await?;
+    log::info!("[REDIS] pgrep output='{}'", p_out);
+
+    // 如果 pgrep 找到了进程，则 redis-server 正在运行
+    if !p_out.trim().is_empty() {
+        log::info!("[REDIS] RUNNING (process found via pgrep)");
+        return Ok(true);
+    }
+
+    // 已安装但未运行
+    log::info!("[REDIS] STOPPED");
+    Ok(false)
+}
+
+/// 获取 Redis 版本
+pub async fn get_redis_version(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<String, String> {
+    let (out, _, code) = crate::ssh::session_exec_with_output(session, "redis-cli --version 2>&1", 5)
+        .await?;
+    
+    if code != 0 {
+        return Err("Redis not found".to_string());
+    }
+    
+    // 从类似 "redis-cli 7.2.4" 的输出中解析版本
+    let parts: Vec<&str> = out.split_whitespace().collect();
+    if parts.len() >= 2 {
+        Ok(parts[1].to_string())
+    } else {
+        Ok(out.trim().to_string())
+    }
+}
+
+/// 获取所有数据库的大小（0-15）
+/// ponytail：一次 INFO keyspace 调用替代 16 个 redis-cli DBSIZE 进程
+pub async fn redis_dbsize_all(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<RedisDbSize>, String> {
+    let (out, _, code) = crate::ssh::session_exec_with_output(session, "redis-cli INFO keyspace", 5)
+        .await?;
+
+    if code != 0 {
+        return Err(format!("Failed to get database sizes: {}", out));
+    }
+
+    let mut results = vec![0usize; 16];
+    for line in out.lines() {
+        // 格式：db0:keys=123,expires=0,avg_ttl=0
+        if let Some(rest) = line.strip_prefix("db") {
+            if let Some((idx_str, kv)) = rest.split_once(':') {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    if idx < 16 {
+                        for part in kv.split(',') {
+                            if let Some(n) = part.strip_prefix("keys=") {
+                                results[idx] = n.trim().parse().unwrap_or(0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(results.into_iter().enumerate().map(|(i, c)| RedisDbSize {
+        db_index: i as u8,
+        key_count: c,
+    }).collect())
+}
+
+/// 使用模式匹配和分页扫描数据库中的键
+/// ponytail：redis-cli 管道模式将约 4N 个 redis-cli 进程替换为 3 个（SCAN + 2 个管道）
+pub async fn redis_scan_keys(
+    session: &SshSession,
+    _cache: &SshCache,
+    session_id: &str,
+    db_index: u8,
+    pattern: &str,
+    search_type: &str,
+    cursor: usize,
+    count: usize,
+) -> Result<(Vec<RedisKeyInfo>, usize), String> {
+    let match_pattern = if pattern.is_empty() { "*" } else { pattern };
+    let safe_pat = match_pattern.replace('\'', "'\\''");
+
+    // 辅助函数：通过 Base64 编码的管道发送命令（避免所有 Shell 转义问题）
+    let run_pipeline = |cmds: String| {
+        let b64 = B64.encode(cmds.as_bytes());
+        let cmd = format!("printf '%s' '{}' | base64 -d | redis-cli --raw -n {}", b64, db_index);
+        let sess = session.clone();
+        let _sid = session_id.to_string();
+        async move {
+            let (out, _, code) = crate::ssh::session_exec_with_output(&sess, &cmd, 30).await?;
+            if code != 0 {
+                return Err(format!("Pipeline failed: {}", out));
+            }
+            Ok(out.lines().map(|l| l.trim_end().to_string()).collect::<Vec<_>>())
+        }
+    };
+
+    // 步骤 1：SCAN
+    let scan_match = if search_type == "value" { "*" } else { &safe_pat };
+    let scan_cmd = format!(
+        "redis-cli --raw -n {} SCAN {} MATCH '{}' COUNT {}",
+        db_index, cursor, scan_match, count
+    );
+    let (scan_out, _, code) = crate::ssh::session_exec_with_output(session, &scan_cmd, 15).await?;
+    if code != 0 {
+        return Err(format!("Failed to scan keys: {}", scan_out));
+    }
+
+    let mut scan_lines = scan_out.lines();
+    let next_cursor: usize = scan_lines.next().unwrap_or("0").trim().parse().unwrap_or(0);
+    let key_names: Vec<String> = scan_lines
+        .map(|l| l.to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    if key_names.is_empty() {
+        return Ok((vec![], next_cursor));
+    }
+
+    // 步骤 2：为所有键通过管道执行 TYPE + TTL
+    let type_ttl_cmds: String = key_names.iter()
+        .map(|k| format!("TYPE \"{}\"\nTTL \"{}\"", k, k))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let type_ttl_lines = run_pipeline(type_ttl_cmds).await?;
+
+    let mut types = Vec::with_capacity(key_names.len());
+    let mut ttls = Vec::with_capacity(key_names.len());
+    let mut i = 0;
+    while i < type_ttl_lines.len() {
+        let t = type_ttl_lines.get(i).map(|s| s.as_str()).unwrap_or("none");
+        let ttl = type_ttl_lines.get(i + 1).and_then(|s| s.parse::<i64>().ok()).unwrap_or(-1);
+        // 跳过错误结果（例如键在 SCAN 和 TYPE 之间被删除）
+        if !t.starts_with("ERR") && !t.starts_with("WRONGTYPE") {
+            types.push(t.to_string());
+            ttls.push(ttl);
+        } else {
+            types.push("none".to_string());
+            ttls.push(-1);
+        }
+        i += 2;
+    }
+
+    // 值搜索：通过 GET 值过滤字符串类型的键
+    let (key_names, types, ttls) = if search_type == "value" {
+        let mut get_cmds = String::new();
+        let mut string_indices = Vec::new();
+        for (idx, t) in types.iter().enumerate() {
+            if t == "string" {
+                get_cmds.push_str(&format!("GET \"{}\"\n", key_names[idx]));
+                string_indices.push(idx);
+            }
+        }
+        if string_indices.is_empty() {
+            return Ok((vec![], next_cursor));
+        }
+        let get_lines = run_pipeline(get_cmds).await?;
+        let search_pat = match_pattern;
+        // ponytail：保留的键全部为 type=string（值搜索仅匹配字符串）
+        let mut kept_names = Vec::new();
+        let mut kept_ttls = Vec::new();
+        for (gi, &idx) in string_indices.iter().enumerate() {
+            if let Some(val) = get_lines.get(gi) {
+                if val.contains(search_pat) {
+                    kept_names.push(key_names[idx].clone());
+                    kept_ttls.push(ttls[idx]);
+                }
+            }
+        }
+        let kept_types = vec!["string".to_string(); kept_names.len()];
+        (kept_names, kept_types, kept_ttls)
+    } else {
+        (key_names, types, ttls)
+    };
+
+    if key_names.is_empty() {
+        return Ok((vec![], next_cursor));
+    }
+
+    // 步骤 3：根据类型通过管道获取长度和数值预览
+    let mut len_cmds = String::new();
+    let mut results_per_key: Vec<usize> = Vec::new();
+    for (idx, k) in key_names.iter().enumerate() {
+        match types[idx].as_str() {
+            "string" => {
+                len_cmds.push_str(&format!("STRLEN \"{}\"\nGETRANGE \"{}\" 0 199\n", k, k));
+                results_per_key.push(2);
+            }
+            "list" => {
+                len_cmds.push_str(&format!("LLEN \"{}\"\n", k));
+                results_per_key.push(1);
+            }
+            "set" => {
+                len_cmds.push_str(&format!("SCARD \"{}\"\n", k));
+                results_per_key.push(1);
+            }
+            "hash" => {
+                len_cmds.push_str(&format!("HLEN \"{}\"\n", k));
+                results_per_key.push(1);
+            }
+            "zset" => {
+                len_cmds.push_str(&format!("ZCARD \"{}\"\n", k));
+                results_per_key.push(1);
+            }
+            _ => results_per_key.push(0),
+        }
+    }
+
+    let len_lines = if len_cmds.is_empty() {
+        vec![]
+    } else {
+        run_pipeline(len_cmds).await?
+    };
+
+    // 汇总最终结果
+    let mut keys = Vec::new();
+    let mut line_idx = 0;
+    for (idx, k) in key_names.iter().enumerate() {
+        let t = types.get(idx).map(|s| s.as_str()).unwrap_or("none");
+        let ttl = ttls.get(idx).copied().unwrap_or(-1);
+        let n = results_per_key.get(idx).copied().unwrap_or(0);
+
+        let (length, preview) = if n >= 2 {
+            let len_val = len_lines.get(line_idx).and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+            let vp = len_lines.get(line_idx + 1).cloned().unwrap_or_default();
+            line_idx += 2;
+            (len_val, vp)
+        } else if n == 1 {
+            let len_val = len_lines.get(line_idx).and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+            line_idx += 1;
+            let vp = match t {
+                "list" => format!("List with {} elements", len_val),
+                "set" => format!("Set with {} members", len_val),
+                "hash" => format!("Hash with {} fields", len_val),
+                "zset" => format!("Sorted set with {} members", len_val),
+                _ => String::new(),
+            };
+            (len_val, vp)
+        } else {
+            (0usize, "<Unknown type>".to_string())
+        };
+
+        keys.push(RedisKeyInfo {
+            key: k.clone(),
+            data_type: t.to_string(),
+            ttl,
+            length,
+            value_preview: preview,
+        });
+    }
+
+    Ok((keys, next_cursor))
+}
+
+/// 设置或更新键值对
+pub async fn redis_set_key(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_index: u8,
+    key: &str,
+    value: &str,
+    ttl: Option<i64>,
+) -> Result<String, String> {
+    let escaped_key = key.replace('\'', "'\\''");
+    let escaped_value = value.replace('\'', "'\\''");
+    
+    let cmd = if let Some(ttl_val) = ttl {
+        format!("redis-cli -n {} SET '{}' '{}' EX {}", db_index, escaped_key, escaped_value, ttl_val)
+    } else {
+        format!("redis-cli -n {} SET '{}' '{}'", db_index, escaped_key, escaped_value)
+    };
+    
+    let (out, err, code) = crate::ssh::session_exec_with_output(session, &cmd, 10).await?;
+    
+    if code != 0 || !out.trim().to_lowercase().contains("ok") {
+        return Err(format!("Failed to set key: {} {}", out, err));
+    }
+    
+    Ok(format!("Key '{}' set successfully", key))
+}
+
+/// 删除一个或多个键
+pub async fn redis_del_key(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_index: u8,
+    keys: &[String],
+) -> Result<usize, String> {
+    if keys.is_empty() {
+        return Ok(0);
+    }
+    
+    let escaped_keys: Vec<String> = keys
+        .iter()
+        .map(|k| k.replace('\'', "'\\''"))
+        .collect();
+    
+    let cmd = format!(
+        "redis-cli -n {} DEL {}",
+        db_index,
+        escaped_keys.iter().map(|k| format!("'{}'", k)).collect::<Vec<_>>().join(" ")
+    );
+    
+    let (out, _, code) = crate::ssh::session_exec_with_output(session, &cmd, 10).await?;
+    
+    if code != 0 {
+        return Err(format!("Failed to delete keys: {}", out));
+    }
+    
+    let deleted = out.trim().parse::<usize>().unwrap_or(0);
+    Ok(deleted)
+}
+
+/// 清空数据库（删除所有键）
+pub async fn redis_flushdb(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_index: u8,
+) -> Result<String, String> {
+    let cmd = format!("redis-cli -n {} FLUSHDB", db_index);
+    let (out, err, code) = crate::ssh::session_exec_with_output(session, &cmd, 10).await?;
+    
+    if code != 0 {
+        return Err(format!("Failed to flush database: {} {}", out, err));
+    }
+    
+    Ok(format!("Database {} flushed successfully", db_index))
+}
+
+/// 使用 BGSAVE 创建备份
+pub async fn redis_save_backup(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<String, String> {
+    // 触发后台保存
+    let (out, _, code) = crate::ssh::session_exec_with_output(session, "redis-cli BGSAVE 2>&1", 10)
+        .await?;
+    
+    if code != 0 {
+        return Err(format!("Failed to trigger backup: {}", out));
+    }
+    
+    // 等待一段时间，让保存完成
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    
+    // 查找最新的 RDB 文件
+    let (ls_out, _, _) = crate::ssh::session_exec_with_output(session, "ls -lht /var/lib/redis/*.rdb 2>/dev/null | head -1", 5)
+        .await?;
+    
+    if ls_out.trim().is_empty() {
+        // 尝试备用位置
+        let (alt_out, _, _) = crate::ssh::session_exec_with_output(session, "find /var -name '*.rdb' -type f -mmin -5 2>/dev/null | head -1", 5)
+            .await?;
+        
+        if alt_out.trim().is_empty() {
+            return Err("Backup file not found".to_string());
+        }
+        
+        return Ok(alt_out.trim().to_string());
+    }
+    
+    // 从 ls 输出中提取文件名
+    let parts: Vec<&str> = ls_out.split_whitespace().collect();
+    if parts.len() >= 9 {
+        Ok(parts[8].to_string())
+    } else {
+        Err("Could not parse backup file path".to_string())
+    }
+}
+
+/// 列出可用的备份文件
+pub async fn redis_list_backups(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<BackupInfo>, String> {
+    let (out, _, code) = crate::ssh::session_exec_with_output(session, "ls -lh /var/lib/redis/*.rdb 2>/dev/null", 5)
+        .await?;
+    
+    if code != 0 || out.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    
+    let mut backups = Vec::new();
+    for line in out.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 9 {
+            let size_str = parts[4];
+            let month = parts[5];
+            let day = parts[6];
+            let time_or_year = parts[7];
+            let filename = parts[8];
+            
+            // 解析大小
+            let size_bytes = parse_size_string(size_str);
+            
+            // 解析日期
+            let created_at = format!("{} {} {}", month, day, time_or_year);
+            
+            backups.push(BackupInfo {
+                filename: filename.to_string(),
+                size_bytes,
+                created_at,
+            });
+        }
+    }
+    
+    Ok(backups)
+}
+
+fn parse_size_string(size_str: &str) -> u64 {
+    let size_str = size_str.trim();
+    if let Some(num) = size_str.strip_suffix('K') {
+        (num.parse::<f64>().unwrap_or(0.0) * 1024.0) as u64
+    } else if let Some(num) = size_str.strip_suffix('M') {
+        (num.parse::<f64>().unwrap_or(0.0) * 1024.0 * 1024.0) as u64
+    } else if let Some(num) = size_str.strip_suffix('G') {
+        (num.parse::<f64>().unwrap_or(0.0) * 1024.0 * 1024.0 * 1024.0) as u64
+    } else {
+        size_str.parse::<u64>().unwrap_or(0)
+    }
+}
+
+/// 修改 MySQL root 密码
+pub async fn change_mysql_root_password(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    new_password: &str,
+) -> Result<String, String> {
+    // ponytail：复用 get_mysql_cmd 以可靠检测身份验证方式，而不是硬编码 sudo mysql
+    let mysql_cmd = get_mysql_cmd(session, cache, session_id).await;
+    
+    let safe_pw = new_password.replace('\'', "\\'");
+    let sql = format!("ALTER USER 'root'@'localhost' IDENTIFIED BY '{}';\nFLUSH PRIVILEGES;\n", safe_pw);
+    
+    // 通过 SFTP 写入 SQL
+    let tmp_sql = "/tmp/mysql_change_root_pw.sql";
+    crate::ssh::session_write_file(session, tmp_sql, &sql).await?;
+    
+    let (out, err, code) = crate::ssh::session_exec_with_output(session, &format!("{} < {} 2>&1", mysql_cmd, tmp_sql), 30)
+        .await?;
+    
+    // 清理临时文件
+    let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {}", tmp_sql), 5).await;
+    
+    if code != 0 {
+        let combined = format!("{} {}", out, err).trim().to_string();
+        return Err(if combined.is_empty() {
+            "Failed to change root password (unknown error)".to_string()
+        } else {
+            combined
+        });
+    }
+    
+    // ponytail：更新 /root/.my.cnf，使后续 get_mysql_cmd 调用使用新密码
+    let cnf = format!("[client]\nuser=root\npassword={}\n", new_password);
+    let _ = crate::ssh::session_exec_with_output(
+        session,
+        &format!("echo '{}' > /root/.my.cnf && chmod 600 /root/.my.cnf", cnf.replace('\'', "'\\''" )),
+        5,
+    ).await;
+    
+    Ok("MySQL root password changed successfully".to_string())
+}
+
+/// 修改 MySQL 数据库用户密码
+pub async fn change_db_user_password(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    db_user: &str,
+    new_password: &str,
+    access_type: &str,
+    allowed_ip: &str,
+) -> Result<String, String> {
+    let safe_user = db_user.replace('`', "");
+    let safe_pw = new_password.replace('`', "").replace('\'', "\\'");
+
+    let access_hosts: Vec<&str> = match access_type {
+        "local" => vec!["localhost"],
+        "any" => vec!["%"],
+        "ip" => {
+            let ips: Vec<&str> = allowed_ip
+                .split('\n')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if ips.is_empty() {
+                return Err("No IP addresses provided".to_string());
+            }
+            ips
+        },
+        _ => vec!["localhost"],
+    };
+
+    let mut sql = String::new();
+    for host in &access_hosts {
+        sql.push_str(&format!(
+            "ALTER USER '{}'@'{}' IDENTIFIED BY '{}';\n",
+            safe_user, host, safe_pw
+        ));
+    }
+    sql.push_str("FLUSH PRIVILEGES;\n");
+
+    let mysql_cmd = get_mysql_cmd(session, cache, session_id).await;
+    let tmp_sql = "/tmp/db_change_pw.sql";
+    crate::ssh::session_write_file(session, tmp_sql, &sql).await?;
+
+    let (out, err, code) = crate::ssh::session_exec_with_output(session, &format!("{} < {} 2>&1", mysql_cmd, tmp_sql), 30)
+        .await?;
+
+    let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {}", tmp_sql), 5).await;
+
+    if code != 0 {
+        let combined = format!("{} {}", out, err).trim().to_string();
+        return Err(if combined.is_empty() {
+            "Failed to change database user password (unknown error)".to_string()
+        } else {
+            combined
+        });
+    }
+
+    Ok("Database user password changed successfully".to_string())
+}
+
+// ===== Database Remarks Management =====
+
+/// 将数据库备注保存到 SQLite
+pub async fn save_db_remark(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_name: &str,
+    remark: &str,
+) -> Result<String, String> {
+    let db_conn = crate::db::init_db()
+        .map_err(|e| format!("Failed to init DB: {}", e))?;
+    let conn = db_conn.lock().map_err(|_| "DB lock failed".to_string())?;
+    
+    // 从会话获取服务器主机
+    let server_host = session.connect_info.host.clone();
+    
+    crate::db::DbRemarksManager::save(&conn, &server_host, db_name, remark)?;
+    
+    Ok("Remark saved successfully".to_string())
+}
+
+/// 获取服务器的所有数据库备注
+pub async fn get_db_remarks(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let db_conn = crate::db::init_db()
+        .map_err(|e| format!("Failed to init DB: {}", e))?;
+    let conn = db_conn.lock().map_err(|_| "DB lock failed".to_string())?;
+    
+    // 从会话获取服务器主机
+    let server_host = session.connect_info.host.clone();
+    
+    Ok(crate::db::DbRemarksManager::list_for_server(&conn, &server_host))
+}
+
+// ===== Database Credentials =====
+
+/// 保存数据库凭据（password、access_type、allowed_ip）
+pub async fn save_db_credentials(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_name: &str,
+    db_user: &str,
+    password: &str,
+    access_type: &str,
+    allowed_ip: &str,
+) -> Result<String, String> {
+    let db_conn = crate::db::init_db()
+        .map_err(|e| format!("Failed to init DB: {}", e))?;
+    let conn = db_conn.lock().map_err(|_| "DB lock failed".to_string())?;
+    let server_host = session.connect_info.host.clone();
+    crate::db::DbCredentialsManager::save(&conn, &server_host, db_name, db_user, password, access_type, allowed_ip)?;
+    Ok("Credentials saved".to_string())
+}
+
+/// 列出服务器的所有数据库凭据
+pub async fn get_db_credentials(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+) -> Result<Vec<crate::db::DbCredential>, String> {
+    let db_conn = crate::db::init_db()
+        .map_err(|e| format!("Failed to init DB: {}", e))?;
+    let conn = db_conn.lock().map_err(|_| "DB lock failed".to_string())?;
+    let server_host = session.connect_info.host.clone();
+    Ok(crate::db::DbCredentialsManager::list_for_server(&conn, &server_host))
+}
+
+/// 获取指定数据库的凭据
+pub async fn get_db_credential(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_name: &str,
+) -> Result<Option<crate::db::DbCredential>, String> {
+    let db_conn = crate::db::init_db()
+        .map_err(|e| format!("Failed to init DB: {}", e))?;
+    let conn = db_conn.lock().map_err(|_| "DB lock failed".to_string())?;
+    let server_host = session.connect_info.host.clone();
+    Ok(crate::db::DbCredentialsManager::get(&conn, &server_host, db_name))
+}
+
+/// 仅更新数据库密码
+pub async fn update_db_credential_password(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_name: &str,
+    password: &str,
+) -> Result<String, String> {
+    let db_conn = crate::db::init_db()
+        .map_err(|e| format!("Failed to init DB: {}", e))?;
+    let conn = db_conn.lock().map_err(|_| "DB lock failed".to_string())?;
+    let server_host = session.connect_info.host.clone();
+    if password.is_empty() {
+        crate::db::DbCredentialsManager::clear_password(&conn, &server_host, db_name)?;
+    } else {
+        crate::db::DbCredentialsManager::update_password(&conn, &server_host, db_name, password)?;
+    }
+    Ok("Password updated".to_string())
+}
+
+// ===== Database Backup and Import =====
+
+/// 通过 SFTP 写入临时 MySQL 凭据文件。
+/// 返回远程路径，调用方完成后必须执行 `rm -f` 删除文件。
+async fn write_mysql_cnf_file(
+    session: &SshSession,
+    db_user: &str,
+    db_password: &str,
+) -> Result<String, String> {
+    // 转义 .cnf 双引号值，仅处理反斜杠和双引号
+    let escaped_pw = db_password.replace('\\', "\\\\").replace('"', "\\\"");
+    let cnf_content = format!(
+        "[client]\nuser=\"{}\"\npassword=\"{}\"\n",
+        db_user, escaped_pw
+    );
+    let cnf_path = "/tmp/.db_credentials.cnf";
+    crate::ssh::session_write_file(session, cnf_path, &cnf_content).await?;
+    // 限制文件权限，防止其他用户读取密码
+    let _ = crate::ssh::session_exec_with_output(session, "chmod 600 /tmp/.db_credentials.cnf", 5).await;
+    Ok(cnf_path.to_string())
+}
+
+/// 使用 mysqldump 备份指定数据库
+pub async fn backup_database(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_name: &str,
+    db_user: &str,
+    db_password: &str,
+) -> Result<String, String> {
+    // 验证数据库名称（仅允许字母数字和下划线）
+    if !db_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err("Invalid database name".to_string());
+    }
+
+    if db_user.is_empty() || db_password.is_empty() {
+        return Err("数据库账号或密码为空，请先在本地保存密码".to_string());
+    }
+
+    // 如果备份目录不存在则创建
+    let create_dir_cmd = "mkdir -p /tmp/db_backups";
+    let (_, _, code) = crate::ssh::session_exec_with_output(session, create_dir_cmd, 5)
+        .await?;
+    
+    if code != 0 {
+        return Err("Failed to create backup directory".to_string());
+    }
+
+    // 生成用于文件名的时间戳
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Time error: {}", e))?
+        .as_secs();
+    
+    let sql_filename = format!("{}_{}.sql", db_name, timestamp);
+    let tar_filename = format!("{}_{}.tar.gz", db_name, timestamp);
+    let sql_path = format!("/tmp/db_backups/{}", sql_filename);
+    let tar_path = format!("/tmp/db_backups/{}", tar_filename);
+
+    // 写入临时凭据文件，避免内联密码中的 Shell 特殊字符导致问题
+    let cnf_path = write_mysql_cnf_file(session, db_user, db_password).await?;
+
+    // 使用凭据文件执行 mysqldump（密码不出现在命令行中）
+    let dump_cmd = format!(
+        "mysqldump --defaults-extra-file={} {} > {}",
+        cnf_path, db_name, sql_path
+    );
+    
+    let (_stdout, stderr, code) = crate::ssh::session_exec_with_output(session, &dump_cmd, 300)
+        .await?;
+    
+    // 无论结果如何都清理凭据文件
+    let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {}", cnf_path), 5).await;
+
+    if code != 0 {
+        return Err(format!("Backup failed: {}", stderr));
+    }
+
+    // 验证 SQL 文件存在
+    let verify_cmd = format!("test -f {} && echo 'exists'", sql_path);
+    let (verify_out, _, verify_code) = crate::ssh::session_exec_with_output(session, &verify_cmd, 5)
+        .await?;
+    
+    if verify_code != 0 || !verify_out.trim().contains("exists") {
+        return Err("SQL backup file was not created".to_string());
+    }
+
+    // 压缩为 tar.gz，并删除原始 SQL 文件
+    let compress_cmd = format!(
+        "cd /tmp/db_backups && tar -czf {} {} && rm -f {}",
+        tar_filename, sql_filename, sql_filename
+    );
+    
+    let (_, stderr, code) = crate::ssh::session_exec_with_output(session, &compress_cmd, 60)
+        .await?;
+    
+    if code != 0 {
+        return Err(format!("Compression failed: {}", stderr));
+    }
+
+    // 验证 tar.gz 文件存在
+    let verify_tar_cmd = format!("test -f {} && echo 'exists'", tar_path);
+    let (verify_tar_out, _, verify_tar_code) = crate::ssh::session_exec_with_output(session, &verify_tar_cmd, 5)
+        .await?;
+    
+    if verify_tar_code != 0 || !verify_tar_out.trim().contains("exists") {
+        return Err("tar.gz backup file was not created".to_string());
+    }
+
+    Ok(tar_filename)
+}
+
+/// 列出指定数据库的所有备份文件
+pub async fn list_db_backups(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_name: &str,
+) -> Result<Vec<BackupInfo>, String> {
+    // 验证数据库名称
+    if !db_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err("Invalid database name".to_string());
+    }
+
+    // 列出此数据库的备份文件（.sql、.tar.gz 和 .zip）
+    let pattern = format!("/tmp/db_backups/{}*", db_name);
+    let cmd = format!("ls -lht {} 2>/dev/null | grep -E '\\.(sql|tar\\.gz|zip)$'", pattern);
+    
+    let (out, _, code) = crate::ssh::session_exec_with_output(session, &cmd, 5)
+        .await?;
+    
+    if code != 0 || out.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    
+    let mut backups = Vec::new();
+    for line in out.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 9 {
+            let size_str = parts[4];
+            let month = parts[5];
+            let day = parts[6];
+            let time_or_year = parts[7];
+            let filename = parts[8];
+            
+            // 提取基本文件名（以防 ls 返回完整路径）
+            let basename = filename.rsplit('/').next().unwrap_or(filename);
+            
+            // 解析大小
+            let size_bytes = parse_size_string(size_str);
+            
+            // 解析日期
+            let created_at = format!("{} {} {}", month, day, time_or_year);
+            
+            backups.push(BackupInfo {
+                filename: basename.to_string(),
+                size_bytes,
+                created_at,
+            });
+        }
+    }
+    
+    Ok(backups)
+}
+
+/// 删除指定的备份文件
+pub async fn delete_db_backup(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    backup_filename: &str,
+) -> Result<String, String> {
+    // 验证文件名（防止路径遍历）
+    if backup_filename.contains("..") {
+        return Err("Invalid backup filename".to_string());
+    }
+    
+    if !backup_filename.ends_with(".sql") && !backup_filename.ends_with(".tar.gz") && !backup_filename.ends_with(".zip") {
+        return Err("Invalid backup file extension".to_string());
+    }
+
+    // 同时支持完整路径和相对文件名
+    let backup_path = if backup_filename.starts_with("/") {
+        backup_filename.to_string()
+    } else {
+        format!("/tmp/db_backups/{}", backup_filename)
+    };
+    let cmd = format!("rm -f {}", backup_path);
+    
+    let (_, _, code) = crate::ssh::session_exec_with_output(session, &cmd, 5)
+        .await?;
+    
+    if code != 0 {
+        return Err("Failed to delete backup file".to_string());
+    }
+    
+    Ok(format!("Backup {} deleted successfully", backup_filename))
+}
+
+/// 以字节形式下载数据库备份文件内容
+pub async fn download_db_backup(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    backup_filename: &str,
+) -> Result<Vec<u8>, String> {
+    // 验证文件名（防止路径遍历）
+    // 允许类似 /tmp/db_backups/file.sql 的完整路径，也允许只提供文件名
+    if backup_filename.contains("..") {
+        return Err("Invalid backup filename".to_string());
+    }
+    
+    if !backup_filename.ends_with(".sql") && !backup_filename.ends_with(".tar.gz") && !backup_filename.ends_with(".zip") {
+        return Err("Invalid backup file extension".to_string());
+    }
+
+    // 直接使用提供的路径（它应当已经是 /tmp/db_backups/filename.sql 或 .tar.gz）
+    let backup_path = if backup_filename.starts_with("/") {
+        backup_filename.to_string()
+    } else {
+        format!("/tmp/db_backups/{}", backup_filename)
+    };
+    
+    // 检查文件是否存在
+    let check_cmd = format!("test -f {} && echo 'exists'", backup_path);
+    let (stdout, _, code) = crate::ssh::session_exec_with_output(session, &check_cmd, 5)
+        .await?;
+    
+    if code != 0 || !stdout.trim().contains("exists") {
+        return Err("Backup file not found".to_string());
+    }
+    
+    // 通过 SFTP 以原始字节读取文件（保留二进制数据）
+    crate::ssh::session_read_file_bytes(session, &backup_path).await
+}
+
+/// 从上传的 SQL 内容导入数据库
+pub async fn import_database_from_file(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_name: &str,
+    db_user: &str,
+    db_password: &str,
+    sql_content: &str,
+) -> Result<String, String> {
+    // 验证数据库名称
+    if !db_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err("Invalid database name".to_string());
+    }
+
+    if db_user.is_empty() || db_password.is_empty() {
+        return Err("数据库账号或密码为空，请先在本地保存密码".to_string());
+    }
+
+    // 创建具有唯一名称的临时文件
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Time error: {}", e))?
+        .as_secs();
+    
+    let temp_path = format!("/tmp/import_{}.sql", timestamp);
+
+    // 通过 SFTP 将 SQL 内容写入临时文件（适用于大文件）
+    crate::ssh::session_write_file(session, &temp_path, sql_content).await?;
+
+    // 写入临时凭据文件，避免内联密码中的 Shell 特殊字符导致问题
+    let cnf_path = write_mysql_cnf_file(session, db_user, db_password).await?;
+
+    // 使用凭据文件将 SQL 文件导入数据库（密码不出现在命令行中）
+    let import_cmd = format!(
+        "mysql --defaults-extra-file={} {} < {}",
+        cnf_path, db_name, temp_path
+    );
+    
+    let (_import_stdout, import_stderr, import_code) = crate::ssh::session_exec_with_output(session, &import_cmd, 300)
+        .await?;
+    
+    // 无论结果如何都清理临时文件
+    let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {} {}", temp_path, cnf_path), 5).await;
+    
+    if import_code != 0 {
+        return Err(format!("Import failed: {}", import_stderr));
+    }
+    
+    Ok(format!("Database {} imported successfully", db_name))
+}
+
+/// 从上传的原始字节导入数据库（支持 .sql、.tar.gz 和 .zip）
+pub async fn import_database_from_file_bytes(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_name: &str,
+    db_user: &str,
+    db_password: &str,
+    file_name: &str,
+    file_bytes: Vec<u8>,
+) -> Result<String, String> {
+    // 验证数据库名称
+    if !db_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err("Invalid database name".to_string());
+    }
+
+    if db_user.is_empty() || db_password.is_empty() {
+        return Err("数据库账号或密码为空，请先在本地保存密码".to_string());
+    }
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Time error: {}", e))?
+        .as_secs();
+
+    // 将上传的字节写入临时文件
+    let upload_path = format!("/tmp/import_{}_{}", timestamp, file_name);
+    crate::ssh::session_write_file_bytes(session, &upload_path, &file_bytes).await?;
+
+    // 根据文件扩展名确定 SQL 路径
+    let sql_path = if file_name.ends_with(".tar.gz") {
+        let temp_sql = format!("/tmp/import_{}.sql", timestamp);
+        // 分开使用 gunzip 和 tar，以便更好地诊断错误
+        let tar_cmd = format!("gunzip -c {} | tar -xf - -O > {}", upload_path, temp_sql);
+        let (_, stderr, code) = crate::ssh::session_exec_with_output(session, &tar_cmd, 60).await?;
+        if code != 0 {
+            let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {} {}", upload_path, temp_sql), 5).await;
+            return Err(format!("Failed to extract tar.gz: {}", stderr));
+        }
+        temp_sql
+    } else if file_name.ends_with(".zip") {
+        let temp_sql = format!("/tmp/import_{}.sql", timestamp);
+        let unzip_cmd = format!("unzip -p {} > {}", upload_path, temp_sql);
+        let (_, stderr, code) = crate::ssh::session_exec_with_output(session, &unzip_cmd, 60).await?;
+        if code != 0 {
+            let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {}", upload_path), 5).await;
+            return Err(format!("Failed to extract zip: {}", stderr));
+        }
+        temp_sql
+    } else {
+        upload_path.clone()
+    };
+
+    // 写入临时凭据文件
+    let cnf_path = write_mysql_cnf_file(session, db_user, db_password).await?;
+
+    // 将 SQL 导入数据库
+    let import_cmd = format!(
+        "mysql --defaults-extra-file={} {} < {}",
+        cnf_path, db_name, sql_path
+    );
+    let (_import_stdout, import_stderr, import_code) = crate::ssh::session_exec_with_output(session, &import_cmd, 300).await?;
+
+    // 清理
+    let cleanup = if file_name.ends_with(".tar.gz") || file_name.ends_with(".zip") {
+        format!("{} {} {}", upload_path, sql_path, cnf_path)
+    } else {
+        format!("{} {}", upload_path, cnf_path)
+    };
+    let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {}", cleanup), 5).await;
+
+    if import_code != 0 {
+        return Err(format!("Import failed: {}", import_stderr));
+    }
+
+    Ok(format!("Database {} imported successfully", db_name))
+}
+
+/// 从现有备份文件导入数据库
+pub async fn import_database_from_backup(
+    session: &SshSession,
+    _cache: &SshCache,
+    _session_id: &str,
+    db_name: &str,
+    db_user: &str,
+    db_password: &str,
+    backup_filename: &str,
+) -> Result<String, String> {
+    // 验证数据库名称和备份文件名
+    if !db_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err("Invalid database name".to_string());
+    }
+    
+    if backup_filename.contains('/') || backup_filename.contains("..") {
+        return Err("Invalid backup filename".to_string());
+    }
+    
+    if !backup_filename.ends_with(".sql") && !backup_filename.ends_with(".tar.gz") && !backup_filename.ends_with(".zip") {
+        return Err("Invalid backup file extension".to_string());
+    }
+
+    if db_user.is_empty() || db_password.is_empty() {
+        return Err("数据库账号或密码为空，请先在本地保存密码".to_string());
+    }
+
+    let backup_path = format!("/tmp/db_backups/{}", backup_filename);
+    
+    // 验证备份文件存在
+    let verify_cmd = format!("test -f {} && echo 'exists'", backup_path);
+    let (verify_out, _, verify_code) = crate::ssh::session_exec_with_output(session, &verify_cmd, 5)
+        .await?;
+    
+    if verify_code != 0 || !verify_out.trim().contains("exists") {
+        return Err("Backup file not found".to_string());
+    }
+
+    // 如果是 tar.gz 或 zip 文件，则先解压
+    let sql_path = if backup_filename.ends_with(".tar.gz") {
+        let temp_sql = format!("/tmp/import_{}.sql", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("Time error: {}", e))?
+            .as_secs());
+        
+        let tar_cmd = format!("tar -xzf {} -O > {}", backup_path, temp_sql);
+        let (_, stderr, code) = crate::ssh::session_exec_with_output(session, &tar_cmd, 60)
+            .await?;
+        
+        if code != 0 {
+            return Err(format!("Failed to extract tar.gz: {}", stderr));
+        }
+        temp_sql
+    } else if backup_filename.ends_with(".zip") {
+        let temp_sql = format!("/tmp/import_{}.sql", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("Time error: {}", e))?
+            .as_secs());
+        
+        let unzip_cmd = format!("unzip -p {} > {}", backup_path, temp_sql);
+        let (_, stderr, code) = crate::ssh::session_exec_with_output(session, &unzip_cmd, 60)
+            .await?;
+        
+        if code != 0 {
+            return Err(format!("Failed to extract zip: {}", stderr));
+        }
+        temp_sql
+    } else {
+        backup_path.clone()
+    };
+
+    // 写入临时凭据文件，避免内联密码中的 Shell 特殊字符导致问题
+    let cnf_path = write_mysql_cnf_file(session, db_user, db_password).await?;
+
+    // 使用凭据文件将 SQL 导入数据库（密码不出现在命令行中）
+    let import_cmd = format!(
+        "mysql --defaults-extra-file={} {} < {}",
+        cnf_path, db_name, sql_path
+    );
+    
+    let (_import_stdout, import_stderr, import_code) = crate::ssh::session_exec_with_output(session, &import_cmd, 300)
+        .await?;
+    
+    // 如果备份是 tar.gz 或 zip，则清理解压出的 SQL 文件和凭据文件
+    let cleanup_files = if backup_filename.ends_with(".tar.gz") || backup_filename.ends_with(".zip") {
+        format!("{} {}", sql_path, cnf_path)
+    } else {
+        cnf_path.clone()
+    };
+    let _ = crate::ssh::session_exec_with_output(session, &format!("rm -f {}", cleanup_files), 5).await;
+    
+    if import_code != 0 {
+        return Err(format!("Import failed: {}", import_stderr));
+    }
+    
+    Ok(format!("Database {} imported from backup {} successfully", db_name, backup_filename))
+}
+
+// ===== Port Management =====
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PortInfo {
+    pub port: u16,            // 数字端口
+    pub protocol: String,     // "tcp" / "udp"
+    pub address: String,      // 监听地址，例如 "0.0.0.0" / "*" / "[::]"
+    pub pid: Option<i32>,     // 进程 PID（不可用时为 None）
+    pub process: Option<String>, // 进程名称（不可用时为 None）
+    pub user: Option<String>, // 所属用户（不可用时为 None）
+}
+
+/// 列出远程服务器上所有正在监听（或未连接）的端口。
+/// 自动检测可用的最佳工具：ss -> lsof -> netstat。
+pub async fn list_listening_ports(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+) -> Result<Vec<PortInfo>, String> {
+    // 较短的 TTL：端口使用情况会动态变化
+    if let Some(cached) = cache.get(session_id, "ports", 5) {
+        if let Ok(list) = serde_json::from_str::<Vec<PortInfo>>(&cached) {
+            return Ok(list);
+        }
+    }
+
+    let (stdout, _, _) = crate::ssh::session_exec_with_output(session,
+        r#"
+if command -v ss >/dev/null 2>&1; then
+  echo "TOOL=ss"
+  ss -tulnp 2>/dev/null
+elif command -v lsof >/dev/null 2>&1; then
+  echo "TOOL=lsof"
+  lsof -i -P -n 2>/dev/null
+elif command -v netstat >/dev/null 2>&1; then
+  echo "TOOL=netstat"
+  netstat -tulnp 2>/dev/null
+else
+  echo "TOOL=none"
+fi
+echo "PS_MAP_START"
+ps -eo pid=,user=,comm= 2>/dev/null
+echo "PS_MAP_END"
+"#,
+        20,
+    ).await?;
+
+    let mut tool = "none";
+    let mut out = String::new();
+    let mut ps_map: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new(); // pid ->（user，comm）
+    let mut in_ps = false;
+
+    for line in stdout.lines() {
+        if line.starts_with("TOOL=") {
+            tool = &line[5..];
+            continue;
+        }
+        if line == "PS_MAP_START" { in_ps = true; continue; }
+        if line == "PS_MAP_END" { in_ps = false; continue; }
+        if in_ps {
+            let mut parts = line.splitn(3, ' ');
+            let pid = parts.next().unwrap_or("").trim();
+            let user = parts.next().unwrap_or("").trim();
+            let comm = parts.next().unwrap_or("").trim();
+            if !pid.is_empty() && !user.is_empty() {
+                ps_map.insert(pid.to_string(), (user.to_string(), comm.to_string()));
+            }
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+
+    if tool == "none" {
+        return Err("No supported tool (ss/lsof/netstat) found on the server".to_string());
+    }
+
+    let mut ports = match tool {
+        "ss" => parse_ss_ports(&out),
+        "lsof" => parse_lsof_ports(&out),
+        "netstat" => parse_netstat_ports(&out),
+        _ => vec![],
+    };
+
+    // 使用 ps 映射补充用户信息（ss/netstat 不提供所属用户）
+    for p in &mut ports {
+        if let Some(pid_str) = p.pid.as_ref().map(|v| v.to_string()) {
+            if let Some((user, comm)) = ps_map.get(&pid_str) {
+                if p.user.is_none() {
+                    p.user = Some(user.clone());
+                }
+                if p.process.is_none() || p.process.as_deref() == Some("") {
+                    p.process = Some(comm.clone());
+                }
+            }
+        }
+    }
+
+    ports.sort_by(|a, b| b.port.cmp(&a.port));
+    cache.put(session_id, "ports", serde_json::to_string(&ports).unwrap_or_default());
+    Ok(ports)
+}
+
+/// 解析 `ss -tulnp` 输出。
+fn parse_ss_ports(stdout: &str) -> Vec<PortInfo> {
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("Netid") || line.starts_with("State") { continue; }
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 6 { continue; }
+        // Netid State Recv-Q Send-Q Local Address:Port Peer Address:Port [Process]
+        let proto_raw = fields[0];
+        let state = fields[1];
+        let local = fields[4];
+        if state != "LISTEN" && state != "UNCONN" { continue; }
+        let protocol = normalize_proto(proto_raw);
+        let (addr, port) = split_addr_port(local);
+        let Some(port_num) = port else { continue };
+        let mut pid = None;
+        let mut process = None;
+        if fields.len() >= 7 {
+            let proc_field = fields[6];
+            if proc_field.starts_with("users:") {
+                // users:(("sshd",pid=1234,fd=3)) 或 users:(("nginx",pid=100,fd=6),("nginx",pid=101,fd=7))
+                let mut first_name: Option<String> = None;
+                let mut first_pid: Option<i32> = None;
+                let mut rest = &proc_field[7..]; // 跳过 "users:("
+                // 清理末尾的 ')'，可能有多个
+                while let Some(start) = rest.find('"') {
+                    let after = &rest[start + 1..];
+                    let end = match after.find('"') { Some(e) => e, None => break };
+                    let name = &after[..end];
+                    if first_name.is_none() && !name.is_empty() {
+                        first_name = Some(name.to_string());
+                    }
+                    let after_name = &after[end + 1..];
+                    if let Some(p) = after_name.find("pid=") {
+                        let pid_part = &after_name[p + 4..];
+                        let num: String = pid_part.chars().take_while(|c| c.is_ascii_digit()).collect();
+                        if let Ok(v) = num.parse::<i32>() {
+                            if first_pid.is_none() {
+                                first_pid = Some(v);
+                            }
+                        }
+                    }
+                    rest = &after_name[..];
+                    // 跳过 "fd=N"，移动到下一个条目
+                    if let Some(fd) = rest.find("fd=") {
+                        let mut idx = fd + 3;
+                        while idx < rest.len() && rest.as_bytes()[idx].is_ascii_digit() { idx += 1; }
+                        rest = &rest[idx..];
+                    } else {
+                        break;
+                    }
+                }
+                pid = first_pid;
+                process = first_name.filter(|s| !s.is_empty());
+            }
+        }
+        out.push(PortInfo { port: port_num, protocol, address: addr, pid, process, user: None });
+    }
+    out
+}
+
+/// 解析 `lsof -i -P -n` 输出。
+fn parse_lsof_ports(stdout: &str) -> Vec<PortInfo> {
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("COMMAND") { continue; }
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 9 { continue; }
+        // COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+        let process = fields[0].to_string();
+        let pid = fields[1].parse::<i32>().ok();
+        let user = Some(fields[2].to_string());
+        let name = fields[8..].join(" ");
+        if !name.contains("(LISTEN)") { continue; }
+        let proto_raw = fields[7]; // "TCP", "UDP", "TCP6"...
+        let protocol = normalize_proto(proto_raw);
+        // NAME 类似 "TCP *:22 (LISTEN)"，从第二个标记中提取 host:port
+        let second = fields[8].to_string();
+        let (addr, port) = split_addr_port(&second);
+        let Some(port_num) = port else { continue };
+        out.push(PortInfo { port: port_num, protocol, address: addr, pid, process: Some(process), user });
+    }
+    out
+}
+
+/// 解析 `netstat -tulnp` 输出。
+fn parse_netstat_ports(stdout: &str) -> Vec<PortInfo> {
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("Proto") { continue; }
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 7 { continue; }
+        // Proto Recv-Q Send-Q Local Address Foreign Address State PID/Program name
+        let proto_raw = fields[0];
+        let state = fields[5];
+        if state != "LISTEN" { continue; }
+        let local = fields[3];
+        let protocol = normalize_proto(proto_raw);
+        let (addr, port) = split_addr_port(local);
+        let Some(port_num) = port else { continue };
+        let mut pid = None;
+        let mut process = None;
+        let pid_prog = fields[6].trim();
+        if pid_prog != "-" && !pid_prog.is_empty() {
+            if let Some((p, name)) = pid_prog.split_once('/') {
+                pid = p.parse::<i32>().ok();
+                process = Some(name.to_string());
+            } else {
+                pid = pid_prog.parse::<i32>().ok();
+            }
+        }
+        out.push(PortInfo { port: port_num, protocol, address: addr, pid, process, user: None });
+    }
+    out
+}
+
+/// 规范化协议标记（"TCP6" -> "tcp"，"tcp6" -> "tcp" 等）。
+fn normalize_proto(raw: &str) -> String {
+    let r = raw.to_ascii_lowercase();
+    if r.starts_with("tcp") { "tcp".to_string() }
+    else if r.starts_with("udp") { "udp".to_string() }
+    else { r }
+}
+
+/// 将 "0.0.0.0:22" / "*:80" / "ipv6:443" 拆分为（地址，端口）。
+fn split_addr_port(s: &str) -> (String, Option<u16>) {
+    let s = s.trim();
+    // IPv6 方括号形式：[::]:443
+    if let Some(close) = s.rfind(']') {
+        if let Some(colon) = s[close..].find(':') {
+            let addr = s[..close + 1].to_string();
+            let port = s[close + 1 + colon + 1..].parse::<u16>().ok();
+            return (addr, port);
+        }
+    }
+    match s.rsplit_once(':') {
+        Some((addr, port)) => {
+            let port = port.parse::<u16>().ok();
+            let addr = if addr.is_empty() { "*".to_string() } else { addr.to_string() };
+            (addr, port)
+        }
+        None => (s.to_string(), None),
+    }
+}
+
+/// 查询指定端口是否正在使用。
+pub async fn query_port(
+    session: &SshSession,
+    cache: &SshCache,
+    session_id: &str,
+    port: u16,
+) -> Result<Vec<PortInfo>, String> {
+    let all = list_listening_ports(session, cache, session_id).await?;
+    Ok(all.into_iter().filter(|p| p.port == port).collect())
+}
+
+/// 根据 PID 终止进程。返回人类可读的消息。
+/// `force = true` uses SIGKILL (-9), otherwise SIGTERM (-15).
+pub async fn kill_pid(
+    session: &SshSession,
+    pid: i32,
+    force: bool,
+) -> Result<String, String> {
+    if pid <= 1 {
+        return Err(format!("Refusing to kill PID {} (system process)", pid));
+    }
+    let sig = if force { "-9" } else { "-15" };
+    let cmd = format!(
+        "kill {sig} {pid} 2>/dev/null || sudo -n kill {sig} {pid} 2>/dev/null; echo \"RC=$?\""
+    );
+    let (stdout, stderr, _) = crate::ssh::session_exec_with_output(session, &cmd, 15).await?;
+    let rc = stdout
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("RC="))
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .unwrap_or(-1);
+    if rc != 0 {
+        let detail = stderr.trim();
+        return Err(if detail.is_empty() {
+            format!("Failed to kill PID {} (exit {})", pid, rc)
+        } else {
+            format!("Failed to kill PID {}: {}", pid, detail)
+        });
+    }
+    Ok(format!("Process {} killed with {}", pid, if force { "SIGKILL" } else { "SIGTERM" }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempKeyFile(std::path::PathBuf);
+
+    impl Drop for TempKeyFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    fn generated_private_key_is_written_without_crossing_serialization() {
+        let path = std::env::temp_dir().join(format!(
+            "ohmypanel-key-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let cleanup = TempKeyFile(path.clone());
+        let generated = generate_ssh_keypair("ed25519", &path).unwrap();
+        let serialized = serde_json::to_string(&generated).unwrap();
+        let private_key = std::fs::read(&path).unwrap();
+        assert_eq!(generated.private_key_path, path.to_string_lossy());
+        assert!(generated.public_key_openssh.starts_with("ssh-ed25519 "));
+        assert!(!serialized.contains("PRIVATE KEY"));
+        assert!(private_key.starts_with(b"-----BEGIN OPENSSH PRIVATE KEY-----"));
+        drop(cleanup);
+    }
+
+    #[test]
+    fn ssh_public_key_parser_accepts_canonical_key_and_safe_comment() {
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let line = format!("{} ohmypanel:test-id", key.public_key().to_openssh().unwrap());
+        let parsed = parse_ssh_public_key(&line).unwrap();
+        assert_eq!(parsed.public_key_base64(), key.public_key().public_key_base64());
+    }
+
+    #[test]
+    fn ssh_public_key_parser_rejects_options_multiline_and_shell_comments() {
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let line = key.public_key().to_openssh().unwrap();
+        assert!(parse_ssh_public_key(&format!("command=\"id\" {line}")).is_err());
+        assert!(parse_ssh_public_key(&format!("{line}\n{line}")).is_err());
+        assert!(parse_ssh_public_key(&format!("{line} unsafe'comment")).is_err());
+    }
+}

@@ -1,0 +1,1069 @@
+use rusqlite::{Connection as SqliteConn, OptionalExtension};
+use russh::keys::PublicKeyBase64;
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+/// 获取 SQLite 数据目录：<config_dir>/ohmypanel
+pub fn db_dir() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("ohmypanel");
+    std::fs::create_dir_all(&path).ok();
+    path
+}
+
+/// 获取 SQLite 数据库路径：<config_dir>/ohmypanel/data.db
+pub fn db_path() -> PathBuf {
+    let mut path = db_dir();
+    path.push("data.db");
+    path
+}
+
+/// 初始化数据库，并在需要时创建数据表。
+pub fn init_db() -> Result<Mutex<SqliteConn>, String> {
+    let path = db_path();
+    let conn = SqliteConn::open(&path)
+        .map_err(|e| format!("Failed to open SQLite DB: {}", e))?;
+
+    // 启用 WAL 模式以提高并发能力
+    conn.execute_batch("PRAGMA journal_mode=WAL;")
+        .map_err(|e| format!("Failed to set WAL mode: {}", e))?;
+
+    // 创建数据表
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS connections (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '',
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 22,
+            username TEXT NOT NULL DEFAULT 'root',
+            auth_type TEXT NOT NULL DEFAULT 'password',
+            key_path TEXT,
+            password TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS favorites (
+            path TEXT PRIMARY KEY,
+            name TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS fb_favorites (
+            server_host TEXT NOT NULL,
+            path TEXT NOT NULL,
+            PRIMARY KEY(server_host, path)
+        );
+
+        CREATE TABLE IF NOT EXISTS fb_dir_cache (
+            server_host TEXT NOT NULL,
+            path TEXT NOT NULL,
+            data TEXT NOT NULL,
+            cached_at INTEGER NOT NULL,
+            PRIMARY KEY(server_host, path)
+        );
+
+        CREATE TABLE IF NOT EXISTS db_remarks (
+            server_host TEXT NOT NULL,
+            db_name TEXT NOT NULL,
+            remark TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY(server_host, db_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS db_credentials (
+            server_host TEXT NOT NULL,
+            db_name TEXT NOT NULL,
+            password TEXT NOT NULL DEFAULT '',
+            access_type TEXT NOT NULL DEFAULT 'local',
+            allowed_ip TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY(server_host, db_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS site_metadata (
+            server_host TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY(server_host, domain)
+        );
+
+        CREATE TABLE IF NOT EXISTS custom_software (
+            server_host TEXT NOT NULL,
+            package_name TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'other',
+            PRIMARY KEY(server_host, package_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS tunnels (
+            id TEXT PRIMARY KEY,
+            server_key TEXT NOT NULL,
+            tunnel_type TEXT NOT NULL,
+            local_host TEXT NOT NULL,
+            local_port INTEGER NOT NULL,
+            remote_host TEXT NOT NULL,
+            remote_port INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            note TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS ssh_host_keys (
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            key_base64 TEXT NOT NULL,
+            algorithm TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            trusted_at INTEGER NOT NULL,
+            PRIMARY KEY(host, port)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tunnels_server_key ON tunnels(server_key);"
+    ).map_err(|e| format!("Failed to create tables: {}", e))?;
+
+    // ponytail：版本化数据库结构迁移；新增版本请追加到末尾
+    let schema_version: i32 = conn
+        .query_row("SELECT value FROM settings WHERE key='schema_version'", [], |r| r.get::<_, String>(0))
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    if schema_version < 1 {
+        // v1：移除 sites 表；现在通过 SSH 直接从 Nginx 读取站点
+        // 如果 sites 表存在则删除（ponytail：用户已确认无需备份）
+        let _ = conn.execute_batch("DROP TABLE IF EXISTS sites;");
+    }
+
+    // 始终确保 remember_me 列存在（幂等迁移）
+    let has_remember_me: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('connections') WHERE name='remember_me'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+    
+    if !has_remember_me {
+        let _ = conn.execute_batch("ALTER TABLE connections ADD COLUMN remember_me INTEGER DEFAULT 0;");
+    }
+
+    // v3：为 db_credentials 添加 db_user 列（ponytail：幂等 ALTER TABLE）
+    let has_db_user: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('db_credentials') WHERE name='db_user'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if !has_db_user {
+        let _ = conn.execute_batch("ALTER TABLE db_credentials ADD COLUMN db_user TEXT NOT NULL DEFAULT '';");
+    }
+
+    // v4：为 tunnels 添加 note 列（幂等 ALTER TABLE）
+    let has_tunnel_note: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('tunnels') WHERE name='note'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if !has_tunnel_note {
+        let _ = conn.execute_batch("ALTER TABLE tunnels ADD COLUMN note TEXT NOT NULL DEFAULT '';");
+    }
+
+    // 更新数据库结构版本号至最新值
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '5')",
+        [],
+    ).map_err(|e| format!("Failed to update schema_version: {}", e))?;
+
+    Ok(Mutex::new(conn))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostKeyRecord {
+    pub host: String,
+    pub port: u16,
+    pub key_base64: String,
+    pub algorithm: String,
+    pub fingerprint: String,
+    pub trusted_at: i64,
+}
+
+pub struct HostKeyStore;
+
+impl HostKeyStore {
+    pub fn normalize_host(host: &str) -> Result<String, String> {
+        let normalized = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        if normalized.is_empty() {
+            return Err("SSH host cannot be empty".to_string());
+        }
+        Ok(normalized)
+    }
+
+    pub fn get(conn: &SqliteConn, host: &str, port: u16) -> Result<Option<HostKeyRecord>, String> {
+        let host = Self::normalize_host(host)?;
+        conn.query_row(
+            "SELECT host, port, key_base64, algorithm, fingerprint, trusted_at FROM ssh_host_keys WHERE host = ?1 AND port = ?2",
+            rusqlite::params![host, port],
+            |row| {
+                Ok(HostKeyRecord {
+                    host: row.get(0)?,
+                    port: row.get(1)?,
+                    key_base64: row.get(2)?,
+                    algorithm: row.get(3)?,
+                    fingerprint: row.get(4)?,
+                    trusted_at: row.get(5)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| format!("Failed to read trusted SSH host key: {}", e))
+    }
+
+    pub fn trust(
+        conn: &SqliteConn,
+        host: &str,
+        port: u16,
+        key_base64: &str,
+        replace: bool,
+    ) -> Result<HostKeyRecord, String> {
+        if port == 0 {
+            return Err("SSH port must be greater than zero".to_string());
+        }
+        let host = Self::normalize_host(host)?;
+        let public_key = russh::keys::parse_public_key_base64(key_base64)
+            .map_err(|e| format!("Invalid SSH host key: {}", e))?;
+        let record = HostKeyRecord {
+            host: host.clone(),
+            port,
+            key_base64: public_key.public_key_base64(),
+            algorithm: public_key.algorithm().as_str().to_string(),
+            fingerprint: public_key.fingerprint(Default::default()).to_string(),
+            trusted_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64,
+        };
+
+        match Self::get(conn, &host, port)? {
+            Some(existing) if existing.key_base64 == record.key_base64 => return Ok(existing),
+            Some(_) if !replace => {
+                return Err("A different SSH host key is already trusted for this host".to_string())
+            }
+            None if replace => return Err("No trusted SSH host key exists to replace".to_string()),
+            _ => {}
+        }
+
+        conn.execute(
+            "INSERT INTO ssh_host_keys (host, port, key_base64, algorithm, fingerprint, trusted_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(host, port) DO UPDATE SET
+                 key_base64 = excluded.key_base64,
+                 algorithm = excluded.algorithm,
+                 fingerprint = excluded.fingerprint,
+                 trusted_at = excluded.trusted_at",
+            rusqlite::params![
+                record.host,
+                record.port,
+                record.key_base64,
+                record.algorithm,
+                record.fingerprint,
+                record.trusted_at,
+            ],
+        )
+        .map_err(|e| format!("Failed to save trusted SSH host key: {}", e))?;
+
+        Ok(record)
+    }
+}
+
+// ===== 文件浏览器收藏夹 =====
+
+// ===== 文件浏览器目录缓存 =====
+
+pub struct FbDirCache;
+
+impl FbDirCache {
+    // ponytail：如果 cached_at 在 ttl_hours 范围内则获取缓存的 JSON 和 cached_at；缓存过期或不存在时返回 None
+    pub fn get(conn: &SqliteConn, server_host: &str, path: &str, ttl_hours: u32) -> Option<(String, i64)> {
+        let mut stmt = conn.prepare(
+            "SELECT data, cached_at FROM fb_dir_cache WHERE server_host = ?1 AND path = ?2"
+        ).ok()?;
+        let (data, cached_at): (String, i64) = stmt.query_row(
+            rusqlite::params![server_host, path], |row| Ok((row.get(0)?, row.get(1)?))
+        ).ok()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let ttl_ms = (ttl_hours as i64) * 3600 * 1000;
+        if now - cached_at > ttl_ms { return None; } // ponytail：已过期
+        Some((data, cached_at))
+    }
+
+    pub fn put(conn: &SqliteConn, server_host: &str, path: &str, data: &str) -> Result<(), String> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        conn.execute(
+            "INSERT OR REPLACE INTO fb_dir_cache (server_host, path, data, cached_at) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![server_host, path, data, now],
+        ).map_err(|e| format!("Failed to cache dir: {}", e))?;
+        Ok(())
+    }
+
+    // ponytail：更新 cached_at，但不重写数据
+    pub fn touch(conn: &SqliteConn, server_host: &str, path: &str) -> Result<(), String> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        conn.execute(
+            "UPDATE fb_dir_cache SET cached_at = ?1 WHERE server_host = ?2 AND path = ?3",
+            rusqlite::params![now, server_host, path],
+        ).map_err(|e| format!("Failed to touch cache: {}", e))?;
+        Ok(())
+    }
+
+    // ponytail：删除所有缓存目录
+    pub fn clear_all(conn: &SqliteConn) -> Result<u32, String> {
+        let affected = conn.execute("DELETE FROM fb_dir_cache", [])
+            .map_err(|e| format!("Failed to clear cache: {}", e))?;
+        Ok(affected as u32)
+    }
+
+    // ponytail：统计缓存目录数量
+    pub fn count(conn: &SqliteConn) -> u32 {
+        conn.query_row("SELECT COUNT(*) FROM fb_dir_cache", [], |r| r.get::<_, u32>(0))
+            .unwrap_or(0)
+    }
+}
+
+pub struct FbFavorites;
+
+impl FbFavorites {
+    pub fn list(conn: &SqliteConn, server_host: &str) -> Vec<String> {
+        let mut stmt = conn.prepare(
+            "SELECT path FROM fb_favorites WHERE server_host = ?1 ORDER BY path"
+        ).unwrap();
+        stmt.query_map([server_host], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    pub fn add(conn: &SqliteConn, server_host: &str, path: &str) -> Result<(), String> {
+        conn.execute(
+            "INSERT OR IGNORE INTO fb_favorites (server_host, path) VALUES (?1, ?2)",
+            rusqlite::params![server_host, path],
+        ).map_err(|e| format!("Failed to add fb favorite: {}", e))?;
+        Ok(())
+    }
+
+    pub fn remove(conn: &SqliteConn, server_host: &str, path: &str) -> Result<(), String> {
+        conn.execute(
+            "DELETE FROM fb_favorites WHERE server_host = ?1 AND path = ?2",
+            rusqlite::params![server_host, path],
+        ).map_err(|e| format!("Failed to remove fb favorite: {}", e))?;
+        Ok(())
+    }
+}
+
+// ===== 数据库凭据 =====
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DbCredential {
+    pub db_name: String,
+    pub db_user: String,
+    pub password: String,
+    pub access_type: String,
+    pub allowed_ip: String,
+}
+
+pub struct DbCredentialsManager;
+
+impl DbCredentialsManager {
+    fn hydrate_password(
+        conn: &SqliteConn,
+        server_host: &str,
+        credential: &mut DbCredential,
+    ) {
+        if !credential.password.is_empty() {
+            let legacy_password = credential.password.clone();
+            match crate::credentials::set_database_password(
+                server_host,
+                &credential.db_name,
+                &legacy_password,
+            ) {
+                Ok(()) => {
+                    if let Err(error) = conn.execute(
+                        "UPDATE db_credentials SET password = '' WHERE server_host = ?1 AND db_name = ?2",
+                        rusqlite::params![server_host, credential.db_name],
+                    ) {
+                        log::warn!("Failed to clear migrated database password: {error}");
+                    }
+                }
+                Err(error) => {
+                    log::warn!("Failed to migrate database password to the OS credential store: {error}");
+                }
+            }
+            return;
+        }
+
+        match crate::credentials::get_database_password(server_host, &credential.db_name) {
+            Ok(Some(password)) => credential.password = password,
+            Ok(None) => {}
+            Err(error) => log::warn!("Failed to read database password from the OS credential store: {error}"),
+        }
+    }
+
+    /// 保存或更新数据库凭据
+    pub fn save(
+        conn: &SqliteConn,
+        server_host: &str,
+        db_name: &str,
+        db_user: &str,
+        password: &str,
+        access_type: &str,
+        allowed_ip: &str,
+    ) -> Result<(), String> {
+        if password.is_empty() {
+            crate::credentials::delete_database_password(server_host, db_name)?;
+        } else {
+            crate::credentials::set_database_password(server_host, db_name, password)?;
+        }
+        conn.execute(
+            "INSERT OR REPLACE INTO db_credentials (server_host, db_name, db_user, password, access_type, allowed_ip) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![server_host, db_name, db_user, "", access_type, allowed_ip],
+        ).map_err(|e| format!("Failed to save db credentials: {}", e))?;
+        Ok(())
+    }
+
+    /// 获取指定数据库的凭据
+    pub fn get(conn: &SqliteConn, server_host: &str, db_name: &str) -> Option<DbCredential> {
+        let mut credential = conn.query_row(
+            "SELECT db_name, db_user, password, access_type, allowed_ip FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
+            rusqlite::params![server_host, db_name],
+            |row| {
+                Ok(DbCredential {
+                    db_name: row.get(0)?,
+                    db_user: row.get::<_, String>(1).unwrap_or_default(),
+                    password: row.get(2)?,
+                    access_type: row.get(3)?,
+                    allowed_ip: row.get(4)?,
+                })
+            },
+        ).ok()?;
+        Self::hydrate_password(conn, server_host, &mut credential);
+        Some(credential)
+    }
+
+    /// 列出服务器的所有凭据
+    pub fn list_for_server(conn: &SqliteConn, server_host: &str) -> Vec<DbCredential> {
+        let mut stmt = conn.prepare(
+            "SELECT db_name, db_user, password, access_type, allowed_ip FROM db_credentials WHERE server_host = ?1"
+        ).unwrap();
+        let mut credentials: Vec<DbCredential> = stmt.query_map([server_host], |row| {
+            Ok(DbCredential {
+                db_name: row.get(0)?,
+                db_user: row.get::<_, String>(1).unwrap_or_default(),
+                password: row.get(2)?,
+                access_type: row.get(3)?,
+                allowed_ip: row.get(4)?,
+            })
+        }).unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+        drop(stmt);
+        for credential in &mut credentials {
+            Self::hydrate_password(conn, server_host, credential);
+        }
+        credentials
+    }
+
+    /// 删除指定数据库的凭据
+    pub fn delete(conn: &SqliteConn, server_host: &str, db_name: &str) -> Result<(), String> {
+        crate::credentials::delete_database_password(server_host, db_name)?;
+        conn.execute(
+            "DELETE FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
+            rusqlite::params![server_host, db_name],
+        ).map_err(|e| format!("Failed to delete db credentials: {}", e))?;
+        Ok(())
+    }
+
+    /// 仅更新密码（保留现有的 db_user）
+    pub fn update_password(conn: &SqliteConn, server_host: &str, db_name: &str, password: &str) -> Result<(), String> {
+        if password.is_empty() {
+            crate::credentials::delete_database_password(server_host, db_name)?;
+        } else {
+            crate::credentials::set_database_password(server_host, db_name, password)?;
+        }
+        // 检查记录是否存在
+        let exists = conn.query_row(
+            "SELECT COUNT(*) FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
+            rusqlite::params![server_host, db_name],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+
+        if exists {
+            conn.execute(
+                "UPDATE db_credentials SET password = '' WHERE server_host = ?1 AND db_name = ?2",
+                rusqlite::params![server_host, db_name],
+            ).map_err(|e| format!("Failed to update password: {}", e))?;
+        } else if !password.is_empty() {
+        // 如果密码非空，则使用默认值创建新记录
+            conn.execute(
+                "INSERT INTO db_credentials (server_host, db_name, db_user, password, access_type, allowed_ip) VALUES (?1, ?2, ?2, '', 'local', '')",
+                rusqlite::params![server_host, db_name],
+            ).map_err(|e| format!("Failed to insert password: {}", e))?;
+        }
+        Ok(())
+    }
+
+    /// 仅清空密码（设为空字符串）
+    pub fn clear_password(conn: &SqliteConn, server_host: &str, db_name: &str) -> Result<(), String> {
+        crate::credentials::delete_database_password(server_host, db_name)?;
+        let exists = conn.query_row(
+            "SELECT COUNT(*) FROM db_credentials WHERE server_host = ?1 AND db_name = ?2",
+            rusqlite::params![server_host, db_name],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+
+        if exists {
+            conn.execute(
+                "UPDATE db_credentials SET password = '' WHERE server_host = ?1 AND db_name = ?2",
+                rusqlite::params![server_host, db_name],
+            ).map_err(|e| format!("Failed to clear password: {}", e))?;
+        }
+        Ok(())
+    }
+}
+
+// ===== 数据库备注 =====
+
+pub struct DbRemarksManager;
+
+impl DbRemarksManager {
+    /// 保存或更新数据库备注
+    pub fn save(conn: &SqliteConn, server_host: &str, db_name: &str, remark: &str) -> Result<(), String> {
+        conn.execute(
+            "INSERT OR REPLACE INTO db_remarks (server_host, db_name, remark) VALUES (?1, ?2, ?3)",
+            rusqlite::params![server_host, db_name, remark],
+        ).map_err(|e| format!("Failed to save db remark: {}", e))?;
+        Ok(())
+    }
+
+    /// 获取指定数据库的备注
+    pub fn get(conn: &SqliteConn, server_host: &str, db_name: &str) -> Option<String> {
+        conn.query_row(
+            "SELECT remark FROM db_remarks WHERE server_host = ?1 AND db_name = ?2",
+            rusqlite::params![server_host, db_name],
+            |row| row.get(0),
+        ).ok()
+    }
+
+    /// 列出服务器的所有数据库备注
+    pub fn list_for_server(conn: &SqliteConn, server_host: &str) -> Vec<(String, String)> {
+        let mut stmt = conn.prepare(
+            "SELECT db_name, remark FROM db_remarks WHERE server_host = ?1"
+        ).unwrap();
+        stmt.query_map([server_host], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }).unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    /// 删除指定数据库的备注
+    pub fn delete(conn: &SqliteConn, server_host: &str, db_name: &str) -> Result<(), String> {
+        conn.execute(
+            "DELETE FROM db_remarks WHERE server_host = ?1 AND db_name = ?2",
+            rusqlite::params![server_host, db_name],
+        ).map_err(|e| format!("Failed to delete db remark: {}", e))?;
+        Ok(())
+    }
+}
+
+// ===== 自定义软件 =====
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CustomSoftwareEntry {
+    pub package_name: String,
+    pub display_name: String,
+    pub category: String,
+}
+
+pub struct CustomSoftwareManager;
+
+impl CustomSoftwareManager {
+    pub fn list(conn: &SqliteConn, server_host: &str) -> Vec<CustomSoftwareEntry> {
+        let mut stmt = conn.prepare(
+            "SELECT package_name, display_name, category FROM custom_software WHERE server_host = ?1 ORDER BY package_name"
+        ).unwrap();
+        stmt.query_map([server_host], |row| {
+            Ok(CustomSoftwareEntry {
+                package_name: row.get(0)?,
+                display_name: row.get(1)?,
+                category: row.get(2)?,
+            })
+        }).unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    pub fn add(conn: &SqliteConn, server_host: &str, package_name: &str, display_name: &str, category: &str) -> Result<(), String> {
+        conn.execute(
+            "INSERT OR REPLACE INTO custom_software (server_host, package_name, display_name, category) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![server_host, package_name, display_name, category],
+        ).map_err(|e| format!("Failed to add custom software: {}", e))?;
+        Ok(())
+    }
+
+    pub fn remove(conn: &SqliteConn, server_host: &str, package_name: &str) -> Result<(), String> {
+        conn.execute(
+            "DELETE FROM custom_software WHERE server_host = ?1 AND package_name = ?2",
+            rusqlite::params![server_host, package_name],
+        ).map_err(|e| format!("Failed to remove custom software: {}", e))?;
+        Ok(())
+    }
+}
+
+// ===== 站点元数据（用于跟踪站点创建时间） =====
+
+pub struct SiteMetadataManager;
+
+impl SiteMetadataManager {
+    /// 保存或获取站点创建时间戳。
+    /// 如果站点已存在，则返回已保存的 created_at。
+    /// 否则将 current_mtime 保存为 created_at 并返回。
+    pub fn save_or_get_created_at(
+        conn: &SqliteConn,
+        server_host: &str,
+        domain: &str,
+        current_mtime: i64,
+    ) -> Result<i64, String> {
+        let existing = conn.query_row(
+            "SELECT created_at FROM site_metadata WHERE server_host = ?1 AND domain = ?2",
+            rusqlite::params![server_host, domain],
+            |row| row.get::<_, i64>(0),
+        );
+        match existing {
+            Ok(ts) => Ok(ts),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                conn.execute(
+                    "INSERT INTO site_metadata (server_host, domain, created_at) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![server_host, domain, current_mtime],
+                ).map_err(|e| format!("Failed to save site metadata: {}", e))?;
+                Ok(current_mtime)
+            }
+            Err(e) => Err(format!("Failed to query site metadata: {}", e)),
+        }
+    }
+
+    /// 列出服务器的所有站点元数据
+    pub fn list_for_server(conn: &SqliteConn, server_host: &str) -> Vec<(String, i64)> {
+        let mut stmt = conn.prepare(
+            "SELECT domain, created_at FROM site_metadata WHERE server_host = ?1"
+        ).unwrap();
+        stmt.query_map([server_host], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        }).unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    /// 删除站点元数据
+    pub fn delete(conn: &SqliteConn, server_host: &str, domain: &str) -> Result<(), String> {
+        conn.execute(
+            "DELETE FROM site_metadata WHERE server_host = ?1 AND domain = ?2",
+            rusqlite::params![server_host, domain],
+        ).map_err(|e| format!("Failed to delete site metadata: {}", e))?;
+        Ok(())
+    }
+}
+
+// ===== 隧道持久化 =====
+
+/// 持久化的隧道配置。断开或重新连接后仍会保留；
+/// 只有用户明确删除隧道时才会移除。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SavedTunnel {
+    pub id: String,
+    pub server_key: String,
+    pub tunnel_type: String,
+    pub local_host: String,
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+    pub created_at: i64,
+    pub note: String,
+}
+
+pub struct TunnelStore;
+
+impl TunnelStore {
+    pub fn save(conn: &SqliteConn, t: &SavedTunnel) -> Result<(), String> {
+        conn.execute(
+            "INSERT OR REPLACE INTO tunnels (id, server_key, tunnel_type, local_host, local_port, remote_host, remote_port, created_at, note)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                t.id, t.server_key, t.tunnel_type, t.local_host,
+                t.local_port, t.remote_host, t.remote_port, t.created_at, t.note
+            ],
+        ).map_err(|e| format!("Failed to save tunnel: {}", e))?;
+        Ok(())
+    }
+
+    pub fn delete(conn: &SqliteConn, id: &str) -> Result<(), String> {
+        conn.execute("DELETE FROM tunnels WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| format!("Failed to delete tunnel: {}", e))?;
+        Ok(())
+    }
+
+    /// 仅更新已持久化隧道配置的备注。
+    pub fn update_note(conn: &SqliteConn, id: &str, note: &str) -> Result<(), String> {
+        conn.execute(
+            "UPDATE tunnels SET note = ?1 WHERE id = ?2",
+            rusqlite::params![note, id],
+        ).map_err(|e| format!("Failed to update tunnel note: {}", e))?;
+        Ok(())
+    }
+
+    pub fn get(conn: &SqliteConn, id: &str) -> Result<Option<SavedTunnel>, String> {
+        let mut stmt = conn.prepare(
+            "SELECT id, server_key, tunnel_type, local_host, local_port, remote_host, remote_port, created_at, COALESCE(note, '')
+             FROM tunnels WHERE id = ?1"
+        ).map_err(|e| format!("Failed to prepare tunnel query: {}", e))?;
+        let row = stmt.query_row(rusqlite::params![id], |r| {
+            Ok(SavedTunnel {
+                id: r.get(0)?,
+                server_key: r.get(1)?,
+                tunnel_type: r.get(2)?,
+                local_host: r.get(3)?,
+                local_port: r.get(4)?,
+                remote_host: r.get(5)?,
+                remote_port: r.get(6)?,
+                created_at: r.get(7)?,
+                note: r.get(8)?,
+            })
+        });
+        match row {
+            Ok(t) => Ok(Some(t)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(format!("Failed to get tunnel: {}", e)),
+        }
+    }
+
+    pub fn list_for_server(conn: &SqliteConn, server_key: &str) -> Result<Vec<SavedTunnel>, String> {
+        let mut stmt = conn.prepare(
+            "SELECT id, server_key, tunnel_type, local_host, local_port, remote_host, remote_port, created_at, COALESCE(note, '')
+             FROM tunnels WHERE server_key = ?1 ORDER BY created_at ASC"
+        ).map_err(|e| format!("Failed to prepare tunnel list: {}", e))?;
+        let rows = stmt.query_map(rusqlite::params![server_key], |r| {
+            Ok(SavedTunnel {
+                id: r.get(0)?,
+                server_key: r.get(1)?,
+                tunnel_type: r.get(2)?,
+                local_host: r.get(3)?,
+                local_port: r.get(4)?,
+                remote_host: r.get(5)?,
+                remote_port: r.get(6)?,
+                created_at: r.get(7)?,
+                note: r.get(8)?,
+            })
+        }).map_err(|e| format!("Failed to query tunnels: {}", e))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|e| format!("Tunnel row error: {}", e))?);
+        }
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ponytail：所有测试使用内存 SQLite；结构与 init_db 相同，不使用文件系统
+    fn test_conn() -> SqliteConn {
+        let conn = SqliteConn::open(":memory:").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE fb_favorites (server_host TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY(server_host, path));
+             CREATE TABLE fb_dir_cache (server_host TEXT NOT NULL, path TEXT NOT NULL, data TEXT NOT NULL, cached_at INTEGER NOT NULL, PRIMARY KEY(server_host, path));
+             CREATE TABLE db_remarks (server_host TEXT NOT NULL, db_name TEXT NOT NULL, remark TEXT NOT NULL DEFAULT '', PRIMARY KEY(server_host, db_name));
+             CREATE TABLE db_credentials (server_host TEXT NOT NULL, db_name TEXT NOT NULL, db_user TEXT NOT NULL DEFAULT '', password TEXT NOT NULL DEFAULT '', access_type TEXT NOT NULL DEFAULT 'local', allowed_ip TEXT NOT NULL DEFAULT '', PRIMARY KEY(server_host, db_name));
+             CREATE TABLE site_metadata (server_host TEXT NOT NULL, domain TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(server_host, domain));
+             CREATE TABLE custom_software (server_host TEXT NOT NULL, package_name TEXT NOT NULL, display_name TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'other', PRIMARY KEY(server_host, package_name));
+             CREATE TABLE ssh_host_keys (host TEXT NOT NULL, port INTEGER NOT NULL, key_base64 TEXT NOT NULL, algorithm TEXT NOT NULL, fingerprint TEXT NOT NULL, trusted_at INTEGER NOT NULL, PRIMARY KEY(host, port));"
+        ).unwrap();
+        conn
+    }
+
+    fn generated_host_key() -> String {
+        let mut rng = rand::rng();
+        let key_pair = russh::keys::PrivateKey::random(
+            &mut rng,
+            russh::keys::Algorithm::Ed25519,
+        )
+        .unwrap();
+        key_pair.public_key().public_key_base64()
+    }
+
+    #[test]
+    fn host_key_store_normalizes_and_persists() {
+        let conn = test_conn();
+        let key = generated_host_key();
+        let saved = HostKeyStore::trust(&conn, " Example.COM. ", 22, &key, false).unwrap();
+        let loaded = HostKeyStore::get(&conn, "example.com", 22).unwrap().unwrap();
+        assert_eq!(saved, loaded);
+        assert_eq!(loaded.host, "example.com");
+        assert_eq!(
+            loaded.fingerprint,
+            russh::keys::parse_public_key_base64(&key)
+                .unwrap()
+                .fingerprint(Default::default())
+                .to_string()
+        );
+    }
+
+    #[test]
+    fn host_key_store_requires_explicit_replacement() {
+        let conn = test_conn();
+        let first = generated_host_key();
+        let second = generated_host_key();
+        HostKeyStore::trust(&conn, "host", 2222, &first, false).unwrap();
+        assert!(HostKeyStore::trust(&conn, "host", 2222, &second, false).is_err());
+        HostKeyStore::trust(&conn, "host", 2222, &second, true).unwrap();
+        let loaded = HostKeyStore::get(&conn, "host", 2222).unwrap().unwrap();
+        assert_eq!(loaded.key_base64, second);
+    }
+
+    #[test]
+    fn host_key_store_rejects_invalid_input() {
+        let conn = test_conn();
+        assert!(HostKeyStore::trust(&conn, "host", 0, &generated_host_key(), false).is_err());
+        assert!(HostKeyStore::trust(&conn, "host", 22, "invalid", false).is_err());
+        assert!(HostKeyStore::trust(&conn, "", 22, &generated_host_key(), false).is_err());
+    }
+
+    // ===== 文件浏览器收藏夹 =====
+
+    #[test]
+    fn fb_favorites_add_and_list() {
+        let conn = test_conn();
+        FbFavorites::add(&conn, "host1", "/var/www").unwrap();
+        FbFavorites::add(&conn, "host1", "/etc/nginx").unwrap();
+        let paths = FbFavorites::list(&conn, "host1");
+        assert_eq!(paths, vec!["/etc/nginx", "/var/www"]);
+    }
+
+    #[test]
+    fn fb_favorites_isolation_by_host() {
+        let conn = test_conn();
+        FbFavorites::add(&conn, "host1", "/a").unwrap();
+        FbFavorites::add(&conn, "host2", "/b").unwrap();
+        assert_eq!(FbFavorites::list(&conn, "host1"), vec!["/a"]);
+        assert_eq!(FbFavorites::list(&conn, "host2"), vec!["/b"]);
+    }
+
+    #[test]
+    fn fb_favorites_remove() {
+        let conn = test_conn();
+        FbFavorites::add(&conn, "host1", "/a").unwrap();
+        FbFavorites::remove(&conn, "host1", "/a").unwrap();
+        assert!(FbFavorites::list(&conn, "host1").is_empty());
+    }
+
+    #[test]
+    fn fb_favorites_add_duplicate_ignored() {
+        let conn = test_conn();
+        FbFavorites::add(&conn, "host1", "/a").unwrap();
+        FbFavorites::add(&conn, "host1", "/a").unwrap();
+        assert_eq!(FbFavorites::list(&conn, "host1").len(), 1);
+    }
+
+    // ===== 文件浏览器目录缓存 =====
+
+    #[test]
+    fn fb_dir_cache_put_and_get() {
+        let conn = test_conn();
+        FbDirCache::put(&conn, "host1", "/tmp", r#"[{"name":"a.txt"}]"#).unwrap();
+        let result = FbDirCache::get(&conn, "host1", "/tmp", 24);
+        assert!(result.is_some());
+        let (data, _) = result.unwrap();
+        assert!(data.contains("a.txt"));
+    }
+
+    #[test]
+    fn fb_dir_cache_expired_returns_none() {
+        let conn = test_conn();
+        // 手动插入旧时间戳
+        let old_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64 - 48 * 3600 * 1000;
+        conn.execute(
+            "INSERT INTO fb_dir_cache VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params!["host1", "/tmp", "data", old_ts],
+        ).unwrap();
+        assert!(FbDirCache::get(&conn, "host1", "/tmp", 24).is_none());
+    }
+
+    #[test]
+    fn fb_dir_cache_touch_updates_timestamp() {
+        let conn = test_conn();
+        FbDirCache::put(&conn, "host1", "/tmp", "data").unwrap();
+        FbDirCache::touch(&conn, "host1", "/tmp").unwrap();
+        assert!(FbDirCache::get(&conn, "host1", "/tmp", 24).is_some());
+    }
+
+    #[test]
+    fn fb_dir_cache_count_and_clear() {
+        let conn = test_conn();
+        FbDirCache::put(&conn, "host1", "/a", "1").unwrap();
+        FbDirCache::put(&conn, "host1", "/b", "2").unwrap();
+        assert_eq!(FbDirCache::count(&conn), 2);
+        let cleared = FbDirCache::clear_all(&conn).unwrap();
+        assert_eq!(cleared, 2);
+        assert_eq!(FbDirCache::count(&conn), 0);
+    }
+
+    // ===== 数据库凭据管理器 =====
+
+    #[test]
+    fn db_credentials_save_and_get() {
+        let conn = test_conn();
+        DbCredentialsManager::save(&conn, "host1", "mydb", "admin", "secret", "local", "").unwrap();
+        let cred = DbCredentialsManager::get(&conn, "host1", "mydb").unwrap();
+        assert_eq!(cred.db_name, "mydb");
+        assert_eq!(cred.db_user, "admin");
+        assert_eq!(cred.password, "secret");
+        assert_eq!(cred.access_type, "local");
+    }
+
+    #[test]
+    fn db_credentials_list_for_server() {
+        let conn = test_conn();
+        DbCredentialsManager::save(&conn, "host1", "db1", "u1", "p1", "local", "").unwrap();
+        DbCredentialsManager::save(&conn, "host1", "db2", "u2", "p2", "remote", "%").unwrap();
+        DbCredentialsManager::save(&conn, "host2", "db3", "u3", "p3", "local", "").unwrap();
+        let creds = DbCredentialsManager::list_for_server(&conn, "host1");
+        assert_eq!(creds.len(), 2);
+    }
+
+    #[test]
+    fn db_credentials_delete() {
+        let conn = test_conn();
+        DbCredentialsManager::save(&conn, "host1", "mydb", "u", "p", "local", "").unwrap();
+        DbCredentialsManager::delete(&conn, "host1", "mydb").unwrap();
+        assert!(DbCredentialsManager::get(&conn, "host1", "mydb").is_none());
+    }
+
+    #[test]
+    fn db_credentials_update_password() {
+        let conn = test_conn();
+        DbCredentialsManager::save(&conn, "host1", "mydb", "admin", "old", "local", "").unwrap();
+        DbCredentialsManager::update_password(&conn, "host1", "mydb", "new").unwrap();
+        let cred = DbCredentialsManager::get(&conn, "host1", "mydb").unwrap();
+        assert_eq!(cred.password, "new");
+        assert_eq!(cred.db_user, "admin"); // 已保留
+    }
+
+    #[test]
+    fn db_credentials_update_password_creates_if_missing() {
+        let conn = test_conn();
+        DbCredentialsManager::update_password(&conn, "host1", "newdb", "pass123").unwrap();
+        let cred = DbCredentialsManager::get(&conn, "host1", "newdb").unwrap();
+        assert_eq!(cred.password, "pass123");
+    }
+
+    #[test]
+    fn db_credentials_clear_password() {
+        let conn = test_conn();
+        DbCredentialsManager::save(&conn, "host1", "mydb", "u", "secret", "local", "").unwrap();
+        DbCredentialsManager::clear_password(&conn, "host1", "mydb").unwrap();
+        let cred = DbCredentialsManager::get(&conn, "host1", "mydb").unwrap();
+        assert_eq!(cred.password, "");
+    }
+
+    // ===== 数据库备注管理器 =====
+
+    #[test]
+    fn db_remarks_save_and_get() {
+        let conn = test_conn();
+        DbRemarksManager::save(&conn, "host1", "mydb", "Production DB").unwrap();
+        assert_eq!(DbRemarksManager::get(&conn, "host1", "mydb"), Some("Production DB".to_string()));
+    }
+
+    #[test]
+    fn db_remarks_list_for_server() {
+        let conn = test_conn();
+        DbRemarksManager::save(&conn, "host1", "db1", "note1").unwrap();
+        DbRemarksManager::save(&conn, "host1", "db2", "note2").unwrap();
+        let list = DbRemarksManager::list_for_server(&conn, "host1");
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn db_remarks_delete() {
+        let conn = test_conn();
+        DbRemarksManager::save(&conn, "host1", "mydb", "test").unwrap();
+        DbRemarksManager::delete(&conn, "host1", "mydb").unwrap();
+        assert_eq!(DbRemarksManager::get(&conn, "host1", "mydb"), None);
+    }
+
+    // ===== 自定义软件管理器 =====
+
+    #[test]
+    fn custom_software_add_and_list() {
+        let conn = test_conn();
+        CustomSoftwareManager::add(&conn, "host1", "htop", "Htop", "monitoring").unwrap();
+        let list = CustomSoftwareManager::list(&conn, "host1");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].package_name, "htop");
+        assert_eq!(list[0].display_name, "Htop");
+        assert_eq!(list[0].category, "monitoring");
+    }
+
+    #[test]
+    fn custom_software_remove() {
+        let conn = test_conn();
+        CustomSoftwareManager::add(&conn, "host1", "htop", "Htop", "monitoring").unwrap();
+        CustomSoftwareManager::remove(&conn, "host1", "htop").unwrap();
+        assert!(CustomSoftwareManager::list(&conn, "host1").is_empty());
+    }
+
+    // ===== 站点元数据管理器 =====
+
+    #[test]
+    fn site_metadata_save_or_get_first_call_stores() {
+        let conn = test_conn();
+        let ts = SiteMetadataManager::save_or_get_created_at(&conn, "host1", "example.com", 1000).unwrap();
+        assert_eq!(ts, 1000);
+    }
+
+    #[test]
+    fn site_metadata_save_or_get_second_call_returns_stored() {
+        let conn = test_conn();
+        SiteMetadataManager::save_or_get_created_at(&conn, "host1", "example.com", 1000).unwrap();
+        let ts = SiteMetadataManager::save_or_get_created_at(&conn, "host1", "example.com", 2000).unwrap();
+        assert_eq!(ts, 1000); // 返回原始值，而不是 2000
+    }
+
+    #[test]
+    fn site_metadata_list_and_delete() {
+        let conn = test_conn();
+        SiteMetadataManager::save_or_get_created_at(&conn, "host1", "a.com", 100).unwrap();
+        SiteMetadataManager::save_or_get_created_at(&conn, "host1", "b.com", 200).unwrap();
+        let list = SiteMetadataManager::list_for_server(&conn, "host1");
+        assert_eq!(list.len(), 2);
+        SiteMetadataManager::delete(&conn, "host1", "a.com").unwrap();
+        let list = SiteMetadataManager::list_for_server(&conn, "host1");
+        assert_eq!(list.len(), 1);
+    }
+}

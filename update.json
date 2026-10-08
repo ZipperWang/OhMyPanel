@@ -1,0 +1,23 @@
+{
+  "version": "1.0.21",
+  "notes": "OhMyPanel v1.0.21",
+  "pub_date": "2026-10-08T11:28:33Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTU2Zwenduc0VQUWExdlM3ck5sSkNlMGhBU1NLNmo1cUJ4WnBacWNLODd3dGhsbHlWS3FneW1kT3JQcXdsbHA0UW1lSnpSWExqNFU4azBCb1Y1NnpXN0Fub1ZYSnFkNUFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNDU4ODMwCWZpbGU6T2hNeVBhbmVsXzEuMC4yMV94NjQtc2V0dXAuZXhlCnRSUHQ1eHlzYmszV2RnVUpIdG5UcVIzdWtLRi9EOW5jZENKUnVXWDczMG9TS3o3N0xWOVNOR0tWazczWWxtdUZFMFVyREllMGNRcG4ySCs1T3Z5b0NBPT0K",
+      "url": "https://github.com/ZipperWang/OhMyPanel/releases/download/v1.0.21/OhMyPanel_1.0.21_x64-setup.exe"
+    },
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTU2Zwenduc0VQUWVrYmFUVlAzTExFV0tZanBlY3ZTL2JiT3ZYS250SVZ3TlV6a0h6OWxoL09XTXhsSFNIN1Zhc2RwT1hPcUZwRFB2SVl3T1AzbTJVeFJxalRDN3BmRUFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNDU4ODE5CWZpbGU6T2hNeVBhbmVsLmFwcC50YXIuZ3oKVE9JMmJOMU1pZ0xFMFNLTUxsQXBRQU9sSENZajh1VXlsdGx2R1RzalNkUjY3MEZQNEhnQUtlU3hxcVpqSmN0ejhmeEpJa05WVllFOURrcEJxa0pSREE9PQo=",
+      "url": "https://github.com/ZipperWang/OhMyPanel/releases/download/v1.0.21/OhMyPanel_x64.app.tar.gz"
+    },
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTU2Zwenduc0VQUWFLam52N1dYcGY5SEQvZFRHQ1lHT05ZcTZGdWg0bTRBWVg4eDlRelQ3ZVRzUjRyMkNiKys1c1pvbDJxZEM5VUoxcXpWTnRQblgzZHlGMFNmdW1EMHcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNDU4NzI0CWZpbGU6T2hNeVBhbmVsLmFwcC50YXIuZ3oKWER2dUU4UGxSOWo1dlprYkFFbkg0eUZRWm9hSTEzazNNbzYxZUtQRzZmdGJVOHNYVkNNc3JUbjF0QVkvR3Q0Y2tma1k2QVl2Nm90ckRKeVFEUitURHc9PQo=",
+      "url": "https://github.com/ZipperWang/OhMyPanel/releases/download/v1.0.21/OhMyPanel_aarch64.app.tar.gz"
+    },
+    "linux-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTU2Zwenduc0VQUWMzTlZ6eEdXNGhTOEdYT3JKYStJL29JaGE4eDJBdnIxcTdSV3JBdjFKb2hycHRPN0J5cVoxQ05YaFhWdVEydy83SC9XR3VtenFYekVqQ2dYZFhHdlFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNDU4NzUxCWZpbGU6T2hNeVBhbmVsXzEuMC4yMV9hbWQ2NC5kZWIKNU9VTlhoOFRqY281QTB5SlZoc2F6Y0lWOFNYVXNCZVBGZ01YQ3RSNFB4Vkk1bE9XZkdhTTRhYUVST1l3blFkNzBHS0tzbEtKd3I4aXNqUCtwVm40QlE9PQo=",
+      "url": "https://github.com/ZipperWang/OhMyPanel/releases/download/v1.0.21/OhMyPanel_1.0.21_amd64.deb"
+    }
+  }
+}

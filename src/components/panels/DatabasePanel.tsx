@@ -1,0 +1,1765 @@
+import { useState, useEffect, useCallback } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { useTranslation } from 'react-i18next'
+import ServiceUnavailable from './ServiceUnavailable'
+
+interface DbInfo {
+  name: string
+  user?: string // 实际 MySQL 用户名（可能不同于数据库名称）
+  size_mb: number
+  password?: string // 可选：从 localStorage 加载
+  access_type?: 'local' | 'any' | 'ip' // 访问权限类型
+  allowed_ip?: string // access_type 为 'ip' 时允许的 IP
+}
+
+interface BackupInfo {
+  filename: string
+  size_bytes: number
+  created_at: string
+}
+
+interface DbCredential {
+  db_name: string
+  db_user: string
+  password: string
+  access_type: string
+  allowed_ip: string
+}
+
+interface DatabasePanelProps {
+  sessionId: string | null
+  onNavigateToSoftware?: () => void
+}
+
+interface DatabaseTunnelInfo {
+  tunnelId: string
+  localHost: string
+  localPort: number
+  remotePort: number
+}
+
+export default function DatabasePanel({ sessionId, onNavigateToSoftware }: DatabasePanelProps) {
+  const { t } = useTranslation()
+  const [databases, setDatabases] = useState<DbInfo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [msg, setMsg] = useState('')
+  
+  // 搜索
+  const [searchQuery, setSearchQuery] = useState('')
+  
+  // 分页
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  
+  // 创建对话框
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [newDbName, setNewDbName] = useState('')
+  const [newDbUser, setNewDbUser] = useState('')
+  const [newDbPass, setNewDbPass] = useState('')
+  const [savePasswordLocally, setSavePasswordLocally] = useState(true) // 默认：保存密码
+  const [dbCharset, setDbCharset] = useState('utf8mb4') // 默认字符集
+  const [accessType, setAccessType] = useState<'local' | 'any' | 'ip'>('local') // 默认：本地服务器
+  const [allowedIp, setAllowedIp] = useState('') // 用于自定义 IP 访问
+  const [creating, setCreating] = useState(false)
+  
+  // 删除对话框
+  const [deleteTarget, setDeleteTarget] = useState<DbInfo | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteConfirmName, setDeleteConfirmName] = useState('')
+  
+  // 清空数据库对话框
+  const [clearTarget, setClearTarget] = useState<DbInfo | null>(null)
+  const [clearing, setClearing] = useState(false)
+  const [clearConfirmText, setClearConfirmText] = useState('')
+  
+  // 密码可见性
+  const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(new Set())
+  
+  // 批量操作选中的数据库
+  const [selectedDbs, setSelectedDbs] = useState<Set<string>>(new Set())
+  
+  // 数据库备注（键：dbName，值：remark）
+  const [dbRemarks, setDbRemarks] = useState<Record<string, string>>({})
+  const [editingRemark, setEditingRemark] = useState<string | null>(null)
+  const [remarkInput, setRemarkInput] = useState('')
+  
+  // 修改 root 密码对话框
+  const [showChangePwDialog, setShowChangePwDialog] = useState(false)
+  const [newRootPassword, setNewRootPassword] = useState('')
+  const [showRootPassword, setShowRootPassword] = useState(false)
+  const [changingPw, setChangingPw] = useState(false)
+  
+  // 修改访问权限对话框
+  const [showAccessDialog, setShowAccessDialog] = useState(false)
+  const [accessTarget, setAccessTarget] = useState<{ name: string; user: string } | null>(null)
+  const [newAccessType, setNewAccessType] = useState<'local' | 'any' | 'ip'>('local')
+  const [newAllowedIp, setNewAllowedIp] = useState('')
+  const [changingAccess, setChangingAccess] = useState(false)
+  
+  // 修改数据库用户密码对话框
+  const [showChangePwDbDialog, setShowChangePwDbDialog] = useState(false)
+  const [changePwTarget, setChangePwTarget] = useState<{ name: string; user: string } | null>(null)
+  const [newDbPassword, setNewDbPassword] = useState('')
+  const [changingDbPw, setChangingDbPw] = useState(false)
+  const [updateLocalPassword, setUpdateLocalPassword] = useState(true)
+  
+  // 备份对话框
+  const [showBackupDialog, setShowBackupDialog] = useState(false)
+  const [backupTarget, setBackupTarget] = useState<string | null>(null)
+  const [backups, setBackups] = useState<BackupInfo[]>([])
+  const [backingUp, setBackingUp] = useState(false)
+  const [loadingBackups, setLoadingBackups] = useState(false)
+  
+  // 导入对话框
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [importTarget, setImportTarget] = useState<string | null>(null)
+  const [importMode, setImportMode] = useState<'upload' | 'backup'>('upload')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [selectedBackup, setSelectedBackup] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [importBackups, setImportBackups] = useState<BackupInfo[]>([])
+  const [loadingImportBackups, setLoadingImportBackups] = useState(false)
+  const [missingToolModal, setMissingToolModal] = useState(false)
+  
+  // 来自 SQLite 的数据库凭据（键：dbName）
+  const [dbCredentials, setDbCredentials] = useState<Record<string, DbCredential>>({})
+  const [databaseTunnel, setDatabaseTunnel] = useState<DatabaseTunnelInfo | null>(null)
+  const [tunnelBusy, setTunnelBusy] = useState(false)
+  
+  const fetchDatabases = useCallback(async () => {
+    if (!sessionId) return
+    setLoading(true)
+    try {
+      const list = await invoke<DbInfo[]>('server_list_databases', { sessionId })
+      
+      // 从 SQLite 加载凭据
+      try {
+        const credsList = await invoke<DbCredential[]>('server_get_db_credentials', { sessionId })
+        const credsMap: Record<string, DbCredential> = {}
+        for (const cred of credsList) {
+          credsMap[cred.db_name] = cred
+        }
+        setDbCredentials(credsMap)
+        
+        // 将凭据合并到数据库列表
+        const withCredentials = list.map(db => {
+          const cred = credsMap[db.name]
+          return cred ? {
+            ...db,
+            user: cred.db_user || db.name, // 使用保存的 db_user，回退到数据库名称
+            password: cred.password || undefined,
+            access_type: (cred.access_type as 'local' | 'any' | 'ip') || 'local',
+            allowed_ip: cred.allowed_ip || undefined,
+          } : { ...db, user: db.name } // 默认：user = 数据库名称
+        })
+        setDatabases(withCredentials)
+      } catch (e) {
+        console.error('Failed to load db credentials:', e)
+        setDatabases(list)
+      }
+      
+      // 从 SQLite 加载备注
+      try {
+        const remarksList = await invoke<[string, string][]>('server_get_db_remarks', { sessionId })
+        const remarksMap: Record<string, string> = {}
+        for (const [dbName, remark] of remarksList) {
+          remarksMap[dbName] = remark
+        }
+        setDbRemarks(remarksMap)
+      } catch (e) {
+        console.error('Failed to load db remarks:', e)
+      }
+      
+      setError('') // 成功时清除错误
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [sessionId])
+  
+  useEffect(() => { fetchDatabases() }, [fetchDatabases])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!sessionId) {
+      setDatabaseTunnel(null)
+      return
+    }
+    invoke<DatabaseTunnelInfo | null>('database_tunnel_status', { sessionId })
+      .then(info => { if (!cancelled) setDatabaseTunnel(info) })
+      .catch(() => { if (!cancelled) setDatabaseTunnel(null) })
+    return () => { cancelled = true }
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!databaseTunnel) return
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    listen<{ tunnelId: string; status: string }>('tunnel-status', event => {
+      if (event.payload.tunnelId === databaseTunnel.tunnelId && event.payload.status === 'stopped') {
+        setDatabaseTunnel(null)
+      }
+    }).then(fn => {
+      if (disposed) fn()
+      else unlisten = fn
+    })
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [databaseTunnel?.tunnelId])
+
+  const openDatabaseTunnel = async () => {
+    if (!sessionId) return
+    setTunnelBusy(true)
+    try {
+      const info = await invoke<DatabaseTunnelInfo>('database_tunnel_open', { sessionId })
+      setDatabaseTunnel(info)
+      setMsg(t('database.tunnelReady'))
+    } catch (e) {
+      setMsg(t('database.tunnelFailed', { error: String(e) }))
+    } finally {
+      setTunnelBusy(false)
+    }
+  }
+
+  const closeDatabaseTunnel = async () => {
+    if (!sessionId || !databaseTunnel) return
+    setTunnelBusy(true)
+    try {
+      await invoke('database_tunnel_close', { sessionId, tunnelId: databaseTunnel.tunnelId })
+      setDatabaseTunnel(null)
+      setMsg(t('database.tunnelClosed'))
+    } catch (e) {
+      setMsg(t('database.tunnelFailed', { error: String(e) }))
+    } finally {
+      setTunnelBusy(false)
+    }
+  }
+
+  const copyTunnelCommand = async () => {
+    if (!databaseTunnel) return
+    await navigator.clipboard.writeText(`mysql -h ${databaseTunnel.localHost} -P ${databaseTunnel.localPort} -u <user> -p`)
+    setMsg(t('database.copiedToClipboard'))
+  }
+  
+  // ponytail：密码现在在 fetchDatabases 中内联加载，无需单独的 effect
+
+  // 根据搜索查询过滤数据库
+  const filteredDatabases = databases.filter(db => 
+    db.name.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+  
+  // 计算分页
+  const totalPages = Math.ceil(filteredDatabases.length / pageSize)
+  const startIndex = (currentPage - 1) * pageSize
+  const paginatedDatabases = filteredDatabases.slice(startIndex, startIndex + pageSize)
+  
+  // 搜索条件变化时重置到第 1 页
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchQuery])
+  
+  const handleCreateDatabase = async () => {
+    if (!newDbName.trim() || !newDbUser.trim() || !newDbPass.trim()) {
+      setMsg(t('database.fillAllFields'))
+      return
+    }
+    
+    // access type 为 'ip' 时验证 IP
+    if (accessType === 'ip') {
+      const ips = allowedIp.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+      if (ips.length === 0) {
+        setMsg(t('database.enterAllowedIp'))
+        return
+      }
+      // 基本验证：检查空行或无效字符
+      const invalidLines = ips.filter(ip => !/^([0-9]{1,3}\.){3}[0-9]{1,3}(\/[0-9]{1,2})?$/.test(ip) && ip !== '%')
+      if (invalidLines.length > 0) {
+        setMsg(t('database.invalidIpFormat', { lines: invalidLines.join(', ') }))
+        return
+      }
+    }
+    
+    setCreating(true)
+    setMsg('')
+    try {
+      const result = await invoke<string>('server_mysql_create_database', {
+        sessionId,
+        dbName: newDbName.trim(),
+        dbUser: newDbUser.trim(),
+        dbPass: newDbPass.trim(),
+        charset: dbCharset,
+        accessType: accessType,
+        allowedIp: accessType === 'ip' ? allowedIp.trim() : ''
+      })
+      setMsg(result)
+      
+      // 将凭据保存到 SQLite
+      try {
+        await invoke<string>('server_save_db_credentials', {
+          sessionId,
+          dbName: newDbName.trim(),
+          dbUser: newDbUser.trim(),
+          password: savePasswordLocally ? newDbPass : '',
+          accessType,
+          allowedIp: accessType === 'ip' ? allowedIp.trim() : ''
+        })
+        if (savePasswordLocally) {
+          setMsg(result + ' (Password saved)')
+        }
+      } catch (e) {
+        console.error('Failed to save credentials:', e)
+      }
+      
+      setShowCreateDialog(false)
+      setNewDbName('')
+      setNewDbUser('')
+      setNewDbPass('')
+      setSavePasswordLocally(true) // 重置为默认值
+      setDbCharset('utf8mb4') // 重置为默认值
+      setAccessType('local') // 重置为默认值
+      setAllowedIp('')
+      await fetchDatabases()
+    } catch (e) {
+      setMsg(`${t('common.error')}: ${String(e)}`)
+    } finally {
+      setCreating(false)
+    }
+  }
+  
+  const handleDeleteDatabase = async () => {
+    if (!deleteTarget) return
+    
+    setDeleting(true)
+    setMsg('')
+    try {
+      const result = await invoke<string>('server_mysql_delete_database', {
+        sessionId,
+        dbName: deleteTarget.name,
+        dbUser: deleteTarget.user || deleteTarget.name // 使用实际用户，回退到数据库名称
+      })
+      setMsg(result)
+      setDeleteTarget(null)
+      await fetchDatabases()
+    } catch (e) {
+      setMsg(`${t('common.delete')}: ${String(e)}`)
+    } finally {
+      setDeleting(false)
+    }
+  }
+  
+  const handleClearDatabase = async () => {
+    if (!clearTarget) return
+    
+    setClearing(true)
+    setMsg('')
+    try {
+      const result = await invoke<string>('server_mysql_clear_database', {
+        sessionId,
+        dbName: clearTarget.name,
+      })
+      setMsg(result)
+      setClearTarget(null)
+      setClearConfirmText('')
+      await fetchDatabases()
+    } catch (e) {
+      setMsg(t('database.clearFailed', { error: String(e) }))
+    } finally {
+      setClearing(false)
+    }
+  }
+  
+  const handleChangeAccess = async () => {
+    if (!accessTarget) return
+    
+    // access type 为 'ip' 时验证 IP
+    if (newAccessType === 'ip') {
+      const ips = newAllowedIp.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+      if (ips.length === 0) {
+        setMsg(t('database.enterAllowedIp'))
+        return
+      }
+      // 基本验证：检查空行或无效字符
+      const invalidLines = ips.filter(ip => !/^([0-9]{1,3}\.){3}[0-9]{1,3}(\/[0-9]{1,2})?$/.test(ip) && ip !== '%')
+      if (invalidLines.length > 0) {
+        setMsg(t('database.invalidIpFormat', { lines: invalidLines.join(', ') }))
+        return
+      }
+    }
+    
+    setChangingAccess(true)
+    setMsg('')
+    try {
+      const existingCred = dbCredentials[accessTarget.name]
+      const result = await invoke<string>('server_mysql_change_db_access', {
+        sessionId,
+        dbName: accessTarget.name,
+        dbUser: accessTarget.user,
+        dbPass: existingCred?.password || '',
+        accessType: newAccessType,
+        allowedIp: newAccessType === 'ip' ? newAllowedIp.trim() : ''
+      })
+      setMsg(result)
+      
+      // 将访问权限保存到 SQLite
+      try {
+        await invoke<string>('server_save_db_credentials', {
+          sessionId,
+          dbName: accessTarget.name,
+          dbUser: accessTarget.user,
+          password: existingCred?.password || '',
+          accessType: newAccessType,
+          allowedIp: newAccessType === 'ip' ? newAllowedIp.trim() : ''
+        })
+      } catch (e) {
+        console.error('Failed to save access credentials:', e)
+      }
+      
+      setShowAccessDialog(false)
+      setAccessTarget(null)
+      setNewAccessType('local')
+      setNewAllowedIp('')
+      await fetchDatabases()
+    } catch (e) {
+      setMsg(`${t('common.error')}: ${String(e)}`)
+    } finally {
+      setChangingAccess(false)
+    }
+  }
+  
+  const togglePasswordVisibility = (dbName: string) => {
+    const newSet = new Set(visiblePasswords)
+    if (newSet.has(dbName)) {
+      newSet.delete(dbName)
+    } else {
+      newSet.add(dbName)
+    }
+    setVisiblePasswords(newSet)
+  }
+  
+  const openAccessDialog = (db: DbInfo) => {
+    setAccessTarget({ name: db.name, user: db.user || db.name })
+    // 从 SQLite 凭据中获取当前访问类型
+    const cred = dbCredentials[db.name]
+    setNewAccessType((cred?.access_type as any) || 'local')
+    setNewAllowedIp(cred?.allowed_ip || '')
+    setShowAccessDialog(true)
+  }
+  
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setMsg(t('database.copiedToClipboard'))
+  }
+  
+  const toggleSelectAll = () => {
+    if (selectedDbs.size === paginatedDatabases.length) {
+      setSelectedDbs(new Set())
+    } else {
+      setSelectedDbs(new Set(paginatedDatabases.map(db => db.name)))
+    }
+  }
+  
+  const toggleSelectDb = (dbName: string) => {
+    const newSet = new Set(selectedDbs)
+    if (newSet.has(dbName)) {
+      newSet.delete(dbName)
+    } else {
+      newSet.add(dbName)
+    }
+    setSelectedDbs(newSet)
+  }
+  
+  const handleBatchOperation = () => {
+    if (selectedDbs.size === 0) {
+      setMsg(t('database.selectDatabases'))
+      return
+    }
+    setMsg(t('database.batchOpSelected', { count: selectedDbs.size }))
+  }
+  
+  const handleChangeRootPassword = async () => {
+    if (!newRootPassword.trim()) {
+      setMsg(t('database.enterNewPassword'))
+      return
+    }
+    if (newRootPassword.length < 6) {
+      setMsg(t('database.enterNewPassword'))
+      return
+    }
+    
+    setChangingPw(true)
+    try {
+      const result = await invoke<string>('server_change_mysql_root_password', { 
+        sessionId, 
+        newPassword: newRootPassword 
+      })
+      setMsg(result)
+      setShowChangePwDialog(false)
+      setNewRootPassword('')
+    } catch (e) {
+      setMsg(`${t('common.error')}: ` + String(e))
+    } finally {
+      setChangingPw(false)
+    }
+  }
+  
+  const handleDoubleClickRemark = (dbName: string) => {
+    setEditingRemark(dbName)
+    setRemarkInput(dbRemarks[dbName] || '')
+  }
+  
+  const handleSaveRemark = async (dbName: string) => {
+    if (!sessionId) return
+    
+    const trimmed = remarkInput.trim()
+    setDbRemarks(prev => ({
+      ...prev,
+      [dbName]: trimmed
+    }))
+    setEditingRemark(null)
+    setRemarkInput('')
+    
+    // 通过后端保存到 SQLite
+    try {
+      await invoke<string>('server_save_db_remark', {
+        sessionId,
+        dbName,
+        remark: trimmed
+      })
+      if (trimmed) {
+        setMsg(t('database.remarkUpdated', { name: dbName }))
+      }
+    } catch (e) {
+      console.error('Failed to save remark:', e)
+      setMsg(t('database.saveRemarkFailed'))
+    }
+  }
+  
+ const handleCancelEditRemark = () => {
+    setEditingRemark(null)
+    setRemarkInput('')
+  }
+  
+  // ===== Backup and Import handlers =====
+  
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  }
+  
+  const openBackupDialog = async (dbName: string) => {
+    setBackupTarget(dbName)
+    setShowBackupDialog(true)
+    setLoadingBackups(true)
+    setBackups([])
+    try {
+      const list = await invoke<BackupInfo[]>('server_list_db_backups', { sessionId, dbName })
+      setBackups(list)
+    } catch (e) {
+      console.error('Failed to load backups:', e)
+    } finally {
+      setLoadingBackups(false)
+    }
+  }
+  
+  const handleBackup = async () => {
+    if (!backupTarget || !sessionId) return
+    const dbPassword = dbCredentials[backupTarget]?.password || ''
+    if (!dbPassword) {
+      setMsg(t('database.dbNameNotSaved'))
+      return
+    }
+    setBackingUp(true)
+    try {
+      const result = await invoke<string>('server_backup_database', { 
+        sessionId, dbName: backupTarget, dbUser: dbCredentials[backupTarget]?.db_user || backupTarget, dbPassword 
+      })
+      setMsg(result)
+      // 刷新备份列表
+      const list = await invoke<BackupInfo[]>('server_list_db_backups', { sessionId, dbName: backupTarget })
+      setBackups(list)
+    } catch (e) {
+      setMsg(`${t('common.error')}: ` + String(e))
+    } finally {
+      setBackingUp(false)
+    }
+  }
+  
+  const handleDeleteBackup = async (filename: string) => {
+    if (!backupTarget || !sessionId) return
+    try {
+      await invoke<string>('server_delete_db_backup', { sessionId, backupFilename: filename })
+      setMsg(t('database.backupDeleted', { name: filename }))
+      // 刷新备份列表
+      const list = await invoke<BackupInfo[]>('server_list_db_backups', { sessionId, dbName: backupTarget })
+      setBackups(list)
+    } catch (e) {
+      setMsg(`${t('common.error')}: ` + String(e))
+    }
+  }
+  
+  const handleDownloadBackup = async (filename: string) => {
+    if (!sessionId) return
+    try {
+      // 调用后端并通过对话框将备份文件保存到本地
+      const localPath = await invoke<string>('server_save_db_backup_to_local', { 
+        sessionId, 
+        backupFilename: filename 
+      })
+      
+      setMsg(t('database.backupDownloadedTo', { path: localPath }))
+    } catch (e) {
+      if (String(e) !== 'Save cancelled') {
+        setMsg(t('database.downloadBackupFailed', { error: String(e) }))
+      }
+    }
+  }
+  
+  const openImportDialog = async (dbName: string) => {
+    setImportTarget(dbName)
+    setImportMode('upload')
+    setSelectedFile(null)
+    setSelectedBackup(null)
+    setShowImportDialog(true)
+    // 为备份模式加载备份文件
+    setLoadingImportBackups(true)
+    try {
+      const list = await invoke<BackupInfo[]>('server_list_db_backups', { sessionId, dbName })
+      setImportBackups(list)
+    } catch (e) {
+      console.error('Failed to load backups for import:', e)
+    } finally {
+      setLoadingImportBackups(false)
+    }
+  }
+  
+  const checkUnzipAvailable = async (): Promise<boolean> => {
+    if (!sessionId) return false
+    try {
+      const [, , exitCode] = await invoke<[string, string, number]>('ssh_exec', {
+        sessionId,
+        command: 'command -v unzip',
+      })
+      return exitCode === 0
+    } catch {
+      return false
+    }
+  }
+  
+  const handleImport = async () => {
+    if (!importTarget || !sessionId) return
+    const dbPassword = dbCredentials[importTarget]?.password || ''
+    if (!dbPassword) {
+      setMsg(t('database.dbNameNotSaved'))
+      return
+    }
+    
+    setImporting(true)
+    try {
+      if (importMode === 'upload' && selectedFile) {
+        // 检查 zip 文件所需的 unzip 是否可用
+        if (selectedFile.name.endsWith('.zip')) {
+          const hasUnzip = await checkUnzipAvailable()
+          if (!hasUnzip) {
+            setMissingToolModal(true)
+            setImporting(false)
+            return
+          }
+        }
+        // 以原始字节读取文件（支持 .sql、.tar.gz、.zip）
+        // 直接传递 ArrayBuffer，以便通过 Tauri IPC 高效传输二进制数据
+        const buffer = await selectedFile.arrayBuffer()
+        const result = await invoke<string>('server_import_database_from_file_bytes', {
+          sessionId,
+          dbName: importTarget,
+          dbUser: dbCredentials[importTarget]?.db_user || importTarget,
+          dbPassword,
+          fileName: selectedFile.name,
+          fileBytes: buffer
+        })
+        setMsg(result)
+      } else if (importMode === 'backup' && selectedBackup) {
+        if (selectedBackup.endsWith('.zip')) {
+          const hasUnzip = await checkUnzipAvailable()
+          if (!hasUnzip) {
+            setMissingToolModal(true)
+            setImporting(false)
+            return
+          }
+        }
+        const result = await invoke<string>('server_import_database_from_backup', {
+          sessionId,
+          dbName: importTarget,
+          dbUser: dbCredentials[importTarget]?.db_user || importTarget,
+          dbPassword,
+          backupFilename: selectedBackup
+        })
+        setMsg(result)
+      } else {
+        setMsg(t('database.selectFileImport'))
+        setImporting(false)
+        return
+      }
+      setShowImportDialog(false)
+    } catch (e) {
+      setMsg(t('database.importFailed', { error: String(e) }))
+    } finally {
+      setImporting(false)
+    }
+  }
+  
+  const handleImportFromBackup = async (filename: string) => {
+    if (!backupTarget || !sessionId) return
+    const dbPassword = dbCredentials[backupTarget]?.password || ''
+    if (!dbPassword) {
+      setMsg(t('database.dbNameNotSaved'))
+      return
+    }
+    // 关闭备份对话框并直接导入
+    setShowBackupDialog(false)
+    if (filename.endsWith('.zip')) {
+      const hasUnzip = await checkUnzipAvailable()
+      if (!hasUnzip) {
+        setMissingToolModal(true)
+        return
+      }
+    }
+    setImporting(true)
+    try {
+      const result = await invoke<string>('server_import_database_from_backup', {
+        sessionId,
+        dbName: backupTarget,
+        dbUser: dbCredentials[backupTarget]?.db_user || backupTarget,
+        dbPassword,
+        backupFilename: filename
+      })
+      setMsg(result)
+    } catch (e) {
+      setMsg(t('database.importFailed', { error: String(e) }))
+    } finally {
+      setImporting(false)
+    }
+  }
+  
+  return (
+    <div className="panel-container">
+      <div className="panel-header">
+        <h2>{t('database.title')}</h2>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button 
+            className="btn-secondary"
+            onClick={fetchDatabases}
+            disabled={loading}
+          >
+            {loading ? t('common.loading') : t('common.refresh')}
+          </button>
+          <button className="btn-secondary" onClick={() => setShowChangePwDialog(true)}>
+            {t('database.changeRootPw')}
+          </button>
+          <button className="btn-primary" onClick={() => setShowCreateDialog(true)}>
+            {t('database.addDatabase')}
+          </button>
+        </div>
+      </div>
+      
+      {msg && (
+        <div className={`alert ${msg.includes('failed') || msg.includes('Failed') ? 'alert-error' : 'alert-success'}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{msg}</span>
+          <button onClick={() => setMsg('')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '18px', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }} title={t('common.close')}>×</button>
+        </div>
+      )}
+
+      <div style={{
+        border: '1px solid var(--border-color)', borderRadius: '8px', padding: '14px 16px',
+        marginBottom: '16px', background: 'var(--bg-subtle)', display: 'flex',
+        alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap'
+      }}>
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: '4px' }}>{t('database.secureTunnel')}</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+            {databaseTunnel
+              ? `${t('database.localAddress')}: ${databaseTunnel.localHost}:${databaseTunnel.localPort} → MySQL 127.0.0.1:${databaseTunnel.remotePort}`
+              : t('database.tunnelDescription')}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {databaseTunnel && <button className="btn-secondary" onClick={copyTunnelCommand}>{t('database.copyCommand')}</button>}
+          <button
+            className={databaseTunnel ? 'btn-secondary' : 'btn-primary'}
+            onClick={databaseTunnel ? closeDatabaseTunnel : openDatabaseTunnel}
+            disabled={tunnelBusy || !sessionId}
+          >
+            {tunnelBusy ? t('common.loading') : databaseTunnel ? t('common.disconnect') : t('database.openTunnel')}
+          </button>
+        </div>
+      </div>
+      
+      {error && (
+        (error.includes('command not found') || error.toLowerCase().includes('mysql')) ? (
+          <ServiceUnavailable serviceName="MySQL" onNavigate={onNavigateToSoftware} />
+        ) : (
+          <div className="alert alert-error">{error}</div>
+        )
+      )}
+      
+      {/* 搜索和过滤器 */}
+      <div className="toolbar">
+        <input
+          type="text"
+          placeholder={t('database.searchPlaceholder')}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="search-input"
+        />
+      </div>
+      
+      {/* ponytail：搜索结果提示 */}
+      {searchQuery && (
+        <div style={{ color: 'var(--red)', marginBottom: '12px', fontSize: '14px' }}>
+          {t('database.searchResultsHint')}
+        </div>
+      )}
+      
+      {/* 数据库表格 */}
+      <div className="table-wrapper">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th style={{ width: '40px' }}>
+                <input
+                  type="checkbox"
+                  checked={paginatedDatabases.length > 0 && selectedDbs.size === paginatedDatabases.length}
+                  onChange={toggleSelectAll}
+                />
+              </th>
+              <th>{t('database.database')}</th>
+              <th>{t('database.user')}</th>
+              <th>{t('database.password')}</th>
+              <th>{t('database.backup')}</th>
+              <th>{t('database.location')}</th>
+              <th>{t('database.remark')}</th>
+              <th>{t('database.actions')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={9} style={{ textAlign: 'center', padding: '2rem' }}>
+                  {t('common.loading')}
+                </td>
+              </tr>
+            ) : paginatedDatabases.length === 0 ? (
+              <tr>
+                <td colSpan={9} style={{ textAlign: 'center', padding: '2rem' }}>
+                  {filteredDatabases.length === 0 ? t('database.noMatching') : t('database.noDatabases')}
+                </td>
+              </tr>
+            ) : (
+              paginatedDatabases.map((db) => (
+                <tr key={db.name}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selectedDbs.has(db.name)}
+                      onChange={() => toggleSelectDb(db.name)}
+                    />
+                  </td>
+                  <td>{db.name}</td>
+                  <td>{db.user || db.name}</td>
+                  <td>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>
+                      {visiblePasswords.has(db.name) ? (
+                        db.password || t('database.notSaved')
+                      ) : (
+                        '••••••••'
+                      )}
+                    </span>
+                    <button
+                      className="icon-btn"
+                      onClick={() => togglePasswordVisibility(db.name)}
+                      title={db.password ? (visiblePasswords.has(db.name) ? t('database.hidePassword') : t('database.showPassword')) : t('database.passwordNotSaved')}
+                      disabled={!db.password}
+                      style={{ opacity: db.password ? 1 : 0.3, cursor: db.password ? 'pointer' : 'not-allowed', fontSize: '12px', lineHeight: 1, padding: '2px 4px' }}
+                    >
+                      {visiblePasswords.has(db.name) ? t('database.hidePassword') : t('database.showPassword')}
+                    </button>
+                    <button
+                      className="icon-btn"
+                      onClick={() => {
+                        if (db.password) {
+                          copyToClipboard(db.password)
+                        } else {
+                          setMsg(t('database.passwordNotSavedMsg'))
+                          setTimeout(() => setMsg(''), 2000)
+                        }
+                      }}
+                      title={db.password ? t('database.copyPassword') : t('database.passwordNotSaved')}
+                      disabled={!db.password}
+                      style={{ opacity: db.password ? 1 : 0.3, cursor: db.password ? 'pointer' : 'not-allowed' }}
+                    >
+                      {t('common.copy')}
+                    </button>
+                  </td>
+                 <td>
+                    <span 
+                      className="link-text" 
+                      onClick={() => openBackupDialog(db.name)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {t('database.backup')}
+                    </span>
+                    {' | '}
+                    <span 
+                      className="link-text" 
+                      onClick={() => openImportDialog(db.name)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {t('database.importAction')}
+                    </span>
+                  </td>
+                  <td>{t('database.location')}</td>
+                  <td 
+                    onDoubleClick={() => handleDoubleClickRemark(db.name)}
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    title={t('database.editRemark')}
+                  >
+                    {editingRemark === db.name ? (
+                      <input
+                        type="text"
+                        value={remarkInput}
+                        onChange={(e) => setRemarkInput(e.target.value)}
+                        onBlur={() => handleSaveRemark(db.name)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSaveRemark(db.name)
+                          } else if (e.key === 'Escape') {
+                            handleCancelEditRemark()
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="form-input"
+                        autoFocus
+                        style={{ width: '100%', padding: '4px 8px', fontSize: '12px' }}
+                      />
+                    ) : (
+                      <span>{dbRemarks[db.name] || '---'}</span>
+                    )}
+                  </td>
+                  <td className="actions">
+                    <button 
+                      className="action-link"
+                      onClick={() => openAccessDialog(db)}
+                      title={t('database.accessControl')}
+                    >
+                      {t('database.accessControl')}
+                    </button>
+                    <span className="separator">|</span>
+                    <button className="action-link" onClick={() => { setChangePwTarget({ name: db.name, user: db.user || db.name }); setNewDbPassword(''); setShowChangePwDbDialog(true); }}>{t('database.changePassword')}</button>
+                    <span className="separator">|</span>
+                    <button 
+                      className="action-link"
+                      style={{ color: 'var(--yellow)' }}
+                      onClick={() => { setClearTarget(db); setClearConfirmText(''); }}
+                    >
+                      {t('database.clearAction')}
+                    </button>
+                    <span className="separator">|</span>
+                    <button 
+                      className="action-link danger"
+                      onClick={() => setDeleteTarget(db)}
+                    >
+                      {t('common.delete')}
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      
+      {/* 包含批量操作和分页的底部工具栏 */}
+      <div className="bottom-toolbar">
+        <div className="batch-ops">
+          <select className="select-box">
+            <option>{t('database.batchOperations')}</option>
+            <option>{t('database.backupAll', { count: selectedDbs.size })}</option>
+            <option>{t('database.deleteSelected', { count: selectedDbs.size })}</option>
+          </select>
+          <button className="btn-secondary" onClick={handleBatchOperation}>
+            {t('database.batchOperations')}
+          </button>
+        </div>
+        
+        <div className="pagination">
+          <button 
+            className="page-btn"
+            disabled={currentPage === 1}
+            onClick={() => setCurrentPage(prev => prev - 1)}
+          >
+            &lt;
+          </button>
+          <span className="page-info">{currentPage}</span>
+          <button 
+            className="page-btn"
+            disabled={currentPage >= totalPages}
+            onClick={() => setCurrentPage(prev => prev + 1)}
+          >
+            &gt;
+          </button>
+          
+          <select 
+            className="page-size-select"
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+          >
+            <option value={10}>{t('database.perPage', { count: 10 })}</option>
+            <option value={20}>{t('database.perPage', { count: 20 })}</option>
+            <option value={50}>{t('database.perPage', { count: 50 })}</option>
+          </select>
+          
+          <span className="total-info">
+            {t('database.total', { count: filteredDatabases.length })}
+          </span>
+          
+          <span className="goto-page">
+            {t('database.goTo')}
+            <input 
+              type="number" 
+              min={1} 
+              max={totalPages}
+              value={currentPage}
+              onChange={(e) => {
+                const page = Number(e.target.value)
+                if (page >= 1 && page <= totalPages) {
+                  setCurrentPage(page)
+                }
+              }}
+              className="page-input"
+            />
+          </span>
+        </div>
+      </div>
+      
+      {/* 创建数据库对话框 */}
+      {showCreateDialog && (
+        <div className="modal-overlay">
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>{t('database.createDatabase')}</h3>
+              <button 
+                onClick={() => setShowCreateDialog(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '24px', cursor: 'pointer', padding: '0', lineHeight: 1 }}
+                title={t('common.close')}
+              >
+                ×
+              </button>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <div className="form-group">
+                <label><span style={{ color: 'var(--red)' }}>*</span> {t('database.databaseName')}:</label>
+                <input
+                  type="text"
+                  value={newDbName}
+                  onChange={(e) => {
+                    const dbName = e.target.value
+                    setNewDbName(dbName)
+                    // 自动将用户名与数据库名称同步（始终同步）
+                    setNewDbUser(dbName)
+                  }}
+                  placeholder={t('database.dbNamePlaceholder')}
+                  className="form-input"
+                  style={{ width: '160px' }}
+                />
+              </div>
+              
+              <div className="form-group">
+                <label><span style={{ color: 'var(--red)' }}>*</span> {t('database.userName')}:</label>
+                <input
+                  type="text"
+                  value={newDbUser}
+                  onChange={(e) => setNewDbUser(e.target.value)}
+                  placeholder={t('database.dbUserPlaceholder')}
+                  className="form-input"
+                  style={{ width: '160px' }}
+                />
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
+              <div className="form-group" style={{ flex: 3 }}>
+                <label><span style={{ color: 'var(--red)' }}>*</span> {t('database.password')}:</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    value={newDbPass}
+                    onChange={(e) => setNewDbPass(e.target.value)}
+                    placeholder={t('database.passwordPlaceholder')}
+                    className="form-input"
+                    style={{ flex: 1 }}
+                  />
+                  <button 
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*'
+                      let pass = ''
+                      for (let i = 0; i < 16; i++) {
+                        pass += chars.charAt(Math.floor(Math.random() * chars.length))
+                      }
+                      setNewDbPass(pass)
+                    }}
+                    title={t('database.generatePassword')}
+                    style={{ padding: '6px 8px', fontSize: '12px', minWidth: 'auto' }}
+                  >
+                    {t('database.generatePassword')}
+                  </button>
+                </div>
+              </div>
+              
+              <div className="form-group" style={{ flex: 1, maxWidth: '140px' }}>
+                <label>{t('database.charset')}:</label>
+                <select
+                  value={dbCharset}
+                  onChange={(e) => setDbCharset(e.target.value)}
+                  className="form-input"
+                >
+                  <option value="utf8mb4">utf8mb4</option>
+                  <option value="utf8">utf8</option>
+                  <option value="gbk">gbk</option>
+                  <option value="big5">big5</option>
+                  <option value="latin1">latin1</option>
+                </select>
+              </div>
+            </div>
+            
+            <div className="form-group">
+              <label>{t('database.accessControl')}:</label>
+              <select
+                value={accessType}
+                onChange={(e) => setAccessType(e.target.value as any)}
+                className="form-input"
+              >
+                <option value="local">{t('database.localServer')}</option>
+                <option value="any">{t('database.allHosts')}</option>
+                <option value="ip">{t('database.allowedIps')}</option>
+              </select>
+            </div>
+            
+            {accessType === 'ip' && (
+              <div className="form-group">
+                <label>{t('database.allowedIps')}:</label>
+                <textarea
+                  value={allowedIp}
+                  onChange={(e) => {
+                    // 自动将空格或逗号转换为换行
+                    const val = e.target.value.replace(/[,，\s]+/g, '\n')
+                    setAllowedIp(val)
+                  }}
+                  placeholder={t('database.ipPerLinePlaceholder')}
+                  className="form-input"
+                  style={{ minHeight: '100px', resize: 'vertical' as const, fontFamily: 'var(--font-mono)', fontSize: '13px' }}
+                />
+                <small style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+                  {t('database.ipPerLineHint')}
+                </small>
+              </div>
+            )}
+            
+            <div style={{ marginBottom: '16px' }} title={t('database.savePasswordLocallyTitle')}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={savePasswordLocally}
+                  onChange={(e) => setSavePasswordLocally(e.target.checked)}
+                  style={{ width: 'auto', margin: 0 }}
+                />
+                <span>{t('database.savePasswordLocally')}</span>
+              </label>
+            </div>
+            
+            <div className="modal-actions">
+              <button 
+                className="btn-secondary"
+                onClick={() => setShowCreateDialog(false)}
+                disabled={creating}
+              >
+                {t('common.cancel')}
+              </button>
+              <button 
+                className="btn-primary"
+                onClick={handleCreateDatabase}
+                disabled={creating}
+              >
+                {creating ? t('common.loading') : t('common.confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 删除确认对话框 */}
+      {deleteTarget && (
+        <div className="modal-overlay">
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button 
+              className="modal-close-btn"
+              onClick={() => { setDeleteTarget(null); setDeleteConfirmName(''); }}
+              title={t('common.close')}
+            >×</button>
+            <h3>{t('database.deleteDatabase')}</h3>
+            <p style={{ color: 'var(--red)', fontSize: '13px', margin: '8px 0' }}>{t('database.deleteConfirm')} "<strong>{deleteTarget.name}</strong>". {t('common.warning')}!</p>
+            
+            <div className="form-group">
+              <label style={{ fontSize: '13px' }}>{t('database.databaseName')}: <code style={{ background: 'var(--bg-subtle)', padding: '2px 6px', borderRadius: '4px', color: 'var(--red)' }}>{deleteTarget.name}</code></label>
+              <input
+                type="text"
+                value={deleteConfirmName}
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                placeholder={deleteTarget.name}
+                className="form-input"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && deleteConfirmName.trim().toLowerCase() === deleteTarget.name.toLowerCase()) {
+                    handleDeleteDatabase()
+                  } else if (e.key === 'Escape') {
+                    setDeleteTarget(null)
+                    setDeleteConfirmName('')
+                  }
+                }}
+              />
+            </div>
+            
+            <div className="modal-actions">
+              <button 
+                className="btn-secondary"
+                onClick={() => { setDeleteTarget(null); setDeleteConfirmName(''); }}
+                disabled={deleting}
+              >
+                {t('common.cancel')}
+              </button>
+              <button 
+                className="btn-danger"
+                onClick={handleDeleteDatabase}
+                disabled={deleting || deleteConfirmName.trim().toLowerCase() !== deleteTarget.name.toLowerCase()}
+              >
+                {deleting ? t('common.deleting') : t('common.delete')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 清空数据库对话框 */}
+      {clearTarget && (
+        <div className="modal-overlay">
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button 
+              className="modal-close-btn"
+              onClick={() => { setClearTarget(null); setClearConfirmText(''); }}
+              title={t('common.close')}
+            >×</button>
+            <h3>{t('database.clearDatabase')}</h3>
+            <p style={{ color: 'var(--red)', fontSize: '13px', margin: '8px 0' }}>{t('database.clearDatabaseMsg', { name: clearTarget.name })}</p>
+            
+            <div className="form-group">
+              <label style={{ fontSize: '13px' }}>{t('database.typeClearToConfirm')}</label>
+              <input
+                type="text"
+                value={clearConfirmText}
+                onChange={(e) => setClearConfirmText(e.target.value)}
+                placeholder="clear"
+                className="form-input"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && clearConfirmText.trim().toLowerCase() === 'clear') {
+                    handleClearDatabase()
+                  } else if (e.key === 'Escape') {
+                    setClearTarget(null)
+                    setClearConfirmText('')
+                  }
+                }}
+              />
+            </div>
+            
+            <div className="modal-actions">
+              <button 
+                className="btn-secondary"
+                onClick={() => { setClearTarget(null); setClearConfirmText(''); }}
+                disabled={clearing}
+              >
+                {t('common.cancel')}
+              </button>
+              <button 
+                className="btn-danger"
+                onClick={handleClearDatabase}
+                disabled={clearing || clearConfirmText.trim().toLowerCase() !== 'clear'}
+              >
+                {clearing ? t('common.loading') : t('database.clearAction')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 修改 root 密码对话框 */}
+      {showChangePwDialog && (
+        <div className="modal-overlay">
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button 
+              className="modal-close-btn"
+              onClick={() => setShowChangePwDialog(false)}
+              title={t('common.close')}
+            >×</button>
+            <h3>{t('database.changeRootPassword')}</h3>
+                  
+            <div className="form-group">
+              <label>{t('database.newPassword')}:</label>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <input
+                  type={showRootPassword ? 'text' : 'password'}
+                  value={newRootPassword}
+                  onChange={(e) => setNewRootPassword(e.target.value)}
+                  placeholder={t('database.enterNewPasswordPlaceholder')}
+                  className="form-input"
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowRootPassword(!showRootPassword)}
+                  title={showRootPassword ? t('database.hidePassword') : t('database.showPassword')}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', padding: '4px 6px', lineHeight: 1 }}
+                >
+                  {showRootPassword ? t('database.hidePassword') : t('database.showPassword')}
+                </button>
+              </div>
+            </div>
+                  
+            <div style={{ marginBottom: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
+              {t('database.changePasswordNote')}
+            </div>
+                  
+            <div className="modal-actions">
+              <button 
+                className="btn-secondary"
+                onClick={() => setShowChangePwDialog(false)}
+                disabled={changingPw}
+              >
+                {t('common.cancel')}
+              </button>
+              <button 
+                className="btn-primary"
+                onClick={handleChangeRootPassword}
+                disabled={changingPw}
+              >
+                {changingPw ? t('common.loading') : t('common.confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+            
+      {/* 修改访问权限对话框 */}
+      {showAccessDialog && accessTarget && (
+        <div className="modal-overlay">
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>{t('database.accessControl')} - {accessTarget.name}</h3>
+              <button 
+                onClick={() => setShowAccessDialog(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '24px', cursor: 'pointer', padding: '0', lineHeight: 1 }}
+                title={t('common.close')}
+              >
+                ×
+              </button>
+            </div>
+                  
+            <div className="form-group">
+              <label>{t('database.accessControl')}:</label>
+              <select
+                value={newAccessType}
+                onChange={(e) => setNewAccessType(e.target.value as any)}
+                className="form-input"
+              >
+                <option value="local">{t('database.localServer')}</option>
+                <option value="any">{t('database.allHosts')}</option>
+                <option value="ip">{t('database.allowedIps')}</option>
+              </select>
+            </div>
+                  
+            {newAccessType === 'ip' && (
+              <div className="form-group">
+                <label>{t('database.allowedIps')}:</label>
+                <textarea
+                  value={newAllowedIp}
+                  onChange={(e) => {
+                    // 自动将空格或逗号转换为换行
+                    const val = e.target.value.replace(/[,，\s]+/g, '\n')
+                    setNewAllowedIp(val)
+                  }}
+                  placeholder={t('database.ipPerLinePlaceholder')}
+                  className="form-input"
+                  style={{ minHeight: '100px', resize: 'vertical' as const, fontFamily: 'var(--font-mono)', fontSize: '13px' }}
+                />
+                <small style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+                  {t('database.ipPerLineHint')}
+                </small>
+              </div>
+            )}
+                  
+            <div style={{ marginBottom: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
+              {t('database.changeAccessTip')}
+            </div>
+                  
+            <div className="modal-actions">
+              <button 
+                className="btn-secondary"
+                onClick={() => setShowAccessDialog(false)}
+                disabled={changingAccess}
+              >
+                {t('common.cancel')}
+              </button>
+              <button 
+                className="btn-primary"
+                onClick={handleChangeAccess}
+                disabled={changingAccess}
+              >
+                {changingAccess ? t('common.loading') : t('common.confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 修改数据库用户密码对话框 */}
+      {showChangePwDbDialog && changePwTarget && (
+        <div className="modal-overlay">
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button 
+              className="modal-close-btn"
+              onClick={() => setShowChangePwDbDialog(false)}
+              title={t('common.close')}
+            >×</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>{t('database.changePassword')} - {changePwTarget.name}</h3>
+            </div>
+            
+            <div className="form-group">
+              <label>{t('database.newPassword')}:</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={newDbPassword}
+                  onChange={(e) => setNewDbPassword(e.target.value)}
+                  placeholder={t('database.enterNewPasswordPlaceholder')}
+                  className="form-input"
+                  style={{ flex: 1 }}
+                  autoFocus
+                />
+                <button 
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*'
+                    let pass = ''
+                    for (let i = 0; i < 16; i++) {
+                      pass += chars.charAt(Math.floor(Math.random() * chars.length))
+                    }
+                    setNewDbPassword(pass)
+                  }}
+                  title={t('database.generatePassword')}
+                  style={{ padding: '6px 8px', fontSize: '12px', minWidth: 'auto' }}
+                >
+                  {t('database.generatePassword')}
+                </button>
+              </div>
+            </div>
+            
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={updateLocalPassword}
+                  onChange={(e) => setUpdateLocalPassword(e.target.checked)}
+                  style={{ width: 'auto', margin: 0 }}
+                />
+                <span>{t('database.savePasswordLocally')}</span>
+              </label>
+            </div>
+            
+            <div className="modal-actions">
+              <button 
+                className="btn-secondary"
+                onClick={() => setShowChangePwDbDialog(false)}
+                disabled={changingDbPw}
+              >
+                {t('common.cancel')}
+              </button>
+              <button 
+                className="btn-primary"
+                onClick={async () => {
+                  if (!newDbPassword.trim()) { setMsg(t('database.enterNewPassword')); return }
+                  if (newDbPassword.length < 6) { setMsg(t('database.enterNewPassword')); return }
+                  setChangingDbPw(true)
+                  try {
+                    const cred = dbCredentials[changePwTarget.name]
+                    const savedAccessType = cred?.access_type || 'local'
+                    const savedAllowedIp = cred?.allowed_ip || ''
+                    const result = await invoke<string>('server_change_db_user_password', {
+                      sessionId,
+                      dbUser: changePwTarget.user,
+                      newPassword: newDbPassword,
+                      accessType: savedAccessType,
+                      allowedIp: savedAllowedIp
+                    })
+                    setMsg(result)
+                    // 更新 SQLite 中的密码
+                    try {
+                      await invoke<string>('server_update_db_credential_password', {
+                        sessionId,
+                        dbName: changePwTarget.name,
+                        password: updateLocalPassword ? newDbPassword : ''
+                      })
+                    } catch (e) {
+                      console.error('Failed to update credential password:', e)
+                    }
+                    await fetchDatabases()
+                    setShowChangePwDbDialog(false)
+                    setNewDbPassword('')
+                  } catch (e) {
+                    setMsg(`${t('common.error')}: ` + String(e))
+                  } finally {
+                    setChangingDbPw(false)
+                  }
+                }}
+                disabled={changingDbPw}
+              >
+                {changingDbPw ? t('common.loading') : t('common.confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 备份对话框 */}
+      {showBackupDialog && backupTarget && (
+        <div className="modal-overlay">
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px' }}>
+            <button 
+              className="modal-close-btn"
+              onClick={() => setShowBackupDialog(false)}
+              title={t('common.close')}
+            >×</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>{t('database.backupDatabase')} - {backupTarget}</h3>
+            </div>
+            
+            <div style={{ marginBottom: '16px', fontSize: '13px', color: 'var(--text-muted)' }}>
+              {t('database.backupSaveLocation')}
+            </div>
+            
+            {/* 备份列表 */}
+            <div style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: '16px', border: '1px solid var(--border)', borderRadius: '6px' }}>
+              {loadingBackups ? (
+                <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>{t('common.loading')}</div>
+              ) : backups.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>{t('database.noBackups')}</div>
+              ) : (
+                <table className="data-table" style={{ margin: 0 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ fontSize: '12px' }}>{t('common.name')}</th>
+                      <th style={{ fontSize: '12px', width: '80px' }}>{t('common.size')}</th>
+                      <th style={{ fontSize: '12px', width: '160px' }}>{t('common.status')}</th>
+                      <th style={{ fontSize: '12px', width: '180px' }}>{t('common.actions')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {backups.map((backup) => (
+                      <tr key={backup.filename}>
+                        <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{backup.filename}</td>
+                        <td style={{ fontSize: '12px' }}>{formatBytes(backup.size_bytes)}</td>
+                        <td style={{ fontSize: '12px' }}>{backup.created_at}</td>
+                        <td>
+                          <button 
+                            className="action-link"
+                            onClick={() => handleDownloadBackup(backup.filename)}
+                            style={{ fontSize: '12px' }}
+                          >
+                            {t('common.download')}
+                          </button>
+                          <span className="separator">|</span>
+                          <button 
+                            className="action-link"
+                            onClick={() => handleImportFromBackup(backup.filename)}
+                            disabled={importing}
+                            style={{ fontSize: '12px' }}
+                          >
+                            {t('database.importAction')}
+                          </button>
+                          <span className="separator">|</span>
+                          <button 
+                            className="action-link danger"
+                            onClick={() => handleDeleteBackup(backup.filename)}
+                            style={{ fontSize: '12px' }}
+                          >
+                            {t('common.delete')}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            
+            <div className="modal-actions">
+              <button 
+                className="btn-secondary"
+                onClick={() => setShowBackupDialog(false)}
+                disabled={backingUp}
+              >
+                {t('common.close')}
+              </button>
+              <button 
+                className="btn-primary"
+                onClick={handleBackup}
+                disabled={backingUp}
+              >
+                {backingUp ? t('common.loading') : t('database.backupDatabase')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 导入对话框 */}
+      {showImportDialog && importTarget && (
+        <div className="modal-overlay">
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <button 
+              className="modal-close-btn"
+              onClick={() => setShowImportDialog(false)}
+              title={t('common.close')}
+            >×</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>{t('database.importDatabase')} - {importTarget}</h3>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+              <button 
+                className={importMode === 'upload' ? 'btn-primary' : 'btn-secondary'}
+                onClick={() => setImportMode('upload')}
+                style={{ flex: 1 }}
+              >
+                {t('database.importFile')}
+              </button>
+              <button 
+                className={importMode === 'backup' ? 'btn-primary' : 'btn-secondary'}
+                onClick={() => setImportMode('backup')}
+                style={{ flex: 1 }}
+              >
+                {t('database.selectBackup')}
+              </button>
+            </div>
+            
+            {importMode === 'upload' ? (
+              <div className="form-group">
+                <label>{t('database.importFile')}:</label>
+                <input
+                  type="file"
+                  accept="*"
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  className="form-input"
+                  style={{ padding: '8px' }}
+                />
+                {selectedFile && (
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {t('database.selectedFile', { name: selectedFile.name, size: formatBytes(selectedFile.size) })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="form-group">
+                <label>{t('database.selectBackup')}:</label>
+                {loadingImportBackups ? (
+                  <div style={{ padding: '12px', textAlign: 'center', color: 'var(--text-muted)' }}>{t('common.loading')}</div>
+                ) : importBackups.length === 0 ? (
+                  <div style={{ padding: '12px', textAlign: 'center', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: '6px' }}>
+                    {t('database.noBackups')}
+                  </div>
+                ) : (
+                  <select
+                    value={selectedBackup || ''}
+                    onChange={(e) => setSelectedBackup(e.target.value)}
+                    className="form-input"
+                  >
+                    <option value="">-- {t('database.selectBackup')} --</option>
+                    {importBackups.map((backup) => (
+                      <option key={backup.filename} value={backup.filename}>
+                        {backup.filename} ({formatBytes(backup.size_bytes)}) - {backup.created_at}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+            
+            <div style={{ marginBottom: '16px', padding: '10px', background: 'var(--red)22', borderRadius: '6px', fontSize: '12px', color: 'var(--red)' }}>
+              {t('common.warning')}: {t('database.importOverwriteWarn')}
+            </div>
+            
+            <div className="modal-actions">
+              <button 
+                className="btn-secondary"
+                onClick={() => setShowImportDialog(false)}
+                disabled={importing}
+              >
+                {t('common.cancel')}
+              </button>
+              <button 
+                className="btn-primary"
+                onClick={handleImport}
+                disabled={importing || (importMode === 'upload' ? !selectedFile : !selectedBackup)}
+              >
+                {importing ? t('common.loading') : t('database.importDatabase')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 缺少 unzip 工具弹窗 */}
+      {missingToolModal && (
+        <div className="modal-overlay" onClick={() => setMissingToolModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px', textAlign: 'center' }}>
+            <button className="modal-close-btn" onClick={() => setMissingToolModal(false)} title={t('common.close')}>×</button>
+            <div style={{ marginBottom: '16px', fontSize: '16px', fontWeight: 600 }}>{t('files.missingToolTitle')}</div>
+            <div style={{ marginBottom: '20px', fontSize: '13px', color: 'var(--text-muted)' }}>
+              {t('files.missingUnzipTool')}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+              <button className="btn-secondary" onClick={() => setMissingToolModal(false)}>
+                {t('common.cancel')}
+              </button>
+              <button className="btn-primary" onClick={() => {
+                setMissingToolModal(false)
+                onNavigateToSoftware?.()
+              }}>
+                {t('database.goToSoftware')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

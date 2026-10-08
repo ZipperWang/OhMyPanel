@@ -1,0 +1,1110 @@
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { useTranslation } from 'react-i18next'
+import ServiceUnavailable from './ServiceUnavailable'
+
+interface DockerStatus {
+  installed: boolean
+  version: string
+  compose_version: string
+  running: boolean
+}
+
+interface DockerContainer {
+  id: string
+  name: string
+  image: string
+  status: string
+  state: string
+  ports: string
+  created: string
+}
+
+interface DockerImage {
+  id: string
+  repository: string
+  tag: string
+  size: string
+  created: string
+}
+
+interface DockerBatchResult {
+  id: string
+  ok: boolean
+  message: string
+}
+
+interface DockerPanelProps {
+  sessionId: string | null
+  onNavigateToSoftware?: () => void
+}
+
+type DockerTab = 'containers' | 'images' | 'mirror'
+
+export default function DockerPanel({ sessionId, onNavigateToSoftware }: DockerPanelProps) {
+  const { t } = useTranslation()
+  const [status, setStatus] = useState<DockerStatus | null>(null)
+  const [statusLoading, setStatusLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [activeTab, setActiveTab] = useState<DockerTab>('containers')
+
+  // Docker 安装，ponytail：安装功能已移至软件仓库
+
+  // 拉取操作的流式日志
+  const [streamLogs, setStreamLogs] = useState<string[]>([])
+  const [streamActive, setStreamActive] = useState(false)
+  const streamEndRef = useRef<HTMLDivElement>(null)
+
+  // 容器
+  const [containers, setContainers] = useState<DockerContainer[]>([])
+  const [containersLoading, setContainersLoading] = useState(false)
+  const [containerAction, setContainerAction] = useState('')
+  const [logContainer, setLogContainer] = useState<DockerContainer | null>(null)
+  const [containerLogs, setContainerLogs] = useState('')
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [confirmDeleteContainer, setConfirmDeleteContainer] = useState<DockerContainer | null>(null)
+  const [deleteContainerInput, setDeleteContainerInput] = useState('')
+  const [commitContainer, setCommitContainer] = useState<DockerContainer | null>(null)
+  const [commitImageName, setCommitImageName] = useState('')
+  const [commitMessage, setCommitMessage] = useState('')
+  const [commitMode, setCommitMode] = useState<'direct' | 'clean' | 'export'>('clean')
+  const [commitExportCmd, setCommitExportCmd] = useState('')
+  const [commitExportExpose, setCommitExportExpose] = useState('')
+  const [committing, setCommitting] = useState(false)
+
+  // 容器批量操作
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [batchRunning, setBatchRunning] = useState(false)
+  const [batchResult, setBatchResult] = useState<{ action: string; results: DockerBatchResult[] } | null>(null)
+  const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false)
+  const [batchDeleteConfirmInput, setBatchDeleteConfirmInput] = useState('')
+
+  // 镜像
+  const [images, setImages] = useState<DockerImage[]>([])
+  const [imagesLoading, setImagesLoading] = useState(false)
+  const [pullImageName, setPullImageName] = useState('')
+  const [pulling, setPulling] = useState(false)
+  const [confirmDeleteImage, setConfirmDeleteImage] = useState<DockerImage | null>(null)
+  const [deleteImageInput, setDeleteImageInput] = useState('')
+  const [loadImageModal, setLoadImageModal] = useState(false)
+  const [loadImagePath, setLoadImagePath] = useState('')
+  const [loadingImage, setLoadingImage] = useState(false)
+  const [runImageModal, setRunImageModal] = useState<DockerImage | null>(null)
+  const [runCommand, setRunCommand] = useState('')
+  const [runningContainer, setRunningContainer] = useState(false)
+
+  // 镜像源配置
+  const [mirrors, setMirrors] = useState<string[]>([])
+  const [mirrorInput, setMirrorInput] = useState('')
+  const [mirrorLoading, setMirrorLoading] = useState(false)
+  const [mirrorSaving, setMirrorSaving] = useState(false)
+
+  const fetchStatus = useCallback(async () => {
+    if (!sessionId) return
+    setStatusLoading(true)
+    try {
+      const s = await invoke<DockerStatus>('server_check_docker', { sessionId })
+      setStatus(s)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setStatusLoading(false)
+    }
+  }, [sessionId])
+
+  const fetchContainers = useCallback(async () => {
+    if (!sessionId) return
+    setContainersLoading(true)
+    try {
+      const list = await invoke<DockerContainer[]>('server_docker_container_list', { sessionId })
+      setContainers(list)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setContainersLoading(false)
+    }
+  }, [sessionId])
+
+  const fetchImages = useCallback(async () => {
+    if (!sessionId) return
+    setImagesLoading(true)
+    try {
+      const list = await invoke<DockerImage[]>('server_docker_image_list', { sessionId })
+      setImages(list)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setImagesLoading(false)
+    }
+  }, [sessionId])
+
+  useEffect(() => { fetchStatus() }, [fetchStatus])
+
+  // 监听 docker-action-progress 事件
+  useEffect(() => {
+    const unlisten = listen<{ sessionId: string; line: string; status: string }>('docker-action-progress', (event) => {
+      if (event.payload.sessionId !== sessionId) return
+      setStreamLogs(prev => [...prev, event.payload.line])
+      if (event.payload.status === 'done' || event.payload.status === 'error') {
+        setStreamActive(false)
+      }
+    })
+    return () => { unlisten.then(fn => fn()) }
+  }, [sessionId])
+
+  // 自动滚动流式日志
+  useEffect(() => {
+    streamEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [streamLogs])
+
+  useEffect(() => {
+    if (status?.installed && status?.running) {
+      fetchContainers()
+      fetchImages()
+      fetchMirrorConfig()
+    }
+  }, [status?.installed, status?.running, fetchContainers, fetchImages])
+
+  const fetchMirrorConfig = useCallback(async () => {
+    if (!sessionId) return
+    setMirrorLoading(true)
+    try {
+      const list = await invoke<string[]>('server_docker_get_mirror_config', { sessionId })
+      setMirrors(list)
+    } catch {
+      setMirrors([])
+    } finally {
+      setMirrorLoading(false)
+    }
+  }, [sessionId])
+
+  const handleSaveMirror = async () => {
+    if (!sessionId || !mirrorInput.trim()) return
+    clearMessages()
+    setMirrorSaving(true)
+    const newMirrors = mirrorInput.split('\n').map(s => s.trim()).filter(Boolean)
+    try {
+      const result = await invoke<string>('server_docker_set_mirror_config', { sessionId, mirrors: newMirrors })
+      setSuccess(result)
+      setMirrors(newMirrors)
+      setMirrorInput('')
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setMirrorSaving(false)
+    }
+  }
+
+  const handleRemoveMirror = async (url: string) => {
+    if (!sessionId) return
+    clearMessages()
+    const newMirrors = mirrors.filter(m => m !== url)
+    setMirrorSaving(true)
+    try {
+      const result = await invoke<string>('server_docker_set_mirror_config', { sessionId, mirrors: newMirrors })
+      setSuccess(result)
+      setMirrors(newMirrors)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setMirrorSaving(false)
+    }
+  }
+
+  const clearMessages = () => { setError(''); setSuccess('') }
+
+  const startStream = () => {
+    setStreamLogs([])
+    setStreamActive(true)
+  }
+
+  const handleContainerAction = async (container: DockerContainer, action: string) => {
+    if (!sessionId) return
+    clearMessages()
+    setContainerAction(container.id + action)
+    try {
+      await invoke('server_docker_container_action', { sessionId, containerId: container.id, action })
+      await fetchContainers()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setContainerAction('')
+    }
+  }
+
+  const handleDeleteContainer = async (container: DockerContainer, force: boolean) => {
+    if (!sessionId) return
+    clearMessages()
+    setConfirmDeleteContainer(null)
+    setDeleteContainerInput('')
+    setContainerAction(container.id + 'delete')
+    try {
+      await invoke('server_docker_container_remove', { sessionId, containerId: container.id, force })
+      await fetchContainers()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setContainerAction('')
+    }
+  }
+
+  // ===== Batch container operations =====
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    setSelectedIds(prev => prev.size === containers.length ? new Set() : new Set(containers.map(c => c.id)))
+  }
+
+  const clearSelection = () => setSelectedIds(new Set())
+
+  // ponytail：停止或重启仅对运行中的容器有意义，过滤出符合条件的容器
+  const eligibleIds = (action: string): string[] => {
+    if (action === 'delete') return Array.from(selectedIds)
+    if (action === 'stop' || action === 'restart') {
+      return Array.from(selectedIds).filter(id => containers.find(c => c.id === id)?.state === 'running')
+    }
+    if (action === 'start') {
+      // start 仅适用于未运行且未暂停的容器（暂停的容器必须先取消暂停）
+      return Array.from(selectedIds).filter(id => {
+        const state = containers.find(c => c.id === id)?.state
+        return state !== 'running' && state !== 'paused'
+      })
+    }
+    return Array.from(selectedIds)
+  }
+
+  const handleBatchAction = async (action: string) => {
+    if (!sessionId) return
+    const ids = eligibleIds(action)
+    if (ids.length === 0) {
+      setError(t('dockerPanel.batchNoEligible'))
+      return
+    }
+    clearMessages()
+    setBatchRunning(true)
+    try {
+      const results = await invoke<DockerBatchResult[]>('server_docker_container_batch_action', {
+        sessionId,
+        containerIds: ids,
+        action,
+      })
+      setBatchResult({ action, results })
+      clearSelection()
+      await fetchContainers()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBatchRunning(false)
+    }
+  }
+
+  const handleBatchDelete = async () => {
+    if (!sessionId) return
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    const hasRunning = ids.some(id => containers.find(c => c.id === id)?.state === 'running')
+    setBatchDeleteConfirm(false)
+    setBatchDeleteConfirmInput('')
+    clearMessages()
+    setBatchRunning(true)
+    try {
+      const results = await invoke<DockerBatchResult[]>('server_docker_container_batch_remove', {
+        sessionId,
+        containerIds: ids,
+        force: hasRunning,
+      })
+      setBatchResult({ action: 'remove', results })
+      clearSelection()
+      await fetchContainers()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBatchRunning(false)
+    }
+  }
+
+  const batchSelectedRunningCount = Array.from(selectedIds).filter(id => containers.find(c => c.id === id)?.state === 'running').length
+
+  const handleOpenCommit = (container: DockerContainer) => {
+    setCommitContainer(container)
+    setCommitImageName(`${container.name}:latest`)
+    setCommitMessage('')
+    setCommitMode('clean')
+    setCommitExportCmd('')
+    setCommitExportExpose('')
+  }
+
+  const handleCommit = async () => {
+    if (!sessionId || !commitContainer || !commitImageName.trim()) return
+    clearMessages()
+    setCommitting(true)
+    if (commitMode !== 'direct') startStream()
+    try {
+      await invoke('server_docker_container_commit', {
+        sessionId,
+        containerId: commitContainer.id,
+        imageName: commitImageName.trim(),
+        message: commitMessage.trim(),
+        mode: commitMode,
+        exportCmd: commitExportCmd.trim(),
+        exportExpose: commitExportExpose.trim(),
+      })
+      setCommitContainer(null)
+      setSuccess(t('dockerPanel.commitSuccess', { name: commitImageName.trim() }))
+      await fetchImages()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setCommitting(false)
+    }
+  }
+
+  const handleViewLogs = async (container: DockerContainer) => {
+    if (!sessionId) return
+    setLogContainer(container)
+    setContainerLogs('')
+    setLogsLoading(true)
+    try {
+      const logs = await invoke<string>('server_docker_container_logs', { sessionId, containerId: container.id, lines: 500 })
+      setContainerLogs(logs)
+    } catch (e) {
+      setContainerLogs('Error: ' + String(e))
+    } finally {
+      setLogsLoading(false)
+    }
+  }
+
+  const handlePullImage = async () => {
+    if (!sessionId || !pullImageName.trim()) return
+    clearMessages()
+    startStream()
+    setPulling(true)
+    try {
+      await invoke<string>('server_docker_image_pull', { sessionId, imageName: pullImageName.trim() })
+      setPullImageName('')
+      await fetchImages()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setPulling(false)
+    }
+  }
+
+  const handleDeleteImage = async (image: DockerImage) => {
+    if (!sessionId) return
+    clearMessages()
+    setConfirmDeleteImage(null)
+    setDeleteImageInput('')
+    try {
+      const imageRef = image.repository === '<none>' ? image.id : `${image.repository}:${image.tag}`
+      await invoke('server_docker_image_remove', { sessionId, imageId: imageRef })
+      await fetchImages()
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  const handleLoadImage = async () => {
+    if (!sessionId || !loadImagePath.trim()) return
+    clearMessages()
+    setLoadImageModal(false)
+    startStream()
+    setLoadingImage(true)
+    try {
+      await invoke('server_docker_image_load', {
+        sessionId,
+        filePath: loadImagePath.trim(),
+      })
+      setLoadImagePath('')
+      await fetchImages()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoadingImage(false)
+    }
+  }
+
+  const handleRunFromImage = (image: DockerImage) => {
+    setRunImageModal(image)
+    // ponytail：根据常见模式提供合理的默认值
+    setRunCommand(`-p 80:80 -d`)
+  }
+
+  const handleExecuteRun = async () => {
+    if (!sessionId || !runImageModal) return
+    clearMessages()
+    setRunningContainer(true)
+    const imageName = runImageModal.repository === '<none>' ? runImageModal.id : `${runImageModal.repository}:${runImageModal.tag}`
+    try {
+      await invoke('server_docker_image_run', { 
+        sessionId, 
+        imageName, 
+        runArgs: runCommand.trim() 
+      })
+      setRunImageModal(null)
+      setRunCommand('')
+      await fetchContainers()
+      await fetchImages()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setRunningContainer(false)
+    }
+  }
+
+  const getStateClass = (state: string) => {
+    switch (state.toLowerCase()) {
+      case 'running': return 'docker-state-running'
+      case 'exited': return 'docker-state-exited'
+      case 'paused': return 'docker-state-paused'
+      case 'restarting': return 'docker-state-restarting'
+      default: return 'docker-state-unknown'
+    }
+  }
+
+  if (!sessionId) return <div className="sp-empty">{t('dockerPanel.connectFirst')}</div>
+
+  return (
+    <div className="docker-panel">
+      <div className="docker-header">
+        <h2>Docker</h2>
+        <button className="docker-refresh-btn" onClick={() => { fetchStatus(); if (status?.installed) { fetchContainers(); fetchImages() } }} disabled={statusLoading}>
+          {statusLoading ? '...' : `↻ ${t('dockerPanel.refresh')}`}
+        </button>
+      </div>
+
+      {error && <div className="docker-message docker-error">{error}</div>}
+      {success && <div className="docker-message docker-success">{success}</div>}
+
+      {/* Docker 状态卡片 */}
+      <div className="docker-status-card">
+        {statusLoading && !status ? (
+          <div className="docker-status-loading">{t('dockerPanel.checking')}</div>
+        ) : status ? (
+          <>
+            {/* ponytail：仅在运行时显示状态徽章，其余情况由 ServiceUnavailable 处理 */}
+            {status.installed && status.running && (
+              <div className="docker-status-info">
+                <span className="docker-status-badge active">
+                  {t('dockerPanel.running')}
+                </span>
+                <span className="docker-version">Docker {status.version || 'unknown'}</span>
+                {status.compose_version && <span className="docker-version">Compose {status.compose_version}</span>}
+              </div>
+            )}
+            {(!status.installed || !status.running) && (
+              <ServiceUnavailable serviceName="Docker" onNavigate={onNavigateToSoftware} />
+            )}
+          </>
+        ) : null}
+      </div>
+
+      {/* 流式日志面板 */}
+      {(streamActive || streamLogs.length > 0) && (
+        <div className="docker-stream-panel">
+          <div className="docker-stream-header">
+            <span className="docker-stream-title">
+              {streamActive ? `⟳ ${t('dockerPanel.streamRunning')}` : `✓ ${t('dockerPanel.streamCompleted')}`}
+            </span>
+            {streamLogs.length > 0 && (
+              <button className="docker-stream-clear" onClick={() => setStreamLogs([])}>✕ {t('dockerPanel.streamClear')}</button>
+            )}
+          </div>
+          <div className="docker-stream-body">
+            {streamLogs.map((line, i) => (
+              <div key={i} className="docker-stream-line">{line}</div>
+            ))}
+            <div ref={streamEndRef} />
+          </div>
+        </div>
+      )}
+
+      {/* 标签页，仅在 Docker 已安装时显示 */}
+      {status?.installed && (
+        <>
+          <div className="docker-tabs">
+            <button className={`docker-tab ${activeTab === 'containers' ? 'active' : ''}`} onClick={() => setActiveTab('containers')}>
+              {t('dockerPanel.containersTab', { count: containers.length })}
+            </button>
+            <button className={`docker-tab ${activeTab === 'images' ? 'active' : ''}`} onClick={() => setActiveTab('images')}>
+              {t('dockerPanel.imagesTab', { count: images.length })}
+            </button>
+            <button className={`docker-tab ${activeTab === 'mirror' ? 'active' : ''}`} onClick={() => setActiveTab('mirror')}>
+              {t('dockerPanel.mirrorTab')}
+            </button>
+          </div>
+
+          {/* 容器标签页 */}
+          {activeTab === 'containers' && (
+            <div className="docker-tab-content">
+              {containersLoading && containers.length === 0 ? (
+                <div className="docker-loading">{t('dockerPanel.loadingContainers')}</div>
+              ) : containers.length === 0 ? (
+                <div className="docker-empty">{t('dockerPanel.noContainers')}</div>
+              ) : (
+                <div className="docker-table">
+                  <div className="docker-table-header">
+                    <span className="docker-col-check">
+                      <input
+                        type="checkbox"
+                        className="docker-checkbox"
+                        checked={containers.length > 0 && selectedIds.size === containers.length}
+                        onChange={toggleSelectAll}
+                        title={t('dockerPanel.selectAll')}
+                      />
+                    </span>
+                    <span className="docker-col-name">{t('dockerPanel.colName')}</span>
+                    <span className="docker-col-image">{t('dockerPanel.colImage')}</span>
+                    <span className="docker-col-status">{t('dockerPanel.colStatus')}</span>
+                    <span className="docker-col-ports">{t('dockerPanel.colPorts')}</span>
+                    <span className="docker-col-actions">{t('dockerPanel.colActions')}</span>
+                  </div>
+                  {containers.map((c) => (
+                    <div className={`docker-table-row${selectedIds.has(c.id) ? ' selected' : ''}`} key={c.id}>
+                      <span className="docker-col-check">
+                        <input
+                          type="checkbox"
+                          className="docker-checkbox"
+                          checked={selectedIds.has(c.id)}
+                          onChange={() => toggleSelect(c.id)}
+                        />
+                      </span>
+                      <span className="docker-col-name" title={c.name}>{c.name}</span>
+                      <span className="docker-col-image" title={c.image}>{c.image}</span>
+                      <span className={`docker-col-status ${getStateClass(c.state)}`}>{c.status}</span>
+                      <span className="docker-col-ports" title={c.ports}>{c.ports || '-'}</span>
+                      <span className="docker-col-actions">
+                        {c.state === 'running' ? (
+                          <>
+                            <button className="docker-action-btn" onClick={() => handleContainerAction(c, 'stop')} disabled={!!containerAction} title={t('dockerPanel.stop')}>{t('dockerPanel.stop')}</button>
+                            <button className="docker-action-btn" onClick={() => handleContainerAction(c, 'restart')} disabled={!!containerAction} title={t('dockerPanel.restart')}>{t('dockerPanel.restart')}</button>
+                            <button className="docker-action-btn" onClick={() => handleContainerAction(c, 'pause')} disabled={!!containerAction} title={t('dockerPanel.pause')}>{t('dockerPanel.pause')}</button>
+                          </>
+                        ) : c.state === 'paused' ? (
+                          <button className="docker-action-btn" onClick={() => handleContainerAction(c, 'unpause')} disabled={!!containerAction} title={t('dockerPanel.unpause')}>{t('dockerPanel.unpause')}</button>
+                        ) : (
+                          <button className="docker-action-btn" onClick={() => handleContainerAction(c, 'start')} disabled={!!containerAction} title={t('dockerPanel.start')}>{t('dockerPanel.start')}</button>
+                        )}
+                        <button className="docker-action-btn" onClick={() => handleViewLogs(c)} disabled={!!containerAction} title={t('dockerPanel.logs')}>{t('dockerPanel.logs')}</button>
+                        <button className="docker-action-btn" onClick={() => handleOpenCommit(c)} disabled={!!containerAction} title={t('dockerPanel.commit')}>{t('dockerPanel.commit')}</button>
+                        <button className="docker-action-btn" onClick={() => { setConfirmDeleteContainer(c); setDeleteContainerInput('') }} disabled={!!containerAction} title={t('dockerPanel.delete')}>{t('dockerPanel.delete')}</button>
+                        {containerAction === c.id + 'stop' || containerAction === c.id + 'start' || containerAction === c.id + 'restart' || containerAction === c.id + 'pause' || containerAction === c.id + 'unpause' || containerAction === c.id + 'delete' ? (
+                          <span className="docker-action-loading">...</span>
+                        ) : null}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 批量操作栏，始终可见，位于容器标签页左下角 */}
+              <div className="docker-batch-bar">
+                {selectedIds.size > 0 && (
+                  <span className="docker-batch-count">
+                    {t('dockerPanel.selectedCount', { count: selectedIds.size })}
+                    <button className="docker-batch-clear" onClick={clearSelection} disabled={batchRunning}>✕</button>
+                  </span>
+                )}
+                <button
+                  className="docker-btn"
+                  onClick={() => handleBatchAction('start')}
+                  disabled={batchRunning || selectedIds.size === 0}
+                  title={t('dockerPanel.start')}
+                >
+                  {t('dockerPanel.batchStart')}
+                </button>
+                <button
+                  className="docker-btn"
+                  onClick={() => handleBatchAction('stop')}
+                  disabled={batchRunning || selectedIds.size === 0}
+                  title={t('dockerPanel.stop')}
+                >
+                  {t('dockerPanel.batchStop')}
+                </button>
+                <button
+                  className="docker-btn"
+                  onClick={() => {
+                    if (selectedIds.size === 0) {
+                      setError(t('dockerPanel.batchNoEligible'))
+                      return
+                    }
+                    setBatchDeleteConfirm(true)
+                    setBatchDeleteConfirmInput('')
+                  }}
+                  disabled={batchRunning || selectedIds.size === 0}
+                >
+                  {t('dockerPanel.batchDelete')}
+                </button>
+                {batchRunning && <span className="docker-action-loading">...</span>}
+              </div>
+            </div>
+          )}
+
+          {/* 镜像标签页 */}
+          {activeTab === 'images' && (
+            <div className="docker-tab-content">
+              <div className="docker-pull-section">
+                <input
+                  className="docker-pull-input"
+                  value={pullImageName}
+                  onChange={(e) => setPullImageName(e.target.value)}
+                  placeholder={t('dockerPanel.pullPlaceholder')}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handlePullImage() }}
+                  disabled={pulling}
+                />
+                <button className="docker-btn primary" onClick={handlePullImage} disabled={pulling || !pullImageName.trim()}>
+                  {pulling ? t('dockerPanel.pulling') : t('dockerPanel.pullImage')}
+                </button>
+                <button className="docker-btn" onClick={() => setLoadImageModal(true)} disabled={loadingImage} title={t('dockerPanel.loadImage')}>
+                  {t('dockerPanel.loadImage')}
+                </button>
+              </div>
+
+              {imagesLoading && images.length === 0 ? (
+                <div className="docker-loading">{t('dockerPanel.loadingImages')}</div>
+              ) : images.length === 0 ? (
+                <div className="docker-empty">{t('dockerPanel.noImages')}</div>
+              ) : (
+                <div className="docker-table">
+                  <div className="docker-table-header">
+                    <span className="docker-col-repo">{t('dockerPanel.colRepo')}</span>
+                    <span className="docker-col-tag">{t('dockerPanel.colTag')}</span>
+                    <span className="docker-col-id">{t('dockerPanel.colId')}</span>
+                    <span className="docker-col-size">{t('dockerPanel.colSize')}</span>
+                    <span className="docker-col-actions">{t('dockerPanel.colActions')}</span>
+                  </div>
+                  {images.map((img, idx) => (
+                    <div className="docker-table-row" key={`${img.id}-${idx}`}>
+                      <span className="docker-col-repo">{img.repository}</span>
+                      <span className="docker-col-tag">{img.tag}</span>
+                      <span className="docker-col-id">{img.id.substring(0, 12)}</span>
+                      <span className="docker-col-size">{img.size}</span>
+                      <span className="docker-col-actions">
+                        <button className="docker-action-btn" onClick={() => handleRunFromImage(img)} title={t('dockerPanel.runContainer')}>{t('dockerPanel.runContainer')}</button>
+                        <button className="docker-action-btn" onClick={() => { setConfirmDeleteImage(img); setDeleteImageInput('') }} title={t('dockerPanel.delete')}>{t('dockerPanel.delete')}</button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 镜像源标签页 */}
+          {activeTab === 'mirror' && (
+            <div className="docker-tab-content">
+              <div className="docker-mirror-section">
+                <div className="docker-mirror-header">
+                  <h3>{t('dockerPanel.registryMirrors')}</h3>
+                  <p className="docker-mirror-desc">{t('dockerPanel.mirrorDesc')}</p>
+                </div>
+
+                {mirrorLoading ? (
+                  <div className="docker-loading">{t('dockerPanel.loadingConfig')}</div>
+                ) : (
+                  <>
+                    {mirrors.length > 0 && (
+                      <div className="docker-mirror-current">
+                        <span className="docker-mirror-label">{t('dockerPanel.currentMirrors')}</span>
+                        {mirrors.map((m, i) => (
+                          <span key={i} className="docker-mirror-tag">
+                            {m}
+                            <button className="docker-mirror-remove" onClick={() => handleRemoveMirror(m)} title={t('dockerPanel.remove')}>✕</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="docker-mirror-form">
+                      <label className="docker-mirror-form-label">
+                        {t('dockerPanel.mirrorUrlsLabel')}
+                      </label>
+                      <textarea
+                        className="docker-mirror-textarea"
+                        value={mirrorInput}
+                        onChange={(e) => setMirrorInput(e.target.value)}
+                        placeholder={"https://mirror.ccs.tencentyun.com\nhttps://registry.docker-cn.com"}
+                        rows={4}
+                      />
+                      <div className="docker-mirror-actions">
+                        <button className="docker-btn primary" onClick={handleSaveMirror} disabled={mirrorSaving || !mirrorInput.trim()}>
+                          {mirrorSaving ? t('dockerPanel.saving') : t('dockerPanel.saveRestart')}
+                        </button>
+                        <button className="docker-btn" onClick={() => { setMirrorInput(mirrors.join('\n')) }}>
+                          {t('dockerPanel.loadCurrent')}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="docker-mirror-presets">
+                      <span className="docker-mirror-presets-title">{t('dockerPanel.commonMirrors')}</span>
+                      <div className="docker-mirror-presets-list">
+                        {[
+                          { name: 'Tencent', url: 'https://mirror.ccs.tencentyun.com' },
+                          { name: 'DaoCloud', url: 'https://docker.m.daocloud.io' },
+                          { name: 'Xuanyuan', url: 'https://docker.xuanyuan.me' },
+                          { name: '1ms', url: 'https://docker.1ms.run' },
+                        ].map((preset) => (
+                          <button
+                            key={preset.name}
+                            className="docker-mirror-preset-btn"
+                            onClick={() => setMirrorInput(prev => {
+                              const lines = prev.split('\n').filter(Boolean)
+                              if (lines.includes(preset.url)) return prev
+                              return [...lines, preset.url].join('\n')
+                            })}
+                          >
+                            + {preset.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* 容器日志弹窗 */}
+      {logContainer && (
+        <div className="docker-modal-overlay">
+          <div className="docker-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="docker-modal-header">
+              <span className="docker-modal-title">{t('dockerPanel.logsTitle', { name: logContainer.name })}</span>
+              <button className="docker-modal-close" onClick={() => setLogContainer(null)}>×</button>
+            </div>
+            <div className="docker-modal-body">
+              {logsLoading ? (
+                <div className="docker-loading">{t('dockerPanel.loadingLogs')}</div>
+              ) : (
+                <pre className="docker-logs-content">{containerLogs || t('dockerPanel.noLogs')}</pre>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 确认删除容器对话框 */}
+      {confirmDeleteContainer && (
+        <div className="docker-modal-overlay">
+          <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <button 
+              className="modal-close-btn"
+              onClick={() => {
+                setConfirmDeleteContainer(null)
+                setDeleteContainerInput('')
+              }}
+              title={t('dockerPanel.close')}
+            >×</button>
+            <div className="docker-confirm-title">{t('dockerPanel.deleteContainerTitle')}</div>
+            <div className="docker-confirm-msg">
+              {t('dockerPanel.deleteContainerMsg', { name: confirmDeleteContainer.name })}
+              {confirmDeleteContainer.state === 'running' && <span className="docker-warn">{t('dockerPanel.forceRemoveWarn')}</span>}
+              {confirmDeleteContainer.state === 'paused' && <span className="docker-warn-red">{t('dockerPanel.pausedNeedStop')}</span>}
+              <div className="docker-confirm-del-hint">{t('dockerPanel.batchDeleteTypeDel')}</div>
+              <input
+                className="docker-confirm-input"
+                type="text"
+                placeholder={t('dockerPanel.batchDeleteInputPlaceholder')}
+                value={deleteContainerInput}
+                onChange={(e) => setDeleteContainerInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && deleteContainerInput === 'del') handleDeleteContainer(confirmDeleteContainer, confirmDeleteContainer.state === 'running')
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="docker-confirm-actions">
+              <button className="docker-btn" onClick={() => {
+                setConfirmDeleteContainer(null)
+                setDeleteContainerInput('')
+              }}>{t('dockerPanel.cancel')}</button>
+              <button
+                className="docker-btn danger"
+                onClick={() => handleDeleteContainer(confirmDeleteContainer, confirmDeleteContainer.state === 'running')}
+                disabled={deleteContainerInput !== 'del'}
+              >
+                {t('dockerPanel.delete')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 确认删除镜像对话框 */}
+      {confirmDeleteImage && (
+        <div className="docker-modal-overlay">
+          <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <button 
+              className="modal-close-btn"
+              onClick={() => {
+                setConfirmDeleteImage(null)
+                setDeleteImageInput('')
+              }}
+              title={t('dockerPanel.close')}
+            >×</button>
+            <div className="docker-confirm-title">{t('dockerPanel.deleteImageTitle')}</div>
+            <div className="docker-confirm-msg">
+              {t('dockerPanel.deleteImageMsg', { name: confirmDeleteImage.repository === '<none>' ? confirmDeleteImage.id.substring(0, 12) : `${confirmDeleteImage.repository}:${confirmDeleteImage.tag}` })}
+              <div className="docker-confirm-del-hint">{t('dockerPanel.batchDeleteTypeDel')}</div>
+              <input
+                className="docker-confirm-input"
+                type="text"
+                placeholder={t('dockerPanel.batchDeleteInputPlaceholder')}
+                value={deleteImageInput}
+                onChange={(e) => setDeleteImageInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && deleteImageInput === 'del') handleDeleteImage(confirmDeleteImage)
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="docker-confirm-actions">
+              <button className="docker-btn" onClick={() => {
+                setConfirmDeleteImage(null)
+                setDeleteImageInput('')
+              }}>{t('dockerPanel.cancel')}</button>
+              <button className="docker-btn danger" onClick={() => handleDeleteImage(confirmDeleteImage)} disabled={deleteImageInput !== 'del'}>{t('dockerPanel.delete')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 批量删除容器确认对话框 */}
+      {batchDeleteConfirm && (
+        <div className="docker-modal-overlay">
+          <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="modal-close-btn"
+              onClick={() => {
+                setBatchDeleteConfirm(false)
+                setBatchDeleteConfirmInput('')
+              }}
+              title={t('dockerPanel.close')}
+            >×</button>
+            <div className="docker-confirm-title">{t('dockerPanel.batchDeleteTitle')}</div>
+            <div className="docker-confirm-msg">
+              {t('dockerPanel.batchDeleteConfirmMsg', { count: selectedIds.size, running: batchSelectedRunningCount })}
+              {batchSelectedRunningCount > 0 && <span className="docker-warn">{t('dockerPanel.forceRemoveWarn')}</span>}
+              <div className="docker-confirm-del-hint">{t('dockerPanel.batchDeleteTypeDel')}</div>
+              <input
+                className="docker-confirm-input"
+                type="text"
+                placeholder={t('dockerPanel.batchDeleteInputPlaceholder')}
+                value={batchDeleteConfirmInput}
+                onChange={(e) => setBatchDeleteConfirmInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && batchDeleteConfirmInput === 'del') handleBatchDelete()
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="docker-confirm-actions">
+              <button
+                className="docker-btn"
+                onClick={() => {
+                  setBatchDeleteConfirm(false)
+                  setBatchDeleteConfirmInput('')
+                }}
+              >{t('dockerPanel.cancel')}</button>
+              <button
+                className="docker-btn danger"
+                onClick={handleBatchDelete}
+                disabled={batchDeleteConfirmInput !== 'del'}
+              >{t('dockerPanel.delete')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 批量操作结果对话框 */}
+      {batchResult && (
+        <div className="docker-modal-overlay">
+          <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="modal-close-btn"
+              onClick={() => setBatchResult(null)}
+              title={t('dockerPanel.close')}
+            >×</button>
+            <div className="docker-confirm-title">{t('dockerPanel.batchResultTitle')}</div>
+            <div className="docker-batch-result-list">
+              {batchResult.results.map(r => (
+                <div key={r.id} className={`docker-batch-result-item ${r.ok ? 'ok' : 'fail'}`}>
+                  <span className="docker-batch-result-status">{r.ok ? '✓' : '✗'}</span>
+                  <span className="docker-batch-result-id">{r.id.substring(0, 12)}</span>
+                  <span className="docker-batch-result-msg" title={r.message}>{r.ok ? r.message : r.message}</span>
+                </div>
+              ))}
+            </div>
+            <div className="docker-confirm-actions">
+              <button className="docker-btn primary" onClick={() => setBatchResult(null)}>{t('dockerPanel.close')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 提交容器弹窗 */}
+      {commitContainer && (
+        <div className="docker-modal-overlay">
+          <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="modal-close-btn"
+              onClick={() => setCommitContainer(null)}
+              title={t('dockerPanel.close')}
+            >×</button>
+            <div className="docker-confirm-title">{t('dockerPanel.commitTitle', { name: commitContainer.name })}</div>
+            <div className="docker-confirm-msg">
+              <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.commitImageName')}</label>
+              <input
+                className="docker-pull-input"
+                value={commitImageName}
+                onChange={(e) => setCommitImageName(e.target.value)}
+                placeholder="myimage:v1.0"
+                disabled={committing}
+                style={{ marginBottom: '12px' }}
+              />
+              {commitMode !== 'export' && (
+                <>
+                  <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.commitMsgLabel')}</label>
+                  <input
+                    className="docker-pull-input"
+                    value={commitMessage}
+                    onChange={(e) => setCommitMessage(e.target.value)}
+                    placeholder={t('dockerPanel.commitMsgPlaceholder')}
+                    disabled={committing}
+                    style={{ marginBottom: '12px' }}
+                  />
+                </>
+              )}
+              <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.commitModeLabel')}</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', cursor: 'pointer' }}>
+                <input type="radio" name="commitMode" checked={commitMode === 'export'} onChange={() => setCommitMode('export')} disabled={committing} />
+                {t('dockerPanel.commitExport')}
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', cursor: 'pointer' }}>
+                <input type="radio" name="commitMode" checked={commitMode === 'clean'} onChange={() => setCommitMode('clean')} disabled={committing} />
+                {t('dockerPanel.commitCleanYes')}
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', cursor: 'pointer' }}>
+                <input type="radio" name="commitMode" checked={commitMode === 'direct'} onChange={() => setCommitMode('direct')} disabled={committing} />
+                {t('dockerPanel.commitCleanNo')}
+              </label>
+              <p style={{ fontSize: '12px', opacity: 0.7, margin: '4px 0 0 0' }}>
+                {commitMode === 'export' ? t('dockerPanel.commitExportHint') : t('dockerPanel.commitCleanHint')}
+              </p>
+              {commitMode === 'export' && (
+                <>
+                  <label style={{ display: 'block', marginTop: '12px', marginBottom: '8px' }}>{t('dockerPanel.commitExportCmd')}</label>
+                  <input
+                    className="docker-pull-input"
+                    value={commitExportCmd}
+                    onChange={(e) => setCommitExportCmd(e.target.value)}
+                    placeholder="nginx -g 'daemon off;'"
+                    disabled={committing}
+                    style={{ marginBottom: '12px' }}
+                  />
+                  <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.commitExportExpose')}</label>
+                  <input
+                    className="docker-pull-input"
+                    value={commitExportExpose}
+                    onChange={(e) => setCommitExportExpose(e.target.value)}
+                    placeholder="80/tcp, 443/tcp"
+                    disabled={committing}
+                  />
+                </>
+              )}
+            </div>
+            <div className="docker-confirm-actions">
+              <button className="docker-btn" onClick={() => setCommitContainer(null)} disabled={committing}>{t('dockerPanel.cancel')}</button>
+              <button className="docker-btn primary" onClick={handleCommit} disabled={committing || !commitImageName.trim()}>
+                {committing ? t('dockerPanel.committing') : t('dockerPanel.commit')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 加载镜像弹窗 */}
+      {loadImageModal && (
+        <div className="docker-modal-overlay">
+          <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="modal-close-btn"
+              onClick={() => setLoadImageModal(false)}
+              title={t('dockerPanel.close')}
+            >×</button>
+            <div className="docker-confirm-title">{t('dockerPanel.loadImageTitle')}</div>
+            <div className="docker-confirm-msg">
+              <label style={{ display: 'block', marginBottom: '8px' }}>{t('dockerPanel.loadImagePath')}</label>
+              <input
+                className="docker-pull-input"
+                value={loadImagePath}
+                onChange={(e) => setLoadImagePath(e.target.value)}
+                placeholder="/root/myimage.tar.gz"
+                onKeyDown={(e) => { if (e.key === 'Enter' && loadImagePath.trim()) handleLoadImage() }}
+                autoFocus
+              />
+              <p style={{ fontSize: '12px', opacity: 0.7, margin: '8px 0 0 0' }}>{t('dockerPanel.loadImageHint')}</p>
+            </div>
+            <div className="docker-confirm-actions">
+              <button className="docker-btn" onClick={() => setLoadImageModal(false)}>{t('dockerPanel.cancel')}</button>
+              <button className="docker-btn primary" onClick={handleLoadImage} disabled={!loadImagePath.trim()}>
+                {t('dockerPanel.loadImage')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 运行容器弹窗 */}
+      {runImageModal && (
+        <div className="docker-modal-overlay">
+          <div className="docker-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <button 
+              className="modal-close-btn"
+              onClick={() => {
+                setRunImageModal(null)
+                setRunCommand('')
+              }}
+              title={t('dockerPanel.close')}
+            >×</button>
+            <div className="docker-confirm-title">
+              {t('dockerPanel.runContainerTitle', { name: runImageModal.repository === '<none>' ? runImageModal.id.substring(0, 12) : `${runImageModal.repository}:${runImageModal.tag}` })}
+            </div>
+            <div className="docker-confirm-msg">
+              {t('dockerPanel.runArgsLabel')}
+            </div>
+            <textarea
+              className="docker-mirror-textarea"
+              value={runCommand}
+              onChange={(e) => setRunCommand(e.target.value)}
+              placeholder="-p 80:80 -d --name mycontainer"
+              rows={3}
+              style={{ marginTop: '12px', marginBottom: '12px' }}
+            />
+            <div className="docker-confirm-actions">
+              <button className="docker-btn" onClick={() => {
+                setRunImageModal(null)
+                setRunCommand('')
+              }}>{t('dockerPanel.cancel')}</button>
+              <button className="docker-btn primary" onClick={handleExecuteRun} disabled={runningContainer}>
+                {runningContainer ? t('dockerPanel.runningAction') : t('dockerPanel.runContainer')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
