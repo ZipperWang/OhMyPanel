@@ -645,7 +645,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
                       {t(`tunnel.types.${tunnel.tunnel_type}`)}
                     </span>
                   </td>
-                  <td style={{ fontFamily: 'monospace', fontSize: '13px', whiteSpace: 'nowrap' }}>
+                  <td style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', whiteSpace: 'nowrap' }}>
                     <span style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--accent)' }}>
                       {getTunnelEndpoint(tunnel)}
                     </span>
@@ -1110,7 +1110,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
               padding: '10px 12px',
               marginBottom: '12px',
               lineHeight: 1.7,
-              fontFamily: 'monospace',
+              fontFamily: 'var(--font-mono)',
             }}>
               {getTunnelDescription(deleteTarget)}
             </div>
@@ -1177,7 +1177,7 @@ export default function TunnelPanel({ sessionId, serverHost, connUsername: _conn
               padding: '10px 12px',
               marginBottom: '12px',
               lineHeight: 1.7,
-              fontFamily: 'monospace',
+              fontFamily: 'var(--font-mono)',
               maxHeight: '150px',
               overflowY: 'auto',
             }}>

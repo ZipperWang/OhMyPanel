@@ -874,7 +874,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                   <td>{db.name}</td>
                   <td>{db.user || db.name}</td>
                   <td>
-                    <span style={{ fontFamily: 'monospace' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>
                       {visiblePasswords.has(db.name) ? (
                         db.password || t('database.notSaved')
                       ) : (
@@ -1166,7 +1166,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                   }}
                   placeholder={t('database.ipPerLinePlaceholder')}
                   className="form-input"
-                  style={{ minHeight: '100px', resize: 'vertical' as const, fontFamily: 'monospace', fontSize: '13px' }}
+                  style={{ minHeight: '100px', resize: 'vertical' as const, fontFamily: 'var(--font-mono)', fontSize: '13px' }}
                 />
                 <small style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
                   {t('database.ipPerLineHint')}
@@ -1407,7 +1407,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                   }}
                   placeholder={t('database.ipPerLinePlaceholder')}
                   className="form-input"
-                  style={{ minHeight: '100px', resize: 'vertical' as const, fontFamily: 'monospace', fontSize: '13px' }}
+                  style={{ minHeight: '100px', resize: 'vertical' as const, fontFamily: 'var(--font-mono)', fontSize: '13px' }}
                 />
                 <small style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
                   {t('database.ipPerLineHint')}
@@ -1585,7 +1585,7 @@ export default function DatabasePanel({ sessionId, onNavigateToSoftware }: Datab
                   <tbody>
                     {backups.map((backup) => (
                       <tr key={backup.filename}>
-                        <td style={{ fontSize: '12px', fontFamily: 'monospace' }}>{backup.filename}</td>
+                        <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{backup.filename}</td>
                         <td style={{ fontSize: '12px' }}>{formatBytes(backup.size_bytes)}</td>
                         <td style={{ fontSize: '12px' }}>{backup.created_at}</td>
                         <td>

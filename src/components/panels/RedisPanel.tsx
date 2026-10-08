@@ -557,10 +557,10 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
                       onChange={() => toggleSelectKey(keyInfo.key)}
                     />
                   </td>
-                  <td style={{ fontFamily: 'monospace', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <td style={{ fontFamily: 'var(--font-mono)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {keyInfo.key}
                   </td>
-                  <td style={{ fontFamily: 'monospace', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <td style={{ fontFamily: 'var(--font-mono)', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {truncateValue(keyInfo.value_preview)}
                   </td>
                   <td>
@@ -782,7 +782,7 @@ export default function RedisPanel({ sessionId, onNavigateToSoftware }: RedisPan
                   <tbody>
                     {backups.map((backup, idx) => (
                       <tr key={idx}>
-                        <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{backup.filename}</td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{backup.filename}</td>
                         <td>{(backup.size_bytes / 1024 / 1024).toFixed(2)} MB</td>
                         <td>{backup.created_at}</td>
                       </tr>

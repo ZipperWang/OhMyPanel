@@ -1,7 +1,4 @@
 import { useState, useEffect, useRef, useCallback, type Ref } from 'react'
-import { invoke } from '@tauri-apps/api/core'
-import { useTranslation } from 'react-i18next'
-import { open } from '@tauri-apps/plugin-shell'
 import Dashboard from './panels/Dashboard'
 // ponytail：已移除 InstallLnmp
 // import InstallLnmp from './panels/InstallLnmp'
@@ -27,8 +24,9 @@ import type { TerminalHandle } from './Terminal'
 import { parseConnectionHost } from './terminal/terminalActions'
 import type { TerminalConnectionState, TerminalDimensions } from './terminal/types'
 import FileBrowser, { type FileBrowserHandle } from './FileBrowser'
+import { isPanelSection, type PanelSection } from './navigation'
 
-export type PanelSection = 'dashboard' | 'terminal' | 'files' | 'software' | 'nginx' | 'php' | 'sites' | 'logs' | 'ssl' | 'monitor' | 'firewall' | 'port' | 'tunnel' | 'bbr' | 'docker' | 'database' | 'redis' | 'update' | 'settings' | 'discussions'
+export type { PanelSection }
 
 interface AppSettings {
   auto_reconnect: boolean
@@ -47,7 +45,9 @@ interface ServerPanelProps {
   sessionId: string | null
   connHost?: string
   connUsername?: string
-  initialSection?: PanelSection
+  // ponytail：当前面板由 App 统一控制，导航栏位于全局侧边栏
+  section: PanelSection
+  onNavigate: (section: PanelSection) => void
   jumpToPath?: string | null
   setJumpToPath?: (path: string | null) => void
   termRef?: Ref<TerminalHandle>
@@ -56,7 +56,6 @@ interface ServerPanelProps {
   appSettings?: AppSettings
   onToggleAutoReconnect?: () => void
   onUpdateSettings?: (settings: Partial<AppSettings>) => Promise<void>
-  onShowToast?: (msg: string) => void
   isSessionActive?: boolean
   connectionState?: TerminalConnectionState
   onReconnect?: () => void
@@ -68,81 +67,32 @@ interface ServerPanelProps {
   onNextSession?: () => void
   onPreviousSession?: () => void
   onEditConnection?: () => void
-  onSectionChange?: (section: PanelSection) => void
   onTerminalDimensionsChange?: (dimensions: TerminalDimensions) => void
   onTerminalBackgroundOutput?: () => void
 }
 
-const NAV_ITEMS: { key: PanelSection; labelKey: string }[] = [
-  { key: 'dashboard', labelKey: 'nav.dashboard' },
-  { key: 'terminal', labelKey: 'nav.terminal' },
-  { key: 'files', labelKey: 'nav.files' },
-  { key: 'software', labelKey: 'nav.software' },
-  { key: 'sites', labelKey: 'nav.sites' },
-  { key: 'ssl', labelKey: 'nav.ssl' },
-  { key: 'docker', labelKey: 'nav.docker' },
-  { key: 'database', labelKey: 'nav.database' },
-  { key: 'redis', labelKey: 'nav.redis' },
-  { key: 'logs', labelKey: 'nav.logs' },
-  { key: 'monitor', labelKey: 'nav.monitor' },
-  { key: 'firewall', labelKey: 'nav.firewall' },
-  { key: 'port', labelKey: 'nav.port' },
-  { key: 'tunnel', labelKey: 'nav.tunnel' },
-  { key: 'bbr', labelKey: 'nav.bbr' },
-  { key: 'update', labelKey: 'nav.update' },
-  { key: 'settings', labelKey: 'nav.settings' },
-  { key: 'discussions', labelKey: 'nav.discussions' },
-]
-
-const isPanelSection = (section: string): section is PanelSection => NAV_ITEMS.some(item => item.key === section)
-
-export default function ServerPanel({ sessionId, connHost, connUsername, initialSection = 'dashboard', jumpToPath, setJumpToPath, termRef, onStartUpload, onUploadComplete, appSettings, onToggleAutoReconnect, onUpdateSettings, onShowToast, isSessionActive = true, connectionState, onReconnect, onCancelReconnect, onCloseSession, onNewSession, onDuplicateSession, onCloseOtherSessions, onNextSession, onPreviousSession, onEditConnection, onSectionChange, onTerminalDimensionsChange, onTerminalBackgroundOutput }: ServerPanelProps) {
-  const { t } = useTranslation()
+export default function ServerPanel({ sessionId, connHost, connUsername, section, onNavigate, jumpToPath, setJumpToPath, termRef, onStartUpload, onUploadComplete, appSettings, onToggleAutoReconnect, onUpdateSettings, isSessionActive = true, connectionState, onReconnect, onCancelReconnect, onCloseSession, onNewSession, onDuplicateSession, onCloseOtherSessions, onNextSession, onPreviousSession, onEditConnection, onTerminalDimensionsChange, onTerminalBackgroundOutput }: ServerPanelProps) {
   const terminalHandleRef = useRef<TerminalHandle | null>(null)
   const setTerminalHandle = useCallback((handle: TerminalHandle | null) => {
     terminalHandleRef.current = handle
     if (typeof termRef === 'function') termRef(handle)
     else if (termRef) termRef.current = handle
   }, [termRef])
-  const [activeSection, setActiveSectionRaw] = useState<PanelSection>(() => isPanelSection(initialSection) ? initialSection : 'dashboard')
-  const [mountedSections, setMountedSections] = useState<Set<PanelSection>>(() => new Set(['terminal', isPanelSection(initialSection) ? initialSection : 'dashboard']))
+  const activeSection: PanelSection = isPanelSection(section) ? section : 'dashboard'
+  const [mountedSections, setMountedSections] = useState<Set<PanelSection>>(() => new Set(['terminal', activeSection]))
   const cdHereRef = useRef<string | null>(null)
   const fileBrowserRef = useRef<FileBrowserHandle | null>(null)
-  const onSectionChangeRef = useRef(onSectionChange)
-  const sectionPersistenceRef = useRef<Promise<void>>(Promise.resolve())
 
+  // 懒挂载：首次访问某个面板后保持挂载，切换时保留状态
   useEffect(() => {
-    onSectionChangeRef.current = onSectionChange
-  }, [onSectionChange])
-
-  // ponytail：按服务器保存面板记忆，键为 lastPanel_${user}@${host}
-  const panelKey = connHost && connUsername ? `lastPanel_${connUsername}@${connHost}` : ''
-
-  // initialSection 变化时同步 activeSection（key 重挂载已能处理，但保留此逻辑作为安全保障）
-  useEffect(() => {
-    if (isPanelSection(initialSection)) {
-      setActiveSectionRaw(initialSection)
-      setMountedSections(previous => previous.has(initialSection) ? previous : new Set(previous).add(initialSection))
-    }
-  }, [initialSection])
-
-  useEffect(() => {
-    onSectionChangeRef.current?.(activeSection)
+    setMountedSections(previous => previous.has(activeSection) ? previous : new Set(previous).add(activeSection))
   }, [activeSection])
 
-  const setActiveSection = useCallback((key: PanelSection) => {
-    setMountedSections(previous => previous.has(key) ? previous : new Set(previous).add(key))
-    setActiveSectionRaw(key)
-    if (panelKey) {
-      sectionPersistenceRef.current = sectionPersistenceRef.current
-        .catch(() => {})
-        .then(() => invoke('ui_state_set', { key: panelKey, value: key }))
-        .then(() => undefined, () => undefined)
-    }
-  }, [panelKey])
+  const isMounted = (key: PanelSection) => activeSection === key || mountedSections.has(key)
+  const setActiveSection = onNavigate
 
-  const handleNavigate = (section: string) => {
-    if (isPanelSection(section)) setActiveSection(section)
+  const handleNavigate = (target: string) => {
+    if (isPanelSection(target)) setActiveSection(target)
   }
 
   // ponytail：移除连接后自动切换到终端的逻辑，让用户自行选择目标面板
@@ -244,22 +194,6 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
 
   return (
     <div className="server-panel">
-      <nav className="sp-nav">
-        {NAV_ITEMS.map(item => (
-          <button
-            key={item.key}
-            className={`sp-nav-item ${activeSection === item.key ? 'active' : ''}`}
-            onClick={() => {
-              if (item.key === 'discussions') { open('https://github.com/ZipperWang/OhMyPanel/discussions'); return }
-              // ponytail：没有会话时显示 Toast 提示，而不是禁用导航项
-              if (!sessionId) { onShowToast?.(t('common.connectFirst')); return }
-              setActiveSection(item.key)
-            }}
-          >
-            <span className="sp-nav-label">{t(item.labelKey)}</span>
-          </button>
-        ))}
-      </nav>
       <div className={`sp-content ${activeSection === 'terminal' ? 'terminal-page' : ''}`}>
         <div className={`terminal-panel-slot ${activeSection === 'terminal' ? 'active' : ''}`}>
           <Terminal
@@ -282,16 +216,16 @@ export default function ServerPanel({ sessionId, connHost, connUsername, initial
             onBackgroundOutput={onTerminalBackgroundOutput}
           />
         </div>
-        {mountedSections.has('files') && <div style={{ display: activeSection === 'files' ? 'block' : 'none', height: '100%' }}>
+        {isMounted('files') && <div style={{ display: activeSection === 'files' ? 'block' : 'none', height: '100%' }}>
           <FileBrowser sessionId={sessionId} connHost={connHost} jumpToPath={jumpToPath} ref={fileBrowserRef} onCdHere={handleCdHere} onStartUpload={onStartUpload} onNavigateToSoftware={() => setActiveSection('software')} />
         </div>}
-        {mountedSections.has('sites') && <div style={{ display: activeSection === 'sites' ? 'block' : 'none', height: '100%' }}>
+        {isMounted('sites') && <div style={{ display: activeSection === 'sites' ? 'block' : 'none', height: '100%' }}>
           <SitesPanel sessionId={sessionId} onOpenFolder={handleInternalOpenFolder} visible={activeSection === 'sites'} onNavigateToSoftware={() => setActiveSection('software')} />
         </div>}
-        {mountedSections.has('software') && <div style={{ display: activeSection === 'software' ? 'block' : 'none', height: '100%' }}>
+        {isMounted('software') && <div style={{ display: activeSection === 'software' ? 'block' : 'none', height: '100%' }}>
           <SoftwareRepo sessionId={sessionId} />
         </div>}
-        {mountedSections.has('update') && <div style={{ display: activeSection === 'update' ? 'block' : 'none', height: '100%' }}>
+        {isMounted('update') && <div style={{ display: activeSection === 'update' ? 'block' : 'none', height: '100%' }}>
           <UpdatePanel />
         </div>}
         {activeSection !== 'terminal' && activeSection !== 'files' && activeSection !== 'sites' && activeSection !== 'software' && activeSection !== 'update' && renderContent()}

@@ -128,7 +128,13 @@
     "showPassword": "Passwort anzeigen",
     "hidePassword": "Passwort verbergen",
     "deleteConfirmMsg": "{{name}} löschen?",
-    "language": "Sprache"
+    "language": "Sprache",
+    "expand": "Seitenleiste ausklappen",
+    "collapse": "Seitenleiste einklappen",
+    "selectServer": "Server auswählen",
+    "serverCount": "{{count}} gespeicherte Server",
+    "connected": "Verbunden",
+    "notConnected": "Nicht verbunden"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -150,6 +156,13 @@
     "update": "Update",
     "settings": "Einstellungen",
     "discussions": "Diskussionen"
+  },
+  "navGroup": {
+    "overview": "Übersicht",
+    "workspace": "Arbeitsbereich",
+    "apps": "Anwendungen",
+    "network": "Netzwerk & Sicherheit",
+    "system": "System"
   },
   "terminal": {
     "status": {
@@ -1157,5 +1170,11 @@
     "fromDate": "Von Datum/Zeit",
     "toDate": "Bis Datum/Zeit",
     "clearDateRange": "Datumsbereich löschen"
+  },
+  "home": {
+    "title": "Server",
+    "subtitle": "Wählen Sie einen Server zum Verbinden oder fügen Sie einen neuen hinzu.",
+    "emptyTitle": "Noch keine Server",
+    "emptyHint": "Fügen Sie Ihren ersten Server per SSH hinzu, um zu beginnen."
   }
 }

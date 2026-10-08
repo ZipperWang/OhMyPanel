@@ -1,0 +1,1040 @@
+/* =====================================================================
+   面板统一层：把各面板历史遗留的组件类映射到新的设计系统。
+   本文件在 App.css 之后加载，只覆盖视觉属性（颜色/边框/圆角/间距/字号），
+   尽量不改动布局属性，避免影响面板内部结构。
+   ===================================================================== */
+
+/* ----- 面板容器：统一宽度与留白 ----- */
+.sp-dashboard,
+.panel-container,
+.docker-panel,
+.firewall-panel,
+.monitor-panel,
+.svc-panel,
+.sites-panel,
+.sw-panel,
+.sp-page,
+.settings-panel,
+.ssl-panel,
+.site-logs-panel,
+.install-lnmp {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+  padding: 0;
+}
+
+.settings-panel,
+.ssl-panel {
+  gap: 16px;
+}
+
+/* ----- 页面标题 ----- */
+.panel-header,
+.docker-header,
+.firewall-header,
+.monitor-header,
+.svc-header,
+.sites-header,
+.sw-header,
+.install-header,
+.edit-site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 36px;
+  margin-bottom: 20px;
+}
+
+.panel-header h2,
+.docker-header h2,
+.firewall-header h2,
+.monitor-header h2,
+.svc-header h2,
+.sites-header h2,
+.sw-header h2,
+.site-logs-title,
+.install-header h2,
+.edit-site-header h2,
+.settings-panel-title,
+.sp-page > h2 {
+  margin: 0 !important;
+  font-size: 20px !important;
+  font-weight: 650 !important;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--text-heading) !important;
+}
+
+.settings-panel-title {
+  margin-bottom: 4px !important;
+}
+
+.sp-page > h2 {
+  margin-bottom: 20px !important;
+}
+
+/* ----- 卡片 ----- */
+.sp-card,
+.settings-card,
+.sw-card,
+.sw-sources-card,
+.site-card,
+.fw-stat-card,
+.docker-status-card,
+.monitor-gauge-card,
+.monitor-info-card,
+.monitor-chart-card,
+.monitor-processes-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+}
+
+.sp-card {
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+
+.sp-card-title,
+.monitor-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-heading);
+}
+
+.settings-card {
+  overflow: hidden;
+}
+
+.settings-card-header {
+  padding: 14px 18px;
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.settings-card-body {
+  padding: 16px 18px;
+}
+
+.sw-card,
+.site-card {
+  padding: 16px;
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+
+.sw-card:hover,
+.site-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.sw-card.installed,
+.site-card.running,
+.site-card.stopped {
+  background: var(--bg-panel);
+  border-color: var(--border);
+}
+
+.site-card.stopped {
+  background: var(--bg-subtle);
+}
+
+.sw-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+/* 分组标题（软件分类等） */
+.sw-category-title,
+.sw-section-title,
+.settings-section-header {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+/* ----- 按钮：次要（默认）----- */
+:is(
+  .sw-action-btn, .svc-cfg-btn, .fb-dialog-btn, .docker-btn, .docker-action-btn,
+  .btn-primary, .btn-secondary, .btn-danger, .upload-btn, .sp-refresh-btn, .sp-retry-btn,
+  .firewall-refresh, .firewall-add-btn, .firewall-submit-btn, .firewall-confirm-btn, .docker-refresh-btn,
+  .page-btn, .install-btn, .install-retry-btn, .install-reinstall-btn, .install-done-btn, .install-nav-btn,
+  .create-gen-btn, .back-btn, .svc-action-btn, .docker-mirror-preset-btn, .site-delete-btn, .delete-btn, .cancel-btn,
+  .modal-actions > button, .fb-editor-btn.save
+) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-strong);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+:is(
+  .sw-action-btn, .svc-cfg-btn, .fb-dialog-btn, .docker-btn, .docker-action-btn,
+  .btn-secondary, .upload-btn, .sp-refresh-btn, .sp-retry-btn,
+  .firewall-refresh, .firewall-confirm-btn, .docker-refresh-btn, .page-btn, .back-btn,
+  .create-gen-btn, .svc-action-btn, .docker-mirror-preset-btn, .cancel-btn, .modal-actions > button
+):hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
+  color: var(--text-heading);
+}
+
+:is(
+  .sw-action-btn, .svc-cfg-btn, .fb-dialog-btn, .docker-btn, .docker-action-btn,
+  .btn-primary, .btn-secondary, .btn-danger, .upload-btn, .sp-refresh-btn, .sp-retry-btn,
+  .firewall-refresh, .firewall-add-btn, .firewall-submit-btn, .firewall-confirm-btn, .docker-refresh-btn,
+  .page-btn, .install-btn, .install-retry-btn, .install-reinstall-btn, .install-done-btn, .install-nav-btn,
+  .create-gen-btn, .back-btn, .svc-action-btn, .docker-mirror-preset-btn, .site-delete-btn, .delete-btn, .cancel-btn,
+  .modal-actions > button
+):disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* 小号按钮 */
+.sw-action-btn.small,
+.docker-action-btn,
+.svc-cfg-btn,
+.page-btn {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+/* ----- 按钮：主要 ----- */
+:is(
+  .sw-action-btn, .svc-cfg-btn, .fb-dialog-btn, .docker-btn, .docker-action-btn, .modal-actions > button
+).primary,
+.btn-primary,
+.firewall-add-btn,
+.firewall-submit-btn,
+.install-btn,
+.install-done-btn,
+.install-nav-btn,
+.fb-editor-btn.save,
+.modal-actions > button.btn-primary,
+.page-btn.active {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--accent-contrast);
+}
+
+:is(
+  .sw-action-btn, .svc-cfg-btn, .fb-dialog-btn, .docker-btn, .docker-action-btn, .modal-actions > button
+).primary:hover:not(:disabled),
+.btn-primary:hover:not(:disabled),
+.firewall-add-btn:hover:not(:disabled),
+.firewall-submit-btn:hover:not(:disabled),
+.install-btn:hover:not(:disabled),
+.install-done-btn:hover:not(:disabled),
+.install-nav-btn:hover:not(:disabled),
+.fb-editor-btn.save:hover:not(:disabled) {
+  background: var(--accent-strong-hover);
+  border-color: var(--accent-strong-hover);
+  color: var(--accent-contrast);
+}
+
+/* ----- 按钮：危险 ----- */
+/* 卡片/行内的危险操作：描边样式，避免大面积红色 */
+:is(.sw-action-btn, .svc-cfg-btn, .docker-action-btn).danger,
+.site-delete-btn,
+.delete-btn {
+  background: var(--bg-panel);
+  border-color: var(--red-soft-strong);
+  color: var(--red);
+}
+
+:is(.sw-action-btn, .svc-cfg-btn, .docker-action-btn).danger:hover:not(:disabled),
+.site-delete-btn:hover:not(:disabled),
+.delete-btn:hover:not(:disabled) {
+  background: var(--red-soft);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* 对话框中的确认危险操作：实心 */
+:is(.fb-dialog-btn, .docker-btn, .firewall-confirm-btn, .modal-actions > button).danger,
+.btn-danger,
+.firewall-confirm-btn:not(.cancel) {
+  background: var(--red-strong);
+  border-color: var(--red-strong);
+  color: #fff;
+}
+
+:is(.fb-dialog-btn, .docker-btn, .firewall-confirm-btn, .modal-actions > button).danger:hover:not(:disabled),
+.btn-danger:hover:not(:disabled),
+.firewall-confirm-btn:not(.cancel):hover:not(:disabled) {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+
+.firewall-confirm-btn.cancel {
+  background: var(--bg-panel);
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+
+/* 文本链接按钮 */
+.action-link {
+  color: var(--accent);
+}
+
+/* ----- 输入控件 ----- */
+:is(
+  .form-input, .create-input, .create-select, .edit-field input, .edit-field select, .edit-field textarea,
+  .edit-textarea, .fb-dialog-input, .fb-prompt-input, .docker-pull-input, .docker-confirm-input, .docker-mirror-textarea,
+  .compress-name-input, .confirm-domain-input, .page-input, .page-size-select, .search-input, .search-type-select,
+  .settings-select, .settings-pubkey-textarea, .site-logs-date-input, .site-logs-lines-input, .site-logs-search-input,
+  .site-logs-select, .svc-log-select, .form-group input, .form-group select, .form-group textarea,
+  .firewall-form-group input, .firewall-form-group select, .select-box
+) {
+  min-height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-strong);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+
+:is(
+  .form-input, .create-input, .create-select, .edit-field input, .edit-field select, .edit-field textarea,
+  .edit-textarea, .fb-dialog-input, .fb-prompt-input, .docker-pull-input, .docker-confirm-input, .docker-mirror-textarea,
+  .compress-name-input, .confirm-domain-input, .page-input, .page-size-select, .search-input, .search-type-select,
+  .settings-select, .settings-pubkey-textarea, .site-logs-date-input, .site-logs-lines-input, .site-logs-search-input,
+  .site-logs-select, .svc-log-select, .form-group input, .form-group select, .form-group textarea,
+  .firewall-form-group input, .firewall-form-group select, .select-box
+):focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+:is(.edit-field, .form-group, .create-field, .firewall-form-group) > label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}
+
+.form-row .form-group {
+  flex: 1;
+}
+
+/* ----- 表格 ----- */
+:is(.data-table, .monitor-proc-table) {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+:is(.data-table, .monitor-proc-table) th {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: start;
+}
+
+:is(.data-table, .monitor-proc-table) td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+:is(.data-table, .monitor-proc-table) tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+:is(.data-table, .monitor-proc-table) tbody tr:hover td {
+  background: var(--bg-subtle);
+}
+
+.table-wrapper {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  overflow: auto;
+}
+
+.docker-table,
+.firewall-rules-table {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.docker-table-header,
+.firewall-table-header {
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.docker-table-row,
+.firewall-table-row {
+  border-bottom: 1px solid var(--border);
+}
+
+.docker-table-row:last-child,
+.firewall-table-row:last-child {
+  border-bottom: 0;
+}
+
+.docker-table-row:hover,
+.firewall-table-row:hover {
+  background: var(--bg-subtle);
+}
+
+.docker-table-row.selected {
+  background: var(--accent-soft);
+}
+
+/* ----- 标签页 ----- */
+.docker-tabs,
+.svc-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.docker-tab,
+.svc-tab {
+  margin-bottom: -1px;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.docker-tab:hover,
+.svc-tab:hover {
+  color: var(--text-strong);
+}
+
+.docker-tab.active,
+.svc-tab.active {
+  border-bottom-color: var(--accent-strong);
+  color: var(--text-heading);
+}
+
+/* ----- 开关 ----- */
+.toggle-track {
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+.toggle-thumb {
+  width: 16px !important;
+  height: 16px !important;
+  top: 2px !important;
+  left: 2px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.2);
+}
+
+.firewall-toggle.on .toggle-track {
+  background: var(--accent-strong);
+}
+
+.firewall-toggle.on .toggle-thumb {
+  left: 18px;
+  transform: none;
+}
+
+.toggle-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.firewall-toggle.on .toggle-label {
+  color: var(--text-strong);
+}
+
+/* ----- 遮罩与对话框 ----- */
+.modal-overlay,
+.fb-dialog-overlay,
+.sw-confirm-overlay,
+.docker-modal-overlay,
+.firewall-confirm-overlay {
+  background: var(--overlay);
+  backdrop-filter: blur(2px);
+}
+
+.modal-content,
+.fb-dialog,
+.sw-confirm-dialog,
+.docker-confirm-dialog,
+.docker-modal,
+.firewall-confirm-dialog {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.fb-dialog-title,
+.sw-confirm-title,
+.docker-confirm-title,
+.docker-modal-title,
+.modal-content > h3,
+.modal-content > h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.modal-close-btn,
+.docker-modal-close,
+.config-editor-close,
+.fb-delete-log-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal-close-btn:hover,
+.docker-modal-close:hover,
+.config-editor-close:hover,
+.fb-delete-log-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+/* ----- 提示 ----- */
+.alert {
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+.alert-error {
+  background: var(--red-bg);
+  border: 1px solid var(--red-soft-strong);
+  color: var(--red);
+}
+
+.alert-success {
+  background: var(--green-bg-soft);
+  border: 1px solid var(--green-soft-strong);
+  color: var(--green);
+}
+
+/* ----- 空状态 / 加载 ----- */
+.sp-empty,
+.sp-loading,
+.svc-loading,
+.docker-loading {
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+/* ----- 进度条 ----- */
+.sp-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.sp-progress-fill {
+  border-radius: 999px;
+}
+
+/* ----- 仪表盘 ----- */
+.dash-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.dash-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-xs);
+}
+
+.dash-stat-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.dash-stat-value {
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--text-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-stat-detail {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dash-meter {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.dash-meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s var(--ease);
+}
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+  margin-bottom: 0;
+}
+
+.dash-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-info-row {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.dash-info-row:last-child {
+  border-bottom: 0;
+}
+
+.dash-info-row dt {
+  width: 88px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.dash-info-row dd {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dash-services {
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-service {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.dash-service:last-child {
+  border-bottom: 0;
+}
+
+.dash-service-name {
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.dash-service-version {
+  flex: 1;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dash-pill {
+  margin-inline-start: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.dash-pill.ok {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.dash-pill.off {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+}
+
+.dash-disks {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dash-disk {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dash-disk-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.dash-disk-mount {
+  font-weight: 600;
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+}
+
+.dash-disk-fs {
+  flex: 1;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dash-disk-usage {
+  font-size: 12.5px;
+}
+
+.dash-disk-pct {
+  min-width: 40px;
+  text-align: end;
+  font-weight: 600;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-about .sp-about-content p {
+  margin: 0 0 6px;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.dash-about .sp-about-content strong {
+  color: var(--text-strong);
+}
+
+.icon.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+/* ----- 站点 ----- */
+.sites-grid {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.sites-search {
+  min-height: 30px;
+  width: 220px;
+  border-color: var(--border-strong);
+  background: var(--bg-input);
+}
+
+.sites-search:focus {
+  box-shadow: var(--focus-ring);
+}
+
+.site-card-header {
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.site-domain {
+  min-width: 0;
+}
+
+.site-domain-text {
+  overflow: hidden;
+  font-size: 14px;
+  color: var(--text-heading);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.site-domain-text:hover {
+  color: var(--accent);
+}
+
+.site-ssl-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 10.5px;
+}
+
+.site-state {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.site-state.on {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.site-state.off {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+.site-root-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.site-root-link:hover {
+  text-decoration: underline;
+}
+
+.site-card-actions {
+  align-items: center;
+  margin-top: 4px;
+}
+
+.site-card-actions .site-delete-btn {
+  position: static;
+  margin-inline-start: auto;
+}
+
+/* ----- 防火墙 / 端口 ----- */
+.firewall-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.firewall-badge.active {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.firewall-badge.inactive {
+  background: var(--yellow-soft);
+  color: var(--yellow);
+}
+
+.firewall-badge.none {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+.firewall-table-row.expanded {
+  background: var(--bg-subtle);
+}
+
+.fw-col-ops {
+  flex: 0 0 72px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.fw-copy-btn,
+.fw-delete-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.fw-copy-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+.fw-stat-card {
+  padding: 14px 16px;
+}
+
+/* ----- 设置 ----- */
+.settings-grid {
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 16px;
+  max-width: none;
+}
+
+/* ----- 文件浏览器 ----- */
+.fb-btn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  box-shadow: var(--shadow-xs);
+}
+
+.fb-btn:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  color: var(--text-strong);
+}
+
+.fb-btn.fb-btn-favorites {
+  width: auto;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.fb-upload-btn {
+  background: var(--accent-strong);
+  box-shadow: 0 6px 16px -4px rgba(37, 99, 235, 0.45);
+}
+
+.fb-upload-btn:hover {
+  background: var(--accent-strong-hover);
+}
+
+/* ----- 日志 / SSL ----- */
+.site-logs-header {
+  padding: 0 0 16px;
+  border-bottom: 0;
+  gap: 14px;
+}
+
+.ssl-panel > .panel-header {
+  margin-bottom: 4px;
+}
+
+/* ----- 欢迎弹窗 ----- */
+.welcome-overlay {
+  background: var(--overlay);
+  backdrop-filter: blur(2px);
+}
+
+.welcome-modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+}
+
+.welcome-close-btn {
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.welcome-close-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+.welcome-icon {
+  background: linear-gradient(135deg, #2563eb 0%, #16b8c4 100%);
+  box-shadow: 0 10px 24px -8px rgba(37, 99, 235, 0.45);
+}
+
+/* ----- 上传面板 ----- */
+.upload-panel {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.upload-panel-header {
+  padding: 10px 14px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.upload-progress-fill {
+  background: var(--accent-strong);
+}

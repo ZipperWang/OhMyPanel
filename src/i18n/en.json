@@ -128,7 +128,13 @@
     "showPassword": "Show password",
     "hidePassword": "Hide password",
     "deleteConfirmMsg": "Delete {{name}}?",
-    "language": "Language"
+    "language": "Language",
+    "expand": "Expand sidebar",
+    "collapse": "Collapse sidebar",
+    "selectServer": "Select a server",
+    "serverCount": "{{count}} saved servers",
+    "connected": "Connected",
+    "notConnected": "Not connected"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -150,6 +156,13 @@
     "update": "Update",
     "settings": "Settings",
     "discussions": "Discussions"
+  },
+  "navGroup": {
+    "overview": "Overview",
+    "workspace": "Workspace",
+    "apps": "Applications",
+    "network": "Network & Security",
+    "system": "System"
   },
   "terminal": {
     "status": {
@@ -1157,5 +1170,11 @@
     "fromDate": "From date/time",
     "toDate": "To date/time",
     "clearDateRange": "Clear date range"
+  },
+  "home": {
+    "title": "Servers",
+    "subtitle": "Choose a server to connect, or add a new one.",
+    "emptyTitle": "No servers yet",
+    "emptyHint": "Add your first server over SSH to get started."
   }
 }

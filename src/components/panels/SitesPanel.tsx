@@ -190,14 +190,6 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
     <div className="sites-panel">
       <div className="sites-header">
         <h2>{t('sites.title')}</h2>
-        {view !== 'create' && (
-          <button
-            className="svc-cfg-btn primary"
-            onClick={() => setView('create')}
-          >
-            {t('sites.newSite')}
-          </button>
-        )}
         <div className="sites-header-actions">
           <input
             type="text"
@@ -214,6 +206,14 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
           >
             {loading ? t('common.loading') : t('common.refresh')}
           </button>
+          {view !== 'create' && (
+            <button
+              className="svc-cfg-btn primary"
+              onClick={() => setView('create')}
+            >
+              {t('sites.newSite')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -275,7 +275,6 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
                     <div className="site-domain">
                       <span
                         className="site-domain-text"
-                        style={{ cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dashed' }}
                         onClick={() => openEdit(site)}
                         title="Click to edit site"
                       >
@@ -283,6 +282,9 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
                       </span>
                       {site.ssl && <span className="site-ssl-badge">SSL</span>}
                     </div>
+                    <span className={`site-state ${site.enabled ? 'on' : 'off'}`}>
+                      {site.enabled ? t('common.running') : t('common.stopped')}
+                    </span>
                   </div>
                   <div className="site-card-body">
                     <div className="site-info-row">
@@ -300,24 +302,22 @@ export default function SitesPanel({ sessionId, onOpenFolder, visible, onNavigat
                   </div>
                   <div className="site-card-actions">
                     <button
-                      className="svc-cfg-btn"
-                      style={!site.enabled ? { background: 'var(--green-bg)', color: '#fff', border: '1px solid var(--green-strong)' } : {}}
+                      className={`svc-cfg-btn ${site.enabled ? '' : 'primary'}`}
                       onClick={() => handleToggle(site, !site.enabled)}
                     >
                       {site.enabled ? t('common.stop') : t('common.start')}
                     </button>
-                    <button className="svc-cfg-btn" style={{ background: 'var(--green-bg)', color: '#fff', border: '1px solid var(--green-strong)' }} onClick={() => openEdit(site)}>
+                    <button className="svc-cfg-btn" onClick={() => openEdit(site)}>
                       {t('common.edit')}
                     </button>
+                    <button
+                      className="svc-cfg-btn danger site-delete-btn"
+                      onClick={() => { setDeleteTarget(site); setRemoveFiles(false) }}
+                      title={t('common.delete')}
+                    >
+                      {t('common.delete')}
+                    </button>
                   </div>
-                  {/* 删除按钮，位于右下角 */}
-                  <button
-                    className="site-delete-btn"
-                    onClick={() => { setDeleteTarget(site); setRemoveFiles(false) }}
-                    title={t('common.delete')}
-                  >
-                    {t('common.delete')}
-                  </button>
                 </div>
               ))}
             </div>

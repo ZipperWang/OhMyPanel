@@ -124,8 +124,8 @@ export default function SslPanel({ sessionId }: SslPanelProps) {
 
   return (
     <div className="ssl-panel">
-      <div className="sp-section-header">
-        <h3>{t('ssl.title')}</h3>
+      <div className="panel-header">
+        <h2>{t('ssl.title')}</h2>
         <button className="svc-cfg-btn" onClick={fetchSites} disabled={loading}>
           {loading ? t('common.loading') : t('common.refresh')}
         </button>
@@ -156,8 +156,7 @@ export default function SslPanel({ sessionId }: SslPanelProps) {
             {!site.ssl && (
               <div className="site-card-actions">
                 <button
-                  className="svc-cfg-btn"
-                  style={{ background: 'var(--green-bg)', color: '#fff', border: '1px solid var(--green-strong)' }}
+                  className="svc-cfg-btn primary"
                   onClick={() => handleInstall(site.domain)}
                   disabled={logs[site.domain]?.status === 'installing'}
                 >

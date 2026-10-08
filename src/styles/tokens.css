@@ -1,0 +1,119 @@
+/* ===== 设计令牌：浅色为默认，深色通过 [data-theme="dark"] 覆盖 ===== */
+:root {
+  color-scheme: light;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Cascadia Mono", "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", "Microsoft YaHei Mono", monospace;
+
+  /* 表面 */
+  --bg: #f5f6f8;
+  --bg-panel: #ffffff;
+  --bg-subtle: #f1f2f5;
+  --bg-hover: #eceef2;
+  --bg-input: #ffffff;
+  --bg-sidebar: #fafafb;
+  --bg-code: #f6f7f9;
+
+  /* 边框 */
+  --border: #e4e6eb;
+  --border-strong: #d4d7de;
+  --border-color: var(--border);
+
+  /* 文本 */
+  --text: #1f2329;
+  --text-muted: #5d6470;
+  --text-dim: #6b7280;
+  --text-faint: #9ba1ab;
+  --text-strong: #111418;
+  --text-heading: #0c0e12;
+
+  /* 品牌色 */
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-strong: #2563eb;
+  --accent-strong-hover: #1d4ed8;
+  --accent-soft: rgba(37, 99, 235, 0.08);
+  --accent-soft-strong: rgba(37, 99, 235, 0.16);
+  --accent-contrast: #ffffff;
+
+  /* 语义色 */
+  --green: #16a34a;
+  --green-strong: #15803d;
+  --green-bg: #16a34a;
+  --green-bg-soft: #effaf3;
+  --green-soft: rgba(22, 163, 74, 0.1);
+  --green-soft-strong: rgba(22, 163, 74, 0.32);
+  --red: #dc2626;
+  --red-strong: #dc2626;
+  --red-bg: #fef2f2;
+  --red-soft: rgba(220, 38, 38, 0.09);
+  --red-soft-strong: rgba(220, 38, 38, 0.32);
+  --yellow: #d97706;
+  --yellow-bg: #fffbeb;
+  --yellow-soft: rgba(217, 119, 6, 0.12);
+
+  /* 形状与阴影 */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 1px rgba(16, 24, 40, 0.03);
+  --shadow-lg: 0 16px 40px -12px rgba(16, 24, 40, 0.22), 0 4px 10px -4px rgba(16, 24, 40, 0.08);
+  --overlay: rgba(17, 20, 26, 0.42);
+  --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.18);
+
+  --sidebar-width: 236px;
+  --sidebar-collapsed-width: 64px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0e1013;
+  --bg-panel: #16181d;
+  --bg-subtle: #1c1f25;
+  --bg-hover: #23272e;
+  --bg-input: #111317;
+  --bg-sidebar: #121418;
+  --bg-code: #111317;
+
+  --border: #262a31;
+  --border-strong: #343944;
+
+  --text: #d5d8de;
+  --text-muted: #9aa1ac;
+  --text-dim: #8b929d;
+  --text-faint: #626975;
+  --text-strong: #eceef1;
+  --text-heading: #f5f6f8;
+
+  --accent: #5b9cf8;
+  --accent-hover: #80b3fa;
+  --accent-strong: #3b82f6;
+  --accent-strong-hover: #2f74e6;
+  --accent-soft: rgba(91, 156, 248, 0.1);
+  --accent-soft-strong: rgba(91, 156, 248, 0.2);
+
+  --green: #34c46a;
+  --green-strong: #22a556;
+  --green-bg: #1e9e50;
+  --green-bg-soft: #102418;
+  --green-soft: rgba(52, 196, 106, 0.12);
+  --green-soft-strong: rgba(52, 196, 106, 0.36);
+  --red: #f26464;
+  --red-strong: #e04444;
+  --red-bg: #2a1517;
+  --red-soft: rgba(242, 100, 100, 0.12);
+  --red-soft-strong: rgba(242, 100, 100, 0.38);
+  --yellow: #f2a93b;
+  --yellow-bg: #2a2111;
+  --yellow-soft: rgba(242, 169, 59, 0.14);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 20px 48px -12px rgba(0, 0, 0, 0.6), 0 4px 12px -4px rgba(0, 0, 0, 0.4);
+  --overlay: rgba(0, 0, 0, 0.58);
+  --focus-ring: 0 0 0 3px rgba(91, 156, 248, 0.25);
+}

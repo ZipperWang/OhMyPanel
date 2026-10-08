@@ -128,7 +128,13 @@
     "showPassword": "显示密码",
     "hidePassword": "隐藏密码",
     "deleteConfirmMsg": "删除 {{name}}？",
-    "language": "语言"
+    "language": "语言",
+    "expand": "展开侧边栏",
+    "collapse": "收起侧边栏",
+    "selectServer": "选择服务器",
+    "serverCount": "已保存 {{count}} 台服务器",
+    "connected": "已连接",
+    "notConnected": "未连接"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -150,6 +156,13 @@
     "update": "更新",
     "settings": "设置",
     "discussions": "讨论"
+  },
+  "navGroup": {
+    "overview": "概览",
+    "workspace": "工作区",
+    "apps": "应用",
+    "network": "网络与安全",
+    "system": "系统"
   },
   "terminal": {
     "status": {
@@ -1157,5 +1170,11 @@
     "fromDate": "起始日期/时间",
     "toDate": "结束日期/时间",
     "clearDateRange": "清除日期范围"
+  },
+  "home": {
+    "title": "服务器",
+    "subtitle": "选择一台服务器开始连接，或添加新的服务器。",
+    "emptyTitle": "还没有服务器",
+    "emptyHint": "通过 SSH 添加第一台服务器即可开始使用。"
   }
 }

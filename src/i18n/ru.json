@@ -128,7 +128,13 @@
     "showPassword": "Показать пароль",
     "hidePassword": "Скрыть пароль",
     "deleteConfirmMsg": "Удалить {{name}}?",
-    "language": "Язык"
+    "language": "Язык",
+    "expand": "Развернуть боковую панель",
+    "collapse": "Свернуть боковую панель",
+    "selectServer": "Выберите сервер",
+    "serverCount": "Сохранено серверов: {{count}}",
+    "connected": "Подключено",
+    "notConnected": "Не подключено"
   },
   "nav": {
     "dashboard": "Панель управления",
@@ -150,6 +156,13 @@
     "update": "Обновление",
     "settings": "Настройки",
     "discussions": "Обсуждения"
+  },
+  "navGroup": {
+    "overview": "Обзор",
+    "workspace": "Рабочая область",
+    "apps": "Приложения",
+    "network": "Сеть и безопасность",
+    "system": "Система"
   },
   "terminal": {
     "status": {
@@ -1157,5 +1170,11 @@
     "fromDate": "С даты/времени",
     "toDate": "По дату/время",
     "clearDateRange": "Очистить диапазон дат"
+  },
+  "home": {
+    "title": "Серверы",
+    "subtitle": "Выберите сервер для подключения или добавьте новый.",
+    "emptyTitle": "Серверов пока нет",
+    "emptyHint": "Добавьте первый сервер по SSH, чтобы начать."
   }
 }

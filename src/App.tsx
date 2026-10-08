@@ -1,17 +1,26 @@
-import { useState, useEffect, useRef, useCallback, type CSSProperties, type RefCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, type RefCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { useTranslation } from 'react-i18next'
-import Sidebar from './components/Sidebar'
+import Sidebar, { type Connection as SidebarConnection } from './components/Sidebar'
+import ServerHome from './components/ServerHome'
+import type { ConnectionDraft } from './components/ConnectionDialog'
 import ServerPanel, { type PanelSection } from './components/ServerPanel'
+import { isPanelSection } from './components/navigation'
 import type { TerminalHandle } from './components/Terminal'
 import TerminalTabStrip from './components/terminal/TerminalTabStrip'
 import TerminalWorkspace from './components/terminal/TerminalWorkspace'
+import Icon from './components/icons'
 import { parseConnectionHost } from './components/terminal/terminalActions'
 import { clearTerminalOutput, ensureTerminalOutputBroker } from './components/terminal/terminalOutputBroker'
 import type { TerminalConnectionState, TerminalDimensions, TerminalSavedConnection, TerminalSessionTabModel } from './components/terminal/types'
 import './App.css'
+import './styles/tokens.css'
+import './styles/base.css'
+import './styles/ui.css'
+import './styles/shell.css'
+import './styles/overrides.css'
 
 interface UploadItem {
   file: File
@@ -30,18 +39,6 @@ interface UploadState {
   active: boolean
   paused: boolean
   workers: number
-}
-
-interface SidebarConnection {
-  id: string
-  name: string
-  host: string
-  port: number
-  username: string
-  auth_type: string
-  key_path?: string
-  password?: string
-  remember_me?: boolean
 }
 
 interface Settings {
@@ -151,7 +148,8 @@ function App() {
   const manualDisconnectSessionsRef = useRef(new Set<string>())
   // ponytail：主动发起正常重启的会话，在断开时跳过自动重连
   const normalRebootSessionsRef = useRef(new Set<string>())
-  const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0)
+  const [connections, setConnections] = useState<SidebarConnection[]>([])
+  const connectionsLoadIdRef = useRef(0)
   const sessionsRef = useRef<ActiveSession[]>([])
   const settingsRef = useRef(settings)
 
@@ -251,11 +249,38 @@ function App() {
     }
   }, [activeTabId])
 
-  // 可拖动分隔线
-  const [sidebarWidth, setSidebarWidth] = useState(240)
-  const [sidebarVisible, setSidebarVisible] = useState(true)
-  const draggingRef = useRef<'sidebar' | null>(null)
-  const splitContainerRef = useRef<HTMLDivElement>(null)
+  // 侧边栏折叠状态（仅保存在本机）
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('sidebar_collapsed') === '1' } catch { return false }
+  })
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed(previous => {
+      const next = !previous
+      try { localStorage.setItem('sidebar_collapsed', next ? '1' : '0') } catch { /* 忽略 */ }
+      return next
+    })
+  }
+
+  const sidebarCollapsedRef = useRef(sidebarCollapsed)
+  sidebarCollapsedRef.current = sidebarCollapsed
+
+  const loadConnections = useCallback(async () => {
+    const requestId = ++connectionsLoadIdRef.current
+    try {
+      const list = await invoke<SidebarConnection[]>('config_list')
+      if (requestId === connectionsLoadIdRef.current) setConnections(list)
+      return list
+    } catch {
+      return null
+    }
+  }, [])
+
+  // 首次加载：没有任何服务器时直接打开新建连接弹窗
+  useEffect(() => {
+    void loadConnections().then(list => {
+      if (list && list.length === 0) setNewConnectionRequestId(value => value + 1)
+    })
+  }, [loadConnections])
   useEffect(() => {
     const handleDisconnectRequest = (e: Event) => {
       const configId = (e as CustomEvent).detail?.configId
@@ -591,7 +616,7 @@ function App() {
 
   const [jumpToPath, setJumpToPath] = useState<string | null>(null)
 
-  const handleCreateConnection = async (data: { name: string; host: string; port: number; username: string; auth_type: string; key_path?: string; password?: string; remember_me?: boolean }) => {
+  const handleCreateConnection = async (data: ConnectionDraft) => {
   // 保存新连接
     await invoke('config_save', {
       connection: {
@@ -606,7 +631,7 @@ function App() {
         remember_me: data.remember_me || false,
       },
     })
-    setSidebarRefreshKey(k => k + 1)
+    await loadConnections()
   }
 
   const handleUpdateSettings = async (updates: Partial<Settings>) => {
@@ -617,34 +642,6 @@ function App() {
     await invoke('settings_save', { settings: newSettings }).catch(() => {})
   }
 
-
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (draggingRef.current === 'sidebar') {
-        const w = Math.max(150, Math.min(500, e.clientX))
-        setSidebarWidth(w)
-      }
-    }
-    const onMouseUp = () => {
-      if (draggingRef.current) {
-        draggingRef.current = null
-        document.body.style.cursor = ''
-        document.body.style.userSelect = ''
-      }
-    }
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup', onMouseUp)
-    }
-  }, [])
-
-  const startDrag = (type: 'sidebar') => {
-    draggingRef.current = type
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-  }
 
   // 挂载时加载设置
   useEffect(() => {
@@ -828,7 +825,7 @@ function App() {
       setError('')
       const hostKey = `${conn.host}_${conn.port}`
       const panelKey = `lastPanel_${username}@${hostKey}`
-      const estCols = Math.max(80, Math.floor((window.innerWidth - (sidebarVisible ? sidebarWidth + 10 : 40) - 20) / 8.4))
+      const estCols = Math.max(80, Math.floor((window.innerWidth - (sidebarCollapsedRef.current ? 64 : 240) - 40) / 8.4))
       const estRows = Math.max(24, Math.floor((window.innerHeight - 100) / 17))
       try {
         clearReconnectState(tabId)
@@ -842,7 +839,7 @@ function App() {
         }
         const savedPanelValue = await invoke<string>('ui_state_get', { key: panelKey }).catch(() => '')
         if (!connectingTabIdsRef.current.has(tabId)) return
-        const savedPanel = (savedPanelValue || 'dashboard') as PanelSection
+        const savedPanel: PanelSection = isPanelSection(savedPanelValue) ? savedPanelValue : 'dashboard'
         const placeholder: ActiveSession = {
           tabId,
           configId: conn.id,
@@ -922,7 +919,7 @@ function App() {
         if (conn.auth_type === 'password') {
           try {
             await invoke('ssh_provision_managed_key', { sessionId: sid, connectionId: conn.id })
-            setSidebarRefreshKey(k => k + 1)
+            void loadConnections()
           } catch (provisionError) {
             setToast(`SSH key setup failed: ${String(provisionError)}`)
           }
@@ -971,7 +968,7 @@ function App() {
     }
 
     void doConnect(conn.username, password, keyPath)
-  }, [sidebarVisible, sidebarWidth])
+  }, [loadConnections])
 
   const handleSelectConnection = (conn: SidebarConnection) => {
     const existing = sessionsRef.current.find(session => session.tabId === activeTabIdRef.current && session.configId === conn.id)
@@ -1003,12 +1000,10 @@ function App() {
   }, [handleDirectConnect])
 
   const requestNewSession = () => {
-    setSidebarVisible(true)
     setNewConnectionRequestId(value => value + 1)
   }
 
   const requestEditConnection = (configId: string) => {
-    setSidebarVisible(true)
     setEditConnectionRequest({ id: configId, requestId: Date.now() })
   }
 
@@ -1087,6 +1082,19 @@ function App() {
     })
   }
 
+  // ponytail：切换面板并按服务器记忆，键为 lastPanel_${user}@${host}
+  const sectionPersistenceRef = useRef<Promise<void>>(Promise.resolve())
+  const navigateSession = (tabId: string, section: PanelSection) => {
+    updateSessionSection(tabId, section)
+    const session = sessionsRef.current.find(item => item.tabId === tabId)
+    if (!session) return
+    const panelKey = `lastPanel_${session.username}@${session.hostKey}`
+    sectionPersistenceRef.current = sectionPersistenceRef.current
+      .catch(() => {})
+      .then(() => invoke('ui_state_set', { key: panelKey, value: section }))
+      .then(() => undefined, () => undefined)
+  }
+
   const updateTerminalDimensions = (tabId: string, dimensions: TerminalDimensions) => {
     setTerminalDimensions(prev => {
       const current = prev.get(tabId)
@@ -1156,90 +1164,87 @@ function App() {
     (!terminalOwnsConnectionStatus && (reconnectingSessions.has(activeTabId || '') || toast || isDisconnected))
   )
 
+  const navigateActive = (section: PanelSection) => {
+    if (activeTabId) navigateSession(activeTabId, section)
+  }
+
   return (
-    <div className="app">
-      {sidebarVisible && (
-        <>
-          <div className="sidebar-shell" style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
-            <Sidebar
-              onSelect={handleSelectConnection}
-              onConnect={handleSidebarConnect}
-              onNew={() => {}}
-              onCreateConnection={handleCreateConnection}
-              refreshKey={sidebarRefreshKey}
-              connectedIds={connectedServerIds}
-              connectingIds={connectingServerIds}
-              activeConfigId={activeSession?.configId ?? null}
-              newConnectionRequestId={newConnectionRequestId}
-              editConnectionRequest={editConnectionRequest}
-              onNewConnectionRequestHandled={requestId => setNewConnectionRequestId(current => current === requestId ? 0 : current)}
-              onEditConnectionRequestHandled={requestId => setEditConnectionRequest(current => current?.requestId === requestId ? null : current)}
-            />
-            {/* 侧边栏切换按钮 */}
-            <button 
-              className="sidebar-toggle-btn visible"
-              onClick={() => setSidebarVisible(false)}
-              title={t('common.hidePanel')}
-            >
-              HIDE
-            </button>
-          </div>
-          <div
-            className="v-divider"
-            onMouseDown={() => startDrag('sidebar')}
-          />
-        </>
-      )}
-      {!sidebarVisible && (
-        <button 
-          className="sidebar-toggle-btn hidden"
-          onClick={() => setSidebarVisible(true)}
-          title={t('common.showPanel')}
-        >
-          SHOW
-        </button>
-      )}
-      <div className="main-area">
+    <div className={`app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <Sidebar
+        connections={connections}
+        onConnectionsChanged={async () => { await loadConnections() }}
+        onSelect={handleSelectConnection}
+        onConnect={handleSidebarConnect}
+        onCreateConnection={handleCreateConnection}
+        connectedIds={connectedServerIds}
+        connectingIds={connectingServerIds}
+        activeConfigId={activeSession?.configId ?? null}
+        section={activePanelSection}
+        navEnabled={activeSession !== null}
+        onNavigate={navigateActive}
+        onNavigateBlocked={() => showToast(t('common.connectFirst'))}
+        theme={settings.theme}
+        onToggleTheme={() => void handleUpdateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' })}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={toggleSidebarCollapsed}
+        newConnectionRequestId={newConnectionRequestId}
+        editConnectionRequest={editConnectionRequest}
+        onNewConnectionRequestHandled={requestId => setNewConnectionRequestId(current => current === requestId ? 0 : current)}
+        onEditConnectionRequestHandled={requestId => setEditConnectionRequest(current => current?.requestId === requestId ? null : current)}
+      />
+      <main className="main-area">
         {showTopBar && <div className="top-bar">
-          {error && <div className="error-bar">{error}</div>}
+          {error && <div className="notice-bar danger">{error}</div>}
           {!terminalOwnsConnectionStatus && activeTabId && reconnectingSessions.has(activeTabId) && (() => {
             const info = reconnectingSessions.get(activeTabId)!
             return (
-              <div className="toast-bar">
-                <span>↻ [{info.name}] {t('common.reconnectAttempt', { attempt: info.attempt, max: settings.max_reconnect_attempts })}</span>
-                <button className="toast-stop-btn" onClick={() => cancelReconnect(activeTabId)}>{t('common.stop')}</button>
+              <div className="notice-bar warning">
+                <span className="notice-spinner" />
+                <span>[{info.name}] {t('common.reconnectAttempt', { attempt: info.attempt, max: settings.max_reconnect_attempts })}</span>
+                <button className="ui-btn sm" onClick={() => cancelReconnect(activeTabId)}>{t('common.stop')}</button>
               </div>
             )
           })()}
           {!terminalOwnsConnectionStatus && toast && !reconnectingSessions.has(activeTabId || '') && !isDisconnected && (
-            <div className="toast-bar">
-              <span>{toast}</span>
-            </div>
+            <div className="notice-bar info"><span>{toast}</span></div>
           )}
           {!terminalOwnsConnectionStatus && isDisconnected && (
-            <div className="toast-bar disconnected-bar">{t('common.disconnectedBanner')}</div>
+            <div className="notice-bar danger">
+              <span>{t('common.disconnectedBanner')}</span>
+              {activeTabId && <button className="ui-btn sm" onClick={() => void reconnectSession(activeTabId)}>{t('common.connect')}</button>}
+            </div>
           )}
           {pendingUpdate && (
-            <div className="update-ready-bar">
+            <div className="notice-bar info">
               <span>Update v{pendingUpdate.version} ready</span>
-              <button className="update-restart-btn" onClick={async () => { await pendingUpdate.install() }}>Restart Now</button>
+              <button className="ui-btn primary sm" onClick={async () => { await pendingUpdate.install() }}>Restart Now</button>
             </div>
           )}
         </div>}
-        
+
         {/* 错误对话框 */}
         {errorDialog?.visible && (
-          <div className="error-dialog-overlay" onClick={() => setErrorDialog(null)}>
-            <div className="error-dialog" onClick={(e) => e.stopPropagation()}>
-              <button className="error-dialog-close" onClick={() => setErrorDialog(null)}>×</button>
-              <div className="error-dialog-title">{t('errorDialog.connectionFailed')}</div>
-              <div className="error-dialog-message">{errorDialog.message}</div>
-              <button className="error-dialog-btn" onClick={() => setErrorDialog(null)}>{t('common.close')}</button>
+          <div className="ui-overlay" onClick={() => setErrorDialog(null)}>
+            <div className="ui-dialog sm" onClick={(e) => e.stopPropagation()}>
+              <div className="ui-dialog-header">
+                <div className="ui-dialog-title">
+                  <span className="ui-dialog-icon danger"><Icon name="power" size={16} /></span>
+                  {t('errorDialog.connectionFailed')}
+                </div>
+                <button className="ui-icon-btn" onClick={() => setErrorDialog(null)} aria-label={t('common.close')}><Icon name="x" /></button>
+              </div>
+              <div className="ui-dialog-body">
+                <p className="ui-dialog-text">{errorDialog.message}</p>
+              </div>
+              <div className="ui-dialog-footer">
+                <span className="ui-spacer" />
+                <button className="ui-btn primary" onClick={() => setErrorDialog(null)}>{t('common.close')}</button>
+              </div>
             </div>
           </div>
         )}
-        <TerminalWorkspace terminalMode={activePanelSection === 'terminal'} tabStrip={terminalTabStrip}>
-          <div className="split-container" ref={splitContainerRef}>
+        <TerminalWorkspace terminalMode={activePanelSection === 'terminal' && activeSession !== null} tabStrip={terminalTabStrip}>
+          <div className="split-container">
             <div className="split-full">
               {sessions.map(s => (
               <div key={s.tabId} className={`server-session ${s.tabId === activeTabId ? 'active' : ''}`}>
@@ -1247,7 +1252,8 @@ function App() {
                   sessionId={s.sessionId}
                   connHost={s.hostKey}
                   connUsername={s.username}
-                  initialSection={s.initialSection}
+                  section={sessionSections.get(s.tabId) || s.initialSection}
+                  onNavigate={section => navigateSession(s.tabId, section)}
                   jumpToPath={s.tabId === activeTabId ? jumpToPath : null}
                   setJumpToPath={setJumpToPath}
                   termRef={getTerminalRef(s.tabId)}
@@ -1256,7 +1262,6 @@ function App() {
                   appSettings={settings}
                   onToggleAutoReconnect={toggleAutoReconnect}
                   onUpdateSettings={handleUpdateSettings}
-                  onShowToast={showToast}
                   isSessionActive={s.tabId === activeTabId}
                   connectionState={getConnectionState(s.tabId)}
                   onReconnect={() => void reconnectSession(s.tabId)}
@@ -1268,19 +1273,26 @@ function App() {
                   onNextSession={() => activateRelativeSession(1)}
                   onPreviousSession={() => activateRelativeSession(-1)}
                   onEditConnection={() => requestEditConnection(s.configId)}
-                  onSectionChange={section => updateSessionSection(s.tabId, section)}
                   onTerminalDimensionsChange={dimensions => updateTerminalDimensions(s.tabId, dimensions)}
                   onTerminalBackgroundOutput={() => markTerminalBackgroundOutput(s.tabId)}
                 />
               </div>
               ))}
-              {/* ponytail：没有会话时仍显示导航，仪表盘和讨论区可点击，其他项禁用 */}
-              {sessions.length === 0 && <ServerPanel sessionId={null} onShowToast={showToast} />}
+              {sessions.length === 0 && (
+                <div className="server-session active">
+                  <ServerHome
+                    connections={connections}
+                    connectingIds={connectingServerIds}
+                    onConnect={conn => void handleDirectConnect(conn)}
+                    onEdit={conn => requestEditConnection(conn.id)}
+                    onNew={requestNewSession}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </TerminalWorkspace>
-      </div>
-
+      </main>
 
       {/* 浮动上传面板 */}
       {upload.queue.length > 0 && (

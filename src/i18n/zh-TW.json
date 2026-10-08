@@ -128,7 +128,13 @@
     "showPassword": "顯示密碼",
     "hidePassword": "隱藏密碼",
     "deleteConfirmMsg": "刪除 {{name}}？",
-    "language": "語言"
+    "language": "語言",
+    "expand": "展開側邊欄",
+    "collapse": "收合側邊欄",
+    "selectServer": "選擇伺服器",
+    "serverCount": "已儲存 {{count}} 台伺服器",
+    "connected": "已連線",
+    "notConnected": "未連線"
   },
   "nav": {
     "dashboard": "儀表板",
@@ -150,6 +156,13 @@
     "update": "更新",
     "settings": "設定",
     "discussions": "討論"
+  },
+  "navGroup": {
+    "overview": "概覽",
+    "workspace": "工作區",
+    "apps": "應用",
+    "network": "網路與安全",
+    "system": "系統"
   },
   "terminal": {
     "status": {
@@ -1157,5 +1170,11 @@
     "fromDate": "起始日期/時間",
     "toDate": "結束日期/時間",
     "clearDateRange": "清除日期範圍"
+  },
+  "home": {
+    "title": "伺服器",
+    "subtitle": "選擇一台伺服器開始連線，或新增伺服器。",
+    "emptyTitle": "尚未新增伺服器",
+    "emptyHint": "透過 SSH 新增第一台伺服器即可開始使用。"
   }
 }

@@ -886,7 +886,7 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
               <>
                 {/* 安装方式切换，ponytail：隐藏源码编译，仅支持软件包安装 */}
                 <div style={{ marginBottom: '12px', display: 'flex', gap: '8px' }}>
-                  <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--green-bg)', background: 'rgba(35,134,54,0.1)', cursor: 'pointer' }}>
+                  <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--accent)', background: 'var(--accent-soft)', cursor: 'pointer' }}>
                     <input type="radio" name="phpInstallMethod" checked readOnly />
                     <span style={{ fontSize: '13px' }}>{t('software.installMethodPackage')}</span>
                   </label>
@@ -956,8 +956,8 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
                       style={{
                         display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer',
                         padding: '12px 14px', borderRadius: '8px',
-                        border: `1px solid ${selectedMysqlVersion === v.variant ? 'var(--green-bg)' : 'var(--border)'}`,
-                        background: selectedMysqlVersion === v.variant ? 'rgba(35,134,54,0.1)' : 'transparent',
+                        border: `1px solid ${selectedMysqlVersion === v.variant ? 'var(--accent)' : 'var(--border)'}`,
+                        background: selectedMysqlVersion === v.variant ? 'var(--accent-soft)' : 'transparent',
                       }}
                     >
                       <input
@@ -1011,11 +1011,11 @@ export default function SoftwareRepo({ sessionId }: SoftwareRepoProps) {
           <div className="sw-confirm-dialog" onClick={e => e.stopPropagation()}>
             <div className="sw-confirm-title">{t('software.dockerSourceTitle')}</div>
             <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '10px 12px', borderRadius: '8px', border: `1px solid ${dockerSourceSelected === 'official' ? 'var(--green-bg)' : 'var(--border)'}`, background: dockerSourceSelected === 'official' ? 'rgba(35,134,54,0.1)' : 'transparent' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '10px 12px', borderRadius: '8px', border: `1px solid ${dockerSourceSelected === 'official' ? 'var(--accent)' : 'var(--border)'}`, background: dockerSourceSelected === 'official' ? 'var(--accent-soft)' : 'transparent' }}>
                 <input type="radio" name="dockerSource" checked={dockerSourceSelected === 'official'} onChange={() => setDockerSourceSelected('official')} />
                 {t('software.dockerSourceOfficial')}
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '10px 12px', borderRadius: '8px', border: `1px solid ${dockerSourceSelected === 'aliyun' ? 'var(--green-bg)' : 'var(--border)'}`, background: dockerSourceSelected === 'aliyun' ? 'rgba(35,134,54,0.1)' : 'transparent' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '10px 12px', borderRadius: '8px', border: `1px solid ${dockerSourceSelected === 'aliyun' ? 'var(--accent)' : 'var(--border)'}`, background: dockerSourceSelected === 'aliyun' ? 'var(--accent-soft)' : 'transparent' }}>
                 <input type="radio" name="dockerSource" checked={dockerSourceSelected === 'aliyun'} onChange={() => setDockerSourceSelected('aliyun')} />
                 {t('software.dockerSourceAliyun')}
               </label>

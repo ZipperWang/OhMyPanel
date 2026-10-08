@@ -138,6 +138,7 @@ export default function SiteLogsPanel({ sessionId }: SiteLogsPanelProps) {
   return (
     <div className="site-logs-panel">
       <div className="site-logs-header">
+        <h2 className="site-logs-title">{t('logs.title')}</h2>
         <div className="site-logs-toolbar">
           <select
             className="site-logs-select"

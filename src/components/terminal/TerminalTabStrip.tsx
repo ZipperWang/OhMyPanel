@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
 import TerminalTab from './TerminalTab'
+import Icon from '../icons'
 import { terminalCssVariables } from './terminalTheme'
 import type { TerminalSavedConnection, TerminalSessionTabModel } from './types'
 
@@ -57,7 +58,7 @@ export default function TerminalTabStrip({ sessions, activeId, commandAvailable,
 
   return (
     <div className="terminal-tab-strip" style={terminalCssVariables}>
-      <button className="terminal-tab-mobile-nav previous" onClick={() => activateRelative(-1)} disabled={sessions.length < 2} title={t('terminal.actions.previousSession')} aria-label={t('terminal.actions.previousSession')}>‹</button>
+      <button className="terminal-tab-mobile-nav previous" onClick={() => activateRelative(-1)} disabled={sessions.length < 2} title={t('terminal.actions.previousSession')} aria-label={t('terminal.actions.previousSession')}><Icon name="chevronLeft" /></button>
       <div className="terminal-tab-list" role="tablist">
         {sessions.map(session => (
           <TerminalTab
@@ -74,10 +75,10 @@ export default function TerminalTabStrip({ sessions, activeId, commandAvailable,
           />
         ))}
       </div>
-      <button className="terminal-tab-mobile-nav next" onClick={() => activateRelative(1)} disabled={sessions.length < 2} title={t('terminal.actions.nextSession')} aria-label={t('terminal.actions.nextSession')}>›</button>
-      <button className="terminal-strip-button add" onClick={onNewSession} title={t('terminal.actions.newSession')} aria-label={t('terminal.actions.newSession')}>+</button>
+      <button className="terminal-tab-mobile-nav next" onClick={() => activateRelative(1)} disabled={sessions.length < 2} title={t('terminal.actions.nextSession')} aria-label={t('terminal.actions.nextSession')}><Icon name="chevronRight" /></button>
+      <button className="terminal-strip-button add" onClick={onNewSession} title={t('terminal.actions.newSession')} aria-label={t('terminal.actions.newSession')}><Icon name="plus" /></button>
       <div className="terminal-session-menu-wrap" ref={menuRef}>
-        <button className={`terminal-strip-button ${menuOpen ? 'active' : ''}`} onClick={toggleMenu} title={t('terminal.tabs.sessionMenu')} aria-label={t('terminal.tabs.sessionMenu')}>⌄</button>
+        <button className={`terminal-strip-button ${menuOpen ? 'active' : ''}`} onClick={toggleMenu} title={t('terminal.tabs.sessionMenu')} aria-label={t('terminal.tabs.sessionMenu')}><Icon name="chevronDown" /></button>
         {menuOpen && (
           <div className="terminal-session-menu">
             <div className="terminal-session-menu-title">{t('terminal.tabs.savedServers')}</div>
@@ -97,7 +98,7 @@ export default function TerminalTabStrip({ sessions, activeId, commandAvailable,
             })}
             <div className="terminal-session-menu-divider" />
             <button onClick={() => { setMenuOpen(false); onNewSession() }}>
-              <span className="terminal-menu-plus">+</span>
+              <span className="terminal-menu-plus"><Icon name="plus" size={14} /></span>
               <span><strong>{t('terminal.actions.newSession')}</strong></span>
             </button>
           </div>
@@ -110,7 +111,7 @@ export default function TerminalTabStrip({ sessions, activeId, commandAvailable,
         disabled={!commandAvailable}
         title={t('terminal.tabs.terminalMenu')}
         aria-label={t('terminal.tabs.terminalMenu')}
-      >•••</button>
+      ><Icon name="more" /></button>
     </div>
   )
 }

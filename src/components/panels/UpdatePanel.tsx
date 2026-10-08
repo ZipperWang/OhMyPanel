@@ -79,7 +79,7 @@ export default function UpdatePanel() {
           {/* 版本信息 */}
           <div className="settings-row">
             <span className="settings-label">{t('settings.currentVersion')}</span>
-            <span className="settings-value" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: 'var(--text-muted)' }}>{appVersion || '—'}</span>
+            <span className="settings-value" style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-muted)' }}>{appVersion || '—'}</span>
           </div>
 
           {/* 检查按钮 */}
@@ -94,7 +94,7 @@ export default function UpdatePanel() {
 
           {/* 步骤日志 */}
           {steps.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 12px', background: 'var(--bg-panel)', borderRadius: 6, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 12px', background: 'var(--bg-panel)', borderRadius: 6, fontSize: 12, fontFamily: 'var(--font-mono)' }}>
               {steps.map((s, i) => (
                 <div key={i} style={{ color: s.status === 'ok' ? 'var(--green)' : s.status === 'fail' ? 'var(--red)' : 'var(--text-muted)', wordBreak: 'break-all' }}>
                   {s.status === 'ok' ? '✓' : s.status === 'fail' ? '✗' : '…'} {s.text}

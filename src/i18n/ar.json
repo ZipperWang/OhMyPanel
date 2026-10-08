@@ -128,7 +128,13 @@
     "showPassword": "إظهار كلمة المرور",
     "hidePassword": "إخفاء كلمة المرور",
     "deleteConfirmMsg": "حذف {{name}}؟",
-    "language": "اللغة"
+    "language": "اللغة",
+    "expand": "توسيع الشريط الجانبي",
+    "collapse": "طي الشريط الجانبي",
+    "selectServer": "اختر خادمًا",
+    "serverCount": "{{count}} خوادم محفوظة",
+    "connected": "متصل",
+    "notConnected": "غير متصل"
   },
   "nav": {
     "dashboard": "لوحة التحكم",
@@ -150,6 +156,13 @@
     "update": "تحديث",
     "settings": "الإعدادات",
     "discussions": "المناقشات"
+  },
+  "navGroup": {
+    "overview": "نظرة عامة",
+    "workspace": "مساحة العمل",
+    "apps": "التطبيقات",
+    "network": "الشبكة والأمان",
+    "system": "النظام"
   },
   "terminal": {
     "status": {
@@ -1157,5 +1170,11 @@
     "fromDate": "من تاريخ/وقت",
     "toDate": "إلى تاريخ/وقت",
     "clearDateRange": "مسح نطاق التاريخ"
+  },
+  "home": {
+    "title": "الخوادم",
+    "subtitle": "اختر خادمًا للاتصال أو أضف خادمًا جديدًا.",
+    "emptyTitle": "لا توجد خوادم بعد",
+    "emptyHint": "أضف أول خادم عبر SSH للبدء."
   }
 }

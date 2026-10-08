@@ -128,7 +128,13 @@
     "showPassword": "パスワードを表示",
     "hidePassword": "パスワードを隠す",
     "deleteConfirmMsg": "{{name}} を削除しますか？",
-    "language": "言語"
+    "language": "言語",
+    "expand": "サイドバーを展開",
+    "collapse": "サイドバーを折りたたむ",
+    "selectServer": "サーバーを選択",
+    "serverCount": "保存済みサーバー {{count}} 台",
+    "connected": "接続中",
+    "notConnected": "未接続"
   },
   "nav": {
     "dashboard": "ダッシュボード",
@@ -150,6 +156,13 @@
     "update": "アップデート",
     "settings": "設定",
     "discussions": "ディスカッション"
+  },
+  "navGroup": {
+    "overview": "概要",
+    "workspace": "ワークスペース",
+    "apps": "アプリケーション",
+    "network": "ネットワークとセキュリティ",
+    "system": "システム"
   },
   "terminal": {
     "status": {
@@ -1157,5 +1170,11 @@
     "fromDate": "開始日時",
     "toDate": "終了日時",
     "clearDateRange": "日付範囲をクリア"
+  },
+  "home": {
+    "title": "サーバー",
+    "subtitle": "接続するサーバーを選択するか、新しいサーバーを追加してください。",
+    "emptyTitle": "サーバーがまだありません",
+    "emptyHint": "SSH で最初のサーバーを追加して始めましょう。"
   }
 }

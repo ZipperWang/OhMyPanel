@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { getVersion } from '@tauri-apps/api/app'
 import { open } from '@tauri-apps/plugin-shell'
 import { useTranslation } from 'react-i18next'
+import type { ReactNode } from 'react'
+import Icon, { type IconName } from '../icons'
 
 interface OsInfo {
   distro: string
@@ -56,10 +58,36 @@ function formatMb(mb: number): string {
 }
 
 function percentBar(used: number, total: number): { percent: number; color: string } {
-  if (total === 0) return { percent: 0, color: 'var(--green)' }
+  if (total === 0) return { percent: 0, color: 'var(--accent-strong)' }
   const pct = Math.round((used / total) * 100)
-  const color = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--green)'
-  return { percent: pct, color }
+  return { percent: pct, color: levelColor(pct) }
+}
+
+function levelColor(pct: number): string {
+  return pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--accent-strong)'
+}
+
+// 关于文案中的 **文本** 渲染为加粗
+function renderEmphasis(text: string): ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
+    part.startsWith('**') && part.endsWith('**') ? <strong key={index}>{part.slice(2, -2)}</strong> : part,
+  )
+}
+
+function StatTile({ icon, label, value, percent, color, detail }: { icon: IconName; label: string; value: string; percent?: number; color?: string; detail?: string }) {
+  return (
+    <div className="dash-stat">
+      <div className="dash-stat-label">
+        <Icon name={icon} size={15} />
+        <span>{label}</span>
+      </div>
+      <div className="dash-stat-value">{value}</div>
+      {percent !== undefined && (
+        <div className="dash-meter"><div className="dash-meter-fill" style={{ width: `${Math.min(percent, 100)}%`, background: color }} /></div>
+      )}
+      {detail && <div className="dash-stat-detail" title={detail}>{detail}</div>}
+    </div>
+  )
 }
 
 export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
@@ -155,163 +183,151 @@ export default function Dashboard({ sessionId, onNavigate }: DashboardProps) {
     return map[name] || name
   }
 
+  const infoRows: [string, string][] = sysInfo ? [
+    [t('dashboard.os'), `${sysInfo.os.distro} ${sysInfo.os.version}`],
+    [t('dashboard.kernel'), sysInfo.os.kernel],
+    [t('dashboard.architecture'), sysInfo.os.arch],
+    [t('dashboard.hostname'), sysInfo.os.hostname],
+    [t('dashboard.uptime'), sysInfo.uptime],
+    [t('dashboard.loadAverage'), sysInfo.load_avg],
+  ] : []
+
   return (
     <div className="sp-dashboard">
-      {/* 页头 */}
-      <div className="sp-dash-header">
-        <div className="sp-dash-title">
-          <h2>Dashboard</h2>
-          {sysInfo && (
-            <span className="sp-dash-host">{sysInfo.os.hostname}</span>
-          )}
-          <p className="sp-dash-welcome">{t('dashboard.welcome')} {appVersion && <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>v{appVersion}</span>}</p>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">{t('dashboard.title')}</h1>
+          <p className="page-subtitle">
+            {sysInfo ? <>{sysInfo.os.hostname} · {sysInfo.os.distro} {sysInfo.os.version}</> : t('dashboard.welcome')}
+          </p>
         </div>
-        <button className="sp-refresh-btn" onClick={fetchData} disabled={loading}>
+        <button className="ui-btn" onClick={fetchData} disabled={loading}>
+          <Icon name="refresh" size={14} className={loading ? 'spin' : undefined} />
           {loading ? t('common.refreshing') : t('common.refresh')}
         </button>
       </div>
 
-      {/* 关于 OhMyPanel 卡片 */}
-      <div className="sp-card">
-        <div className="sp-card-title">{t('about.title')}</div>
-        <div className="sp-about-content">
-          <div className="sp-about-section">
-            <p>{t('about.line1')}</p>
-            <p>{t('about.line2')}</p>
-            <p>{t('about.line3')}</p>
-            <p>{t('about.line4')}</p>
-            <p>{t('about.line5')}</p>
-            <p>{t('about.line6')}</p>
-            <p>{t('about.line7')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://github.com/ZipperWang/OhMyPanel/discussions') }}>{t('about.github')}</a></p>
-          </div>
-        </div>
-      </div>
-
-      {/* 系统信息卡片 */}
       {sysInfo && (
-        <div className="sp-card">
-          <div className="sp-card-title">{t('dashboard.system')}</div>
-          <div className="sp-info-grid">
-            <div className="sp-info-item">
-              <span className="sp-info-label">{t('dashboard.os')}</span>
-              <span className="sp-info-value">{sysInfo.os.distro} {sysInfo.os.version}</span>
-            </div>
-            <div className="sp-info-item">
-              <span className="sp-info-label">{t('dashboard.kernel')}</span>
-              <span className="sp-info-value">{sysInfo.os.kernel}</span>
-            </div>
-            <div className="sp-info-item">
-              <span className="sp-info-label">{t('dashboard.architecture')}</span>
-              <span className="sp-info-value">{sysInfo.os.arch}</span>
-            </div>
-            <div className="sp-info-item">
-              <span className="sp-info-label">{t('dashboard.hostname')}</span>
-              <span className="sp-info-value">{sysInfo.os.hostname}</span>
-            </div>
-            <div className="sp-info-item">
-              <span className="sp-info-label">{t('dashboard.uptime')}</span>
-              <span className="sp-info-value">{sysInfo.uptime}</span>
-            </div>
-            <div className="sp-info-item">
-              <span className="sp-info-label">{t('dashboard.loadAverage')}</span>
-              <span className="sp-info-value">{sysInfo.load_avg}</span>
-            </div>
-          </div>
+        <div className="dash-stats">
+          {cpu && (
+            <StatTile
+              icon="cpu"
+              label={t('dashboard.cpu')}
+              value={`${sysInfo.cpu_percent}%`}
+              percent={cpu.percent}
+              color={cpu.color}
+              detail={`${sysInfo.cpu_cores} ${t('dashboard.cores')} · ${sysInfo.cpu_model}`}
+            />
+          )}
+          {mem && (
+            <StatTile
+              icon="memory"
+              label={t('dashboard.memory')}
+              value={`${mem.percent}%`}
+              percent={mem.percent}
+              color={mem.color}
+              detail={`${formatMb(sysInfo.mem_used_mb)} / ${formatMb(sysInfo.mem_total_mb)}`}
+            />
+          )}
+          {swap && (
+            <StatTile
+              icon="layers"
+              label={t('dashboard.swap')}
+              value={sysInfo.swap_total_mb > 0 ? `${swap.percent}%` : '—'}
+              percent={sysInfo.swap_total_mb > 0 ? swap.percent : 0}
+              color={swap.color}
+              detail={sysInfo.swap_total_mb > 0 ? `${formatMb(sysInfo.swap_used_mb)} / ${formatMb(sysInfo.swap_total_mb)}` : t('common.disabled')}
+            />
+          )}
+          <StatTile
+            icon="activity"
+            label={t('dashboard.loadAverage')}
+            value={sysInfo.load_avg.split(/\s+/)[0] || '—'}
+            detail={`${sysInfo.load_avg} · ${sysInfo.uptime}`}
+          />
         </div>
       )}
 
-      {/* 资源卡片 */}
-      {sysInfo && (
-        <div className="sp-card">
-          <div className="sp-card-title">{t('dashboard.resources')}</div>
-          <div className="sp-resource-list">
-            {/* CPU */}
-            {cpu && (
-              <div className="sp-resource-item">
-                <div className="sp-resource-header">
-                  <span>{t('dashboard.cpu')}</span>
-                  <span>{sysInfo.cpu_percent}% - {sysInfo.cpu_model} ({sysInfo.cpu_cores} {t('dashboard.cores')})</span>
+      <div className="dash-grid">
+        {sysInfo && (
+          <section className="sp-card">
+            <div className="sp-card-title">{t('dashboard.system')}</div>
+            <dl className="dash-info">
+              {infoRows.map(([label, value]) => (
+                <div className="dash-info-row" key={label}>
+                  <dt>{label}</dt>
+                  <dd title={value}>{value}</dd>
                 </div>
-                <div className="sp-progress-track">
-                  <div className="sp-progress-fill" style={{ width: `${cpu.percent}%`, background: cpu.color }} />
+              ))}
+            </dl>
+          </section>
+        )}
+
+        <section className="sp-card">
+          <div className="sp-card-title">{t('dashboard.services')}</div>
+          {displayServices.length === 0 ? (
+            <div className="sp-services-empty">
+              <p>{t('dashboard.noLnmp')}</p>
+              {onNavigate && (
+                <button className="ui-btn sm" onClick={() => onNavigate('software')}>
+                  {t('dashboard.installLnmp')}
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="dash-services">
+              {displayServices.map(svc => (
+                <div className="dash-service" key={svc.name}>
+                  <span className={`status-dot ${svc.active ? 'connected' : ''}`} />
+                  <span className="dash-service-name">{serviceLabel(svc.name)}</span>
+                  {svc.version && <span className="dash-service-version">v{svc.version}</span>}
+                  <span className={`dash-pill ${svc.active ? 'ok' : 'off'}`}>
+                    {svc.active ? t('common.running') : t('common.stopped')}
+                  </span>
                 </div>
-              </div>
-            )}
-            {/* 内存 */}
-            {mem && (
-              <div className="sp-resource-item">
-                <div className="sp-resource-header">
-                  <span>{t('dashboard.memory')}</span>
-                  <span>{formatMb(sysInfo.mem_used_mb)} / {formatMb(sysInfo.mem_total_mb)} ({mem.percent}%)</span>
-                </div>
-                <div className="sp-progress-track">
-                  <div className="sp-progress-fill" style={{ width: `${mem.percent}%`, background: mem.color }} />
-                </div>
-              </div>
-            )}
-            {/* 交换分区 */}
-            {swap && sysInfo.swap_total_mb > 0 && (
-              <div className="sp-resource-item">
-                <div className="sp-resource-header">
-                  <span>{t('dashboard.swap')}</span>
-                  <span>{formatMb(sysInfo.swap_used_mb)} / {formatMb(sysInfo.swap_total_mb)} ({swap.percent}%)</span>
-                </div>
-                <div className="sp-progress-track">
-                  <div className="sp-progress-fill" style={{ width: `${swap.percent}%`, background: swap.color }} />
-                </div>
-              </div>
-            )}
-            {/* 磁盘 */}
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {sysInfo && sysInfo.disks.length > 0 && (
+        <section className="sp-card">
+          <div className="sp-card-title">{t('dashboard.disk')}</div>
+          <div className="dash-disks">
             {sysInfo.disks.map((d, i) => {
               const pct = parseInt(d.use_percent) || 0
-              const color = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--green)'
               return (
-                <div className="sp-resource-item" key={i}>
-                  <div className="sp-resource-header">
-                    <span>{t('dashboard.disk')} {d.mount}</span>
-                    <span>{d.used} / {d.size} ({d.use_percent})</span>
+                <div className="dash-disk" key={i}>
+                  <div className="dash-disk-head">
+                    <Icon name="hardDrive" size={15} />
+                    <span className="dash-disk-mount">{d.mount}</span>
+                    <span className="dash-disk-fs">{d.filesystem}</span>
+                    <span className="dash-disk-usage">{d.used} / {d.size}</span>
+                    <span className="dash-disk-pct" style={{ color: pct > 70 ? levelColor(pct) : undefined }}>{d.use_percent}</span>
                   </div>
-                  <div className="sp-progress-track">
-                    <div className="sp-progress-fill" style={{ width: `${pct}%`, background: color }} />
-                  </div>
+                  <div className="dash-meter"><div className="dash-meter-fill" style={{ width: `${pct}%`, background: levelColor(pct) }} /></div>
                 </div>
               )
             })}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* 服务卡片 */}
-      <div className="sp-card">
-        <div className="sp-card-title">{t('dashboard.services')}</div>
-        {displayServices.length === 0 ? (
-          <div className="sp-services-empty">
-            <p>{t('dashboard.noLnmp')}</p>
-            {onNavigate && (
-              <button className="install-nav-btn" onClick={() => onNavigate('install')}>
-                {t('dashboard.installLnmp')}
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="sp-service-grid">
-            {displayServices.map(svc => (
-              <div className="sp-service-card" key={svc.name}>
-                <div className="sp-service-status">
-                  <span className={`sp-status-dot ${svc.active ? 'active' : 'inactive'}`} />
-                  <span className="sp-service-name">{serviceLabel(svc.name)}</span>
-                </div>
-                <div className="sp-service-meta">
-                  {svc.version && <span className="sp-service-version">v{svc.version}</span>}
-                  <span className={`sp-service-state ${svc.active ? 'running' : 'stopped'}`}>
-                    {svc.active ? t('common.running') : t('common.stopped')}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <section className="sp-card dash-about">
+        <div className="sp-card-title">
+          {t('about.title')}
+          {appVersion && <span className="ui-badge">v{appVersion}</span>}
+        </div>
+        <div className="sp-about-content">
+          <p>{t('about.line1')}</p>
+          <p>{t('about.line2')} {t('about.line3')}</p>
+          <p>{renderEmphasis(t('about.line4'))}</p>
+          <p>{t('about.line5')}</p>
+          <p>{t('about.line6')}</p>
+          <p>{t('about.line7')} <a href="#" onClick={(e) => { e.preventDefault(); open('https://github.com/ZipperWang/OhMyPanel/discussions') }}>{t('about.github')}</a></p>
+        </div>
+      </section>
     </div>
   )
 }

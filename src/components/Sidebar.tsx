@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open as openExternal } from '@tauri-apps/plugin-shell'
 import { useTranslation } from 'react-i18next'
+import Icon from './icons'
+import ConnectionDialog, { type ConnectionDraft } from './ConnectionDialog'
+import { DISCUSSIONS_URL, NAV_GROUPS, type PanelSection } from './navigation'
 
-interface Connection {
+export interface Connection {
   id: string
   name: string
   host: string
@@ -15,26 +18,23 @@ interface Connection {
   remember_me?: boolean
 }
 
-interface NewConnectionData {
-  name: string
-  host: string
-  port: number
-  username: string
-  auth_type: string
-  key_path?: string
-  password?: string
-  remember_me?: boolean
-}
-
 interface SidebarProps {
+  connections: Connection[]
+  onConnectionsChanged: () => Promise<void> | void
   onSelect: (conn: Connection) => void
   onConnect: (conn: Connection) => void
-  onNew: () => void
-  onCreateConnection: (data: NewConnectionData) => Promise<void>
-  refreshKey?: number
+  onCreateConnection: (data: ConnectionDraft) => Promise<void>
   connectedIds?: string[]
   connectingIds?: string[]
   activeConfigId?: string | null
+  section: PanelSection
+  navEnabled: boolean
+  onNavigate: (section: PanelSection) => void
+  onNavigateBlocked?: () => void
+  theme: string
+  onToggleTheme: () => void
+  collapsed: boolean
+  onToggleCollapsed: () => void
   newConnectionRequestId?: number
   editConnectionRequest?: { id: string; requestId: number } | null
   onNewConnectionRequestHandled?: (requestId: number) => void
@@ -47,24 +47,69 @@ interface ContextMenu {
   conn: Connection
 }
 
-const authUsesPassword = (authType: string) => authType === 'password' || authType === 'managed_key_password'
-const authUsesKey = (authType: string) => authType === 'key' || authType === 'managed_key' || authType === 'managed_key_password'
+export const LANGUAGES = [
+  { code: 'en', label: 'English' },
+  { code: 'zh-CN', label: '简体中文' },
+  { code: 'zh-TW', label: '繁體中文' },
+  { code: 'ja', label: '日本語' },
+  { code: 'ko', label: '한국어' },
+  { code: 'fr', label: 'Français' },
+  { code: 'de', label: 'Deutsch' },
+  { code: 'ru', label: 'Русский' },
+  { code: 'pt', label: 'Português' },
+  { code: 'ar', label: 'العربية' },
+]
 
-export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection, refreshKey, connectedIds, connectingIds, activeConfigId, newConnectionRequestId = 0, editConnectionRequest, onNewConnectionRequestHandled, onEditConnectionRequestHandled }: SidebarProps) {
+const AVATAR_HUES = [217, 262, 190, 152, 28, 336, 45, 280]
+
+// ponytail：根据名称生成稳定的头像色相，方便在多台服务器间快速辨认
+export function serverHue(seed: string): number {
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0
+  return AVATAR_HUES[Math.abs(hash) % AVATAR_HUES.length]
+}
+
+export function ServerAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
+  const letter = (name.trim()[0] || '?').toUpperCase()
+  return (
+    <span className={`server-avatar ${size}`} style={{ '--avatar-hue': serverHue(name) } as React.CSSProperties}>
+      {letter}
+    </span>
+  )
+}
+
+function usePopover() {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  return { open, setOpen, ref }
+}
+
+export default function Sidebar({
+  connections, onConnectionsChanged, onSelect, onConnect, onCreateConnection, connectedIds, connectingIds, activeConfigId,
+  section, navEnabled, onNavigate, onNavigateBlocked, theme, onToggleTheme, collapsed, onToggleCollapsed,
+  newConnectionRequestId = 0, editConnectionRequest, onNewConnectionRequestHandled, onEditConnectionRequestHandled,
+}: SidebarProps) {
   const { t, i18n } = useTranslation()
-  const [connections, setConnections] = useState<Connection[]>([])
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null)
   const [editing, setEditing] = useState<Connection | null>(null)
-  const [showEditPassword, setShowEditPassword] = useState(false)
-  const [creating, setCreating] = useState<NewConnectionData | null>(null)
-  const [showCreatePassword, setShowCreatePassword] = useState(false)
-  const [langDropdownOpen, setLangDropdownOpen] = useState(false)
+  const [creating, setCreating] = useState<ConnectionDraft | null>(null)
+  const switcher = usePopover()
+  const langMenu = usePopover()
   const menuRef = useRef<HTMLDivElement>(null)
-  const langRef = useRef<HTMLDivElement>(null)
-  const hasCheckedEmptyRef = useRef(false)
-  const loadRequestIdRef = useRef(0)
-  const mountedRef = useRef(true)
   const lastNewConnectionRequestRef = useRef(0)
   const lastEditConnectionRequestRef = useRef<number | null>(null)
   const onNewConnectionRequestHandledRef = useRef(onNewConnectionRequestHandled)
@@ -76,165 +121,33 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
   }, [onNewConnectionRequestHandled, onEditConnectionRequestHandled])
 
   const openNewConnection = useCallback(() => {
-    setShowCreatePassword(false)
     setEditing(null)
     setConfirmDelete(null)
     setContextMenu(null)
-    setCreating({
-      name: '',
-      host: '',
-      port: 22,
-      username: 'root',
-      auth_type: 'password',
-      password: '',
-      remember_me: true
-    })
-  }, [])
+    switcher.setOpen(false)
+    setCreating({ name: '', host: '', port: 22, username: 'root', auth_type: 'password', password: '', remember_me: true })
+  }, [switcher.setOpen])
 
-  const loadConnections = useCallback(async () => {
-    const requestId = ++loadRequestIdRef.current
-    let list: Connection[]
-    try {
-      list = await invoke<Connection[]>('config_list')
-    } catch {
-      return
-    }
-    if (!mountedRef.current || requestId !== loadRequestIdRef.current) return
-    setConnections(list)
-
-    if (!hasCheckedEmptyRef.current) {
-      hasCheckedEmptyRef.current = true
-      if (list.length === 0) openNewConnection()
-    }
-  }, [openNewConnection])
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-      loadRequestIdRef.current += 1
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadConnections()
-  }, [loadConnections])
-
-  // refreshKey 变化时刷新
-  useEffect(() => {
-    if (refreshKey && refreshKey > 0) {
-      void loadConnections()
-    }
-  }, [refreshKey, loadConnections])
+  const openEditor = useCallback(async (conn: Connection) => {
+    switcher.setOpen(false)
+    setContextMenu(null)
+    setCreating(null)
+    setConfirmDelete(null)
+    // 编辑前重新读取，确保拿到最新的凭据配置
+    const list = await invoke<Connection[]>('config_list').catch(() => [] as Connection[])
+    const fresh = list.find(item => item.id === conn.id)
+    setEditing(fresh ? { ...fresh } : { ...conn })
+  }, [switcher.setOpen])
 
   // 点击外部时关闭上下文菜单
   useEffect(() => {
+    if (!contextMenu) return
     const handleClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setContextMenu(null)
-      }
-    }
-    if (contextMenu) {
-      window.addEventListener('mousedown', handleClick)
-      return () => window.removeEventListener('mousedown', handleClick)
-    }
-  }, [contextMenu])
-
-  // 点击外部时关闭语言下拉菜单
-  useEffect(() => {
-    if (!langDropdownOpen) return
-    const handleClick = (e: MouseEvent) => {
-      if (langRef.current && !langRef.current.contains(e.target as Node)) {
-        setLangDropdownOpen(false)
-      }
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setContextMenu(null)
     }
     window.addEventListener('mousedown', handleClick)
     return () => window.removeEventListener('mousedown', handleClick)
-  }, [langDropdownOpen])
-
-  const handleDelete = async (id: string) => {
-    const result = await invoke<{ remoteKeyRevoked: boolean; warning?: string }>('config_delete', { id })
-    setConfirmDelete(null)
-    await loadConnections()
-    if (result.warning) window.alert(result.warning)
-  }
-
-  const handleSaveEdit = async () => {
-    if (!editing) return
-    // 清理主机、用户名和端口两端的空白
-    const trimmed = {
-      ...editing,
-      host: editing.host.trim(),
-      username: editing.username.trim(),
-      port: Number(String(editing.port).trim()) || editing.port,
-      remember_me: editing.remember_me || false,
-      // 仅在勾选 remember_me 时保存凭据
-      password: editing.remember_me ? editing.password : undefined,
-      key_path: editing.remember_me ? editing.key_path : undefined
-    }
-    await invoke('config_save', { connection: trimmed })
-    setEditing(null)
-    await loadConnections()
-  }
-
-  const handleSaveAndConnect = async () => {
-    if (!editing) return
-    
-    // 先保存
-    const trimmed = {
-      ...editing,
-      host: editing.host.trim(),
-      username: editing.username.trim(),
-      port: Number(String(editing.port).trim()) || editing.port,
-      remember_me: editing.remember_me || false,
-      // 仅在勾选 remember_me 时保存凭据
-      password: editing.remember_me ? editing.password : undefined,
-      key_path: editing.remember_me ? editing.key_path : undefined
-    }
-    await invoke('config_save', { connection: trimmed })
-    
-    setEditing(null)
-    await loadConnections()
-    
-    // 通过自定义事件触发重连
-    window.dispatchEvent(new CustomEvent('sidebar-reconnect-after-edit', {
-      detail: { conn: trimmed }
-    }))
-  }
-
-  const pickKeyFile = async () => {
-    const path = await open()
-    if (path) setEditing({ ...editing!, key_path: String(path) })
-  }
-
-  const pickCreateKeyFile = async () => {
-    const path = await open()
-    if (path && creating) setCreating({ ...creating, key_path: String(path) })
-  }
-
-  const handleSaveNewConnection = async () => {
-    if (!creating) return
-    // 清理主机、用户名和端口两端的空白
-    const trimmed = {
-      ...creating,
-      host: creating.host.trim(),
-      username: creating.username.trim(),
-      port: Number(String(creating.port).trim()) || creating.port,
-      remember_me: creating.remember_me || false,
-      // 仅在勾选 remember_me 时保存凭据
-      password: creating.remember_me ? creating.password : undefined,
-      key_path: creating.remember_me ? creating.key_path : undefined
-    }
-    await onCreateConnection(trimmed)
-    setCreating(null)
-    await loadConnections()
-  }
-
-  const handleNewConnection = () => {
-    hasCheckedEmptyRef.current = true
-    openNewConnection()
-    onNew()
-  }
+  }, [contextMenu])
 
   useEffect(() => {
     if (newConnectionRequestId <= 0) {
@@ -243,7 +156,6 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
     }
     if (lastNewConnectionRequestRef.current === newConnectionRequestId) return
     lastNewConnectionRequestRef.current = newConnectionRequestId
-    hasCheckedEmptyRef.current = true
     openNewConnection()
     onNewConnectionRequestHandledRef.current?.(newConnectionRequestId)
   }, [newConnectionRequestId, openNewConnection])
@@ -255,352 +167,268 @@ export default function Sidebar({ onSelect, onConnect, onNew, onCreateConnection
     }
     if (lastEditConnectionRequestRef.current === editConnectionRequest.requestId) return
     lastEditConnectionRequestRef.current = editConnectionRequest.requestId
-    let cancelled = false
     const { id, requestId } = editConnectionRequest
-    const openEditor = async () => {
-      try {
-        const list = await invoke<Connection[]>('config_list')
-        if (cancelled) return
-        const connection = list.find(item => item.id === id)
-        if (connection) {
-          setShowEditPassword(false)
-          setCreating(null)
-          setConfirmDelete(null)
-          setContextMenu(null)
-          setEditing({ ...connection })
-        }
-      } catch {
-      } finally {
-        if (!cancelled) onEditConnectionRequestHandledRef.current?.(requestId)
-      }
+    const target = connections.find(item => item.id === id)
+    const done = () => onEditConnectionRequestHandledRef.current?.(requestId)
+    if (target) void openEditor(target).finally(done)
+    else {
+      invoke<Connection[]>('config_list')
+        .then(list => {
+          const found = list.find(item => item.id === id)
+          if (found) setEditing({ ...found })
+        })
+        .catch(() => {})
+        .finally(done)
     }
-    void openEditor()
-    return () => {
-      cancelled = true
-    }
-  }, [editConnectionRequest?.id, editConnectionRequest?.requestId])
+  }, [editConnectionRequest?.id, editConnectionRequest?.requestId]) // eslint-disable-line
 
-  const handleContextMenu = (e: React.MouseEvent, conn: Connection) => {
-    e.preventDefault()
-    setContextMenu({ x: e.clientX, y: e.clientY, conn })
+  const handleDelete = async (id: string) => {
+    const result = await invoke<{ remoteKeyRevoked: boolean; warning?: string }>('config_delete', { id })
+    setConfirmDelete(null)
+    setEditing(null)
+    await onConnectionsChanged()
+    if (result.warning) window.alert(result.warning)
   }
 
+  const handleSaveEdit = async (draft: ConnectionDraft) => {
+    await invoke('config_save', { connection: draft })
+    setEditing(null)
+    await onConnectionsChanged()
+  }
+
+  const handleSaveAndConnect = async (draft: ConnectionDraft) => {
+    await invoke('config_save', { connection: draft })
+    setEditing(null)
+    await onConnectionsChanged()
+    // 通过自定义事件触发重连
+    window.dispatchEvent(new CustomEvent('sidebar-reconnect-after-edit', { detail: { conn: draft } }))
+  }
+
+  const handleCreate = async (draft: ConnectionDraft) => {
+    await onCreateConnection(draft)
+    setCreating(null)
+  }
+
+  const statusOf = (id: string) => {
+    if (connectedIds?.includes(id)) return 'connected'
+    if (connectingIds?.includes(id)) return 'connecting'
+    return 'idle'
+  }
+
+  const toggleConnection = (conn: Connection) => {
+    if (statusOf(conn.id) === 'connected') {
+      window.dispatchEvent(new CustomEvent('sidebar-disconnect', { detail: { configId: conn.id } }))
+    } else {
+      onConnect(conn)
+    }
+  }
+
+  const activeConn = connections.find(conn => conn.id === activeConfigId) ?? null
+  const activeStatus = activeConn ? statusOf(activeConn.id) : 'idle'
+
   return (
-    <div className="sidebar">
-      <div className="sidebar-header">
-        <h2>{t('sidebar.servers')}</h2>
-        <button className="btn-new" onClick={handleNewConnection} title={t('sidebar.newConnection')}>
-          +
+    <aside className={`sb ${collapsed ? 'collapsed' : ''}`}>
+      <div className="sb-brand">
+        <img className="sb-logo" src="/app-icon.png" alt="" draggable={false} />
+        <span className="sb-brand-name">OhMyPanel</span>
+        <button className="ui-icon-btn sb-collapse" onClick={onToggleCollapsed} title={collapsed ? t('sidebar.expand') : t('sidebar.collapse')} aria-label={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}>
+          <Icon name="panelLeft" />
         </button>
       </div>
-      <div className="connection-list">
-        {connections.length === 0 && (
-          <p className="empty-hint">{t('sidebar.clickToAdd')}</p>
-        )}
-        {connections.map((conn) => {
-          const isConnected = connectedIds?.includes(conn.id) ?? false
-          const isConnecting = connectingIds?.includes(conn.id) ?? false
-          const showConnecting = isConnecting && !isConnected
-          return (
-            <div
-              key={conn.id}
-              className={`connection-item${conn.id === activeConfigId ? ' active' : ''}`}
-              onClick={() => onSelect(conn)}
-              onContextMenu={(e) => handleContextMenu(e, conn)}
-            >
-              <div className="conn-info">
-                <span className="conn-name">{conn.name || conn.host}</span>
-                <span className="conn-detail">
-                  {conn.username}@{conn.host}:{conn.port}
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button
-                  className={`btn-connect ${isConnected ? 'disconnect' : ''}`}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    if (isConnected) {
-                      // 断开此特定会话
-                      window.dispatchEvent(new CustomEvent('sidebar-disconnect', { detail: { configId: conn.id } }))
-                    } else {
-                      onConnect(conn)
-                    }
-                  }}
-                  title={isConnected ? t('common.disconnect') : t('common.connect')}
-                  disabled={showConnecting}
-                >
-                  {showConnecting ? t('common.connecting') : (isConnected ? t('common.disconnect') : t('common.connect'))}
-                </button>
-                <button
-                  className="btn-edit"
-                  onClick={async (e) => {
-                    e.stopPropagation()
-                    const list = await invoke<Connection[]>('config_list')
-                    const fresh = list.find(c => c.id === conn.id)
-                    setEditing(fresh ? { ...fresh } : { ...conn })
-                  }}
-                  title={t('common.edit')}
-                >
-                  {t('common.edit')}
-                </button>
-              </div>
+
+      {/* 服务器切换器 */}
+      <div className="sb-switcher-wrap" ref={switcher.ref}>
+        <button
+          className={`sb-switcher ${switcher.open ? 'open' : ''}`}
+          onClick={() => switcher.setOpen(!switcher.open)}
+          title={activeConn ? `${activeConn.name || activeConn.host} · ${activeConn.username}@${activeConn.host}` : t('sidebar.servers')}
+        >
+          {activeConn ? <ServerAvatar name={activeConn.name || activeConn.host} /> : <span className="server-avatar md empty"><Icon name="server" size={15} /></span>}
+          <span className="sb-switcher-text">
+            <span className="sb-switcher-name">{activeConn ? (activeConn.name || activeConn.host) : t('sidebar.selectServer')}</span>
+            <span className="sb-switcher-sub">
+              {activeConn ? (
+                <><span className={`status-dot ${activeStatus}`} />{activeConn.username}@{activeConn.host}</>
+              ) : t('sidebar.serverCount', { count: connections.length })}
+            </span>
+          </span>
+          <Icon name="chevronsUpDown" className="sb-switcher-caret" />
+        </button>
+
+        {switcher.open && (
+          <div className="ui-popover sb-switcher-menu">
+            <div className="ui-popover-header">
+              <span>{t('sidebar.servers')}</span>
+              <button className="ui-icon-btn sm" onClick={openNewConnection} title={t('sidebar.newConnection')} aria-label={t('sidebar.newConnection')}>
+                <Icon name="plus" />
+              </button>
             </div>
-          )
-        })}
+            <div className="sb-server-list">
+              {connections.length === 0 && <div className="ui-popover-empty">{t('sidebar.clickToAdd')}</div>}
+              {connections.map(conn => {
+                const status = statusOf(conn.id)
+                return (
+                  <div
+                    key={conn.id}
+                    data-conn-id={conn.id}
+                    className={`sb-server ${conn.id === activeConfigId ? 'active' : ''}`}
+                    onClick={() => { switcher.setOpen(false); onSelect(conn) }}
+                    onContextMenu={event => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, conn }) }}
+                  >
+                    <ServerAvatar name={conn.name || conn.host} size="sm" />
+                    <span className="sb-server-text">
+                      <span className="sb-server-name">{conn.name || conn.host}</span>
+                      <span className="sb-server-sub" dir="ltr">{conn.username}@{conn.host}{conn.port !== 22 ? `:${conn.port}` : ''}</span>
+                    </span>
+                    <span className={`status-dot ${status}`} title={status === 'connected' ? t('sidebar.connected') : status === 'connecting' ? t('common.connecting') : t('sidebar.notConnected')} />
+                    <span className="sb-server-actions">
+                      <button
+                        className="ui-icon-btn sm"
+                        onClick={event => { event.stopPropagation(); void openEditor(conn) }}
+                        title={t('common.edit')}
+                        aria-label={t('common.edit')}
+                      >
+                        <Icon name="pencil" size={14} />
+                      </button>
+                      <button
+                        className={`ui-icon-btn sm ${status === 'connected' ? 'danger' : ''}`}
+                        onClick={event => { event.stopPropagation(); toggleConnection(conn) }}
+                        disabled={status === 'connecting'}
+                        title={status === 'connected' ? t('common.disconnect') : t('common.connect')}
+                        aria-label={status === 'connected' ? t('common.disconnect') : t('common.connect')}
+                      >
+                        <Icon name="power" size={14} />
+                      </button>
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+            <button className="ui-popover-action" onClick={openNewConnection}>
+              <Icon name="plus" />
+              {t('sidebar.newConnection')}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 功能导航 */}
+      <nav className={`sb-nav ${navEnabled ? '' : 'disabled'}`}>
+        {NAV_GROUPS.map(group => (
+          <div className="sb-nav-group" key={group.key}>
+            <div className="sb-nav-label">{t(group.labelKey)}</div>
+            {group.items.map(item => (
+              <button
+                key={item.key}
+                className={`sb-nav-item ${navEnabled && section === item.key ? 'active' : ''}`}
+                onClick={() => navEnabled ? onNavigate(item.key) : onNavigateBlocked?.()}
+                title={collapsed ? t(item.labelKey) : undefined}
+              >
+                <Icon name={item.icon} size={17} />
+                <span className="sb-nav-text">{t(item.labelKey)}</span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </nav>
+
+      <div className="sb-footer">
+        <button className="ui-icon-btn" onClick={onToggleTheme} title={theme === 'dark' ? t('settings.light') : t('settings.dark')} aria-label={t('settings.theme')}>
+          <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
+        </button>
+        <div className="sb-lang" ref={langMenu.ref}>
+          <button className={`ui-icon-btn ${langMenu.open ? 'active' : ''}`} onClick={() => langMenu.setOpen(!langMenu.open)} title={t('sidebar.language')} aria-label={t('sidebar.language')}>
+            <Icon name="languages" />
+          </button>
+          {langMenu.open && (
+            <div className="ui-popover sb-lang-menu">
+              {LANGUAGES.map(language => (
+                <button
+                  key={language.code}
+                  className={`ui-menu-item ${i18n.language === language.code ? 'active' : ''}`}
+                  onClick={() => {
+                    i18n.changeLanguage(language.code)
+                    invoke('ui_state_set', { key: 'language', value: language.code }).catch(() => {})
+                    langMenu.setOpen(false)
+                  }}
+                >
+                  <span>{language.label}</span>
+                  {i18n.language === language.code && <Icon name="check" size={14} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <button className="ui-icon-btn" onClick={() => openExternal(DISCUSSIONS_URL)} title={t('nav.discussions')} aria-label={t('nav.discussions')}>
+          <Icon name="message" />
+        </button>
       </div>
 
       {/* 上下文菜单 */}
       {contextMenu && (
-        <div
-          ref={menuRef}
-          className="context-menu"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
-          <div
-            className="context-menu-item"
-            onClick={() => {
-              onConnect(contextMenu.conn)
-              setContextMenu(null)
-            }}
-          >
-            {t('common.connect')}
-          </div>
-          <div
-            className="context-menu-item"
-            onClick={() => {
-              setEditing({ ...contextMenu.conn })
-              setContextMenu(null)
-            }}
-          >
-            {t('common.edit')}
-          </div>
-          <div className="context-menu-divider" />
-          <div
-            className="context-menu-item danger"
+        <div ref={menuRef} className="ui-popover ui-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <button className="ui-menu-item" onClick={() => { toggleConnection(contextMenu.conn); setContextMenu(null); switcher.setOpen(false) }}>
+            <Icon name="power" size={14} />
+            <span>{statusOf(contextMenu.conn.id) === 'connected' ? t('common.disconnect') : t('common.connect')}</span>
+          </button>
+          <button className="ui-menu-item" onClick={() => void openEditor(contextMenu.conn)}>
+            <Icon name="pencil" size={14} />
+            <span>{t('common.edit')}</span>
+          </button>
+          <div className="ui-menu-divider" />
+          <button
+            className="ui-menu-item danger"
             onClick={() => {
               setConfirmDelete({ id: contextMenu.conn.id, name: contextMenu.conn.name || contextMenu.conn.host })
               setContextMenu(null)
+              switcher.setOpen(false)
             }}
           >
-            {t('common.delete')}
-          </div>
+            <Icon name="trash" size={14} />
+            <span>{t('common.delete')}</span>
+          </button>
         </div>
       )}
-      {/* 编辑弹窗 */}
+
       {editing && (
-        <div className="sidebar-confirm-overlay">
-          <div className="sidebar-edit-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="sidebar-edit-header">
-              <div className="sidebar-confirm-title">{t('sidebar.editConnection')}</div>
-              <button className="sidebar-edit-close" onClick={() => setEditing(null)}>×</button>
-            </div>
-            <div className="sidebar-edit-fields">
-              <div className="form-group">
-                <label>{t('sidebar.name')}</label>
-                <input className="sidebar-edit-input" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>{t('sidebar.host')}</label>
-                  <input className="sidebar-edit-input" value={editing.host} onChange={(e) => setEditing({ ...editing, host: e.target.value })} />
-                </div>
-                <div className="form-group fixed-width">
-                  <label>{t('sidebar.port')}</label>
-                  <input 
-                    className="sidebar-edit-input" 
-                    type="number" 
-                    value={editing.port || ''} 
-                    onChange={(e) => {
-                      const val = e.target.value
-                      setEditing({ ...editing, port: val === '' ? 0 : Number(val) })
-                    }}
-                    onBlur={(e) => {
-                      const val = e.target.value
-                      if (val === '' || val.trim() === '') {
-                        setEditing({ ...editing, port: 0 })
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>{t('sidebar.username')}</label>
-                  <input className="sidebar-edit-input" value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} />
-                </div>
-                <div className="form-group medium-width">
-                  <label>{t('sidebar.authType')}</label>
-                  <select className="sidebar-edit-input" value={editing.auth_type} onChange={(e) => setEditing({ ...editing, auth_type: e.target.value, key_path: authUsesKey(e.target.value) ? editing.key_path : undefined, password: authUsesPassword(e.target.value) ? editing.password : undefined })}>
-                    <option value="password">{t('sidebar.password')}</option>
-                    <option value="key">Key File</option>
-                    {editing.auth_type === 'managed_key' && <option value="managed_key">Managed Key</option>}
-                    {editing.auth_type === 'managed_key_password' && <option value="managed_key_password">Managed Key + Password</option>}
-                  </select>
-                </div>
-              </div>
-              {authUsesPassword(editing.auth_type) && (
-                <div className="form-group">
-                  <label>{t('sidebar.password')}</label>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input className="sidebar-edit-input" style={{ flex: 1 }} type={showEditPassword ? 'text' : 'password'} value={editing.password || ''} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
-                    <button className="sidebar-edit-action-btn" onClick={() => setShowEditPassword(!showEditPassword)} title={showEditPassword ? t('sidebar.hidePassword') : t('sidebar.showPassword')}>{showEditPassword ? t('sidebar.hidePassword') : t('sidebar.showPassword')}</button>
-                  </div>
-                </div>
-              )}
-              {authUsesKey(editing.auth_type) && (
-                <div className="form-group">
-                  <label>{t('sidebar.keyPath')}</label>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <input className="sidebar-edit-input" style={{ flex: 1 }} value={editing.key_path || ''} onChange={(e) => setEditing({ ...editing, key_path: e.target.value })} readOnly={editing.auth_type.startsWith('managed_')} />
-                    <button className="sidebar-edit-action-btn" onClick={pickKeyFile} title={t('sidebar.browseKeyFile')} disabled={editing.auth_type.startsWith('managed_')}>{t('sidebar.browseKeyFile')}</button>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="sidebar-confirm-actions">
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginRight: 'auto' }}>
-                <input type="checkbox" checked={editing.remember_me || false} onChange={(e) => setEditing({ ...editing, remember_me: e.target.checked })} />
-                <span style={{ color: 'red' }}>{t('sidebar.rememberMe')}</span>
-              </label>
-              <button className="sidebar-confirm-btn primary" onClick={handleSaveEdit}>{t('common.save')}</button>
-              <button className="sidebar-confirm-btn connect" onClick={handleSaveAndConnect}>{t('common.connect')}</button>
-            </div>
-          </div>
-        </div>
+        <ConnectionDialog
+          key={`edit-${editing.id}`}
+          mode="edit"
+          initial={editing}
+          onCancel={() => setEditing(null)}
+          onSave={handleSaveEdit}
+          onSaveAndConnect={handleSaveAndConnect}
+          onDelete={() => setConfirmDelete({ id: editing.id, name: editing.name || editing.host })}
+        />
       )}
+      {creating && (
+        <ConnectionDialog
+          key="create"
+          mode="create"
+          initial={creating}
+          onCancel={() => setCreating(null)}
+          onSave={handleCreate}
+        />
+      )}
+
       {/* 确认删除对话框 */}
       {confirmDelete && (
-        <div className="sidebar-confirm-overlay" onClick={() => setConfirmDelete(null)}>
-          <div className="sidebar-confirm-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="sidebar-confirm-title">{t('sidebar.confirmDelete')}</div>
-            <div className="sidebar-confirm-msg">
-              {t('sidebar.deleteConfirmMsg', { name: confirmDelete.name })}
+        <div className="ui-overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="ui-dialog sm" onClick={e => e.stopPropagation()}>
+            <div className="ui-dialog-header">
+              <div className="ui-dialog-title">{t('sidebar.confirmDelete')}</div>
             </div>
-            <div className="sidebar-confirm-actions">
-              <button className="sidebar-confirm-btn cancel" onClick={() => setConfirmDelete(null)}>{t('common.cancel')}</button>
-              <button className="sidebar-confirm-btn danger" onClick={() => handleDelete(confirmDelete.id)}>{t('common.delete')}</button>
+            <div className="ui-dialog-body">
+              <p className="ui-dialog-text">{t('sidebar.deleteConfirmMsg', { name: confirmDelete.name })}</p>
             </div>
-          </div>
-        </div>
-      )}
-      {/* 新建连接弹窗 */}
-      {creating && (
-        <div className="sidebar-confirm-overlay">
-          <div className="sidebar-edit-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="sidebar-edit-header">
-              <div className="sidebar-confirm-title">{t('sidebar.newConnection')}</div>
-              <button className="sidebar-edit-close" onClick={() => setCreating(null)}>×</button>
-            </div>
-            <div className="sidebar-edit-fields">
-              <div className="form-group">
-                <label>{t('sidebar.name')}</label>
-                <input className="sidebar-edit-input" value={creating.name} onChange={(e) => setCreating({ ...creating, name: e.target.value })} placeholder={t('sidebar.serverName')} />
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>{t('sidebar.host')}</label>
-                  <input className="sidebar-edit-input" value={creating.host} onChange={(e) => setCreating({ ...creating, host: e.target.value })} placeholder="192.168.1.1" />
-                </div>
-                <div className="form-group fixed-width">
-                  <label>{t('sidebar.port')}</label>
-                  <input 
-                    className="sidebar-edit-input" 
-                    type="number" 
-                    value={creating.port || ''} 
-                    onChange={(e) => {
-                      const val = e.target.value
-                      setCreating({ ...creating, port: val === '' ? 0 : Number(val) })
-                    }}
-                    onBlur={(e) => {
-                      const val = e.target.value
-                      if (val === '' || val.trim() === '') {
-                        setCreating({ ...creating, port: 0 })
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>{t('sidebar.username')}</label>
-                  <input className="sidebar-edit-input" value={creating.username} onChange={(e) => setCreating({ ...creating, username: e.target.value })} placeholder="root" />
-                </div>
-                <div className="form-group medium-width">
-                  <label>{t('sidebar.authType')}</label>
-                  <select className="sidebar-edit-input" value={creating.auth_type} onChange={(e) => setCreating({ ...creating, auth_type: e.target.value, key_path: authUsesKey(e.target.value) ? creating.key_path : undefined, password: authUsesPassword(e.target.value) ? creating.password : undefined })}>
-                    <option value="password">{t('sidebar.password')}</option>
-                    <option value="key">Key File</option>
-                  </select>
-                </div>
-              </div>
-              {authUsesPassword(creating.auth_type) && (
-                <div className="form-group">
-                  <label>{t('sidebar.password')}</label>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input className="sidebar-edit-input" style={{ flex: 1 }} type={showCreatePassword ? 'text' : 'password'} value={creating.password || ''} onChange={(e) => setCreating({ ...creating, password: e.target.value })} placeholder={t('sidebar.enterPassword')} />
-                    <button className="sidebar-edit-action-btn" onClick={() => setShowCreatePassword(!showCreatePassword)} title={showCreatePassword ? t('sidebar.hidePassword') : t('sidebar.showPassword')}>{showCreatePassword ? t('sidebar.hidePassword') : t('sidebar.showPassword')}</button>
-                  </div>
-                </div>
-              )}
-              {authUsesKey(creating.auth_type) && (
-                <div className="form-group">
-                  <label>{t('sidebar.keyPath')}</label>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <input className="sidebar-edit-input" style={{ flex: 1 }} value={creating.key_path || ''} onChange={(e) => setCreating({ ...creating, key_path: e.target.value })} placeholder="~/.ssh/id_rsa" />
-                    <button className="sidebar-edit-action-btn" onClick={pickCreateKeyFile} title={t('sidebar.browseKeyFile')}>{t('sidebar.browseKeyFile')}</button>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="sidebar-confirm-actions">
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginRight: 'auto' }}>
-                <input type="checkbox" checked={creating.remember_me || false} onChange={(e) => setCreating({ ...creating, remember_me: e.target.checked })} />
-                <span style={{ color: 'red' }}>{t('sidebar.rememberMe')}</span>
-              </label>
-              <button className="sidebar-confirm-btn cancel" onClick={() => setCreating(null)}>{t('common.cancel')}</button>
-              <button className="sidebar-confirm-btn primary" onClick={handleSaveNewConnection}>{t('common.create')}</button>
+            <div className="ui-dialog-footer">
+              <span className="ui-spacer" />
+              <button className="ui-btn" onClick={() => setConfirmDelete(null)}>{t('common.cancel')}</button>
+              <button className="ui-btn danger" onClick={() => handleDelete(confirmDelete.id)}>{t('common.delete')}</button>
             </div>
           </div>
         </div>
       )}
-      {/* 语言切换器 */}
-      <div className="sidebar-language-switcher" ref={langRef} style={{ position: 'relative' }}>
-        <button
-          className="lang-toggle-btn"
-          onClick={() => setLangDropdownOpen(!langDropdownOpen)}
-        >
-          {t('sidebar.language')} ▾
-        </button>
-        {langDropdownOpen && (
-          <div className="lang-dropdown">
-            {[
-              { code: 'en', label: 'English' },
-              { code: 'zh-CN', label: '简体中文' },
-              { code: 'zh-TW', label: '繁體中文' },
-              { code: 'ja', label: '日本語' },
-              { code: 'fr', label: 'Français' },
-              { code: 'de', label: 'Deutsch' },
-              { code: 'ru', label: 'Русский' },
-              { code: 'ar', label: 'العربية' },
-              { code: 'pt', label: 'Português' },
-              { code: 'ko', label: '한국어' },
-            ].map(l => (
-              <div
-                key={l.code}
-                className={`lang-dropdown-item${i18n.language === l.code ? ' active' : ''}`}
-                onClick={() => {
-                  i18n.changeLanguage(l.code)
-                  invoke('ui_state_set', { key: 'language', value: l.code }).catch(() => {})
-                  setLangDropdownOpen(false)
-                }}
-              >
-                {l.label}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+    </aside>
   )
 }
-

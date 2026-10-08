@@ -128,7 +128,13 @@
     "showPassword": "Afficher le mot de passe",
     "hidePassword": "Masquer le mot de passe",
     "deleteConfirmMsg": "Supprimer {{name}} ?",
-    "language": "Langue"
+    "language": "Langue",
+    "expand": "Déplier la barre latérale",
+    "collapse": "Replier la barre latérale",
+    "selectServer": "Choisir un serveur",
+    "serverCount": "{{count}} serveurs enregistrés",
+    "connected": "Connecté",
+    "notConnected": "Non connecté"
   },
   "nav": {
     "dashboard": "Tableau de bord",
@@ -150,6 +156,13 @@
     "update": "Mise à jour",
     "settings": "Paramètres",
     "discussions": "Discussions"
+  },
+  "navGroup": {
+    "overview": "Vue d'ensemble",
+    "workspace": "Espace de travail",
+    "apps": "Applications",
+    "network": "Réseau et sécurité",
+    "system": "Système"
   },
   "terminal": {
     "status": {
@@ -1157,5 +1170,11 @@
     "fromDate": "Date/heure de début",
     "toDate": "Date/heure de fin",
     "clearDateRange": "Effacer la plage de dates"
+  },
+  "home": {
+    "title": "Serveurs",
+    "subtitle": "Choisissez un serveur pour vous connecter ou ajoutez-en un nouveau.",
+    "emptyTitle": "Aucun serveur",
+    "emptyHint": "Ajoutez votre premier serveur SSH pour commencer."
   }
 }
