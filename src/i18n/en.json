@@ -527,6 +527,8 @@
     "alreadyInFavorites": "This path is already bookmarked",
     "removedFromFavorites": "Bookmark removed: {{path}}",
     "binaryOrLarge": "Binary or large file — use terminal\nOr right-click \"Save to local computer\" to download and open",
+    "editorLanguage": "Language",
+    "plainText": "Plain Text",
     "downloadComplete": "Download complete",
     "downloadFailed": "Download failed: {{error}}",
     "movedItems": "Moved {{count}} item",

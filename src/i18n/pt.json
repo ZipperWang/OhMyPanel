@@ -527,6 +527,8 @@
     "alreadyInFavorites": "Este caminho já está nos marcadores",
     "removedFromFavorites": "Marcador removido: {{path}}",
     "binaryOrLarge": "Arquivo binário ou grande — use o terminal\nOu clique com o botão direito \"Salvar no computador local\" para baixar e abrir",
+    "editorLanguage": "Linguagem",
+    "plainText": "Texto simples",
     "downloadComplete": "Download concluído",
     "downloadFailed": "Falha no download: {{error}}",
     "movedItems": "{{count}} item movido",

@@ -527,6 +527,8 @@
     "alreadyInFavorites": "Dieser Pfad ist bereits als Lesezeichen gespeichert",
     "removedFromFavorites": "Lesezeichen entfernt: {{path}}",
     "binaryOrLarge": "Binärdatei oder große Datei — bitte Terminal verwenden\nOder Rechtsklick \"Auf lokalen Computer speichern\" zum Herunterladen und Öffnen",
+    "editorLanguage": "Sprache",
+    "plainText": "Nur Text",
     "downloadComplete": "Download abgeschlossen",
     "downloadFailed": "Download fehlgeschlagen: {{error}}",
     "movedItems": "{{count}} Element verschoben",

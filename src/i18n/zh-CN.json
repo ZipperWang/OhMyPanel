@@ -527,6 +527,8 @@
     "alreadyInFavorites": "该路径已在书签中",
     "removedFromFavorites": "已移除书签: {{path}}",
     "binaryOrLarge": "二进制或大文件 — 请使用终端\n或右键「保存到本地电脑」打开",
+    "editorLanguage": "语言",
+    "plainText": "纯文本",
     "downloadComplete": "下载完成",
     "downloadFailed": "下载失败: {{error}}",
     "movedItems": "已移动 {{count}} 项",

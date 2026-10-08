@@ -527,6 +527,8 @@
     "alreadyInFavorites": "هذا المسار مضاف بالفعل إلى الإشارات المرجعية",
     "removedFromFavorites": "تمت إزالة الإشارة المرجعية: {{path}}",
     "binaryOrLarge": "ملف ثنائي أو كبير — استخدم الطرفية\nأو انقر بزر الماوس الأيمن \"حفظ على الكمبيوتر المحلي\" للتنزيل والفتح",
+    "editorLanguage": "اللغة",
+    "plainText": "نص عادي",
     "downloadComplete": "اكتمل التحميل",
     "downloadFailed": "فشل التحميل: {{error}}",
     "movedItems": "نُقل {{count}} عنصر",

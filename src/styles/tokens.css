@@ -63,6 +63,19 @@
   --overlay: rgba(17, 20, 26, 0.42);
   --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.18);
 
+  /* 代码编辑器语法高亮 */
+  --syn-keyword: #cf222e;
+  --syn-string: #0a3069;
+  --syn-comment: #6e7781;
+  --syn-number: #0550ae;
+  --syn-function: #8250df;
+  --syn-type: #953800;
+  --syn-definition: #953800;
+  --syn-property: #0550ae;
+  --syn-tag: #116329;
+  --syn-meta: #8250df;
+  --syn-active-line: rgba(37, 99, 235, 0.04);
+
   --sidebar-width: 236px;
   --sidebar-collapsed-width: 64px;
   --ease: cubic-bezier(0.2, 0, 0, 1);
@@ -116,4 +129,16 @@
   --shadow-lg: 0 20px 48px -12px rgba(0, 0, 0, 0.6), 0 4px 12px -4px rgba(0, 0, 0, 0.4);
   --overlay: rgba(0, 0, 0, 0.58);
   --focus-ring: 0 0 0 3px rgba(91, 156, 248, 0.25);
+
+  --syn-keyword: #ff7b72;
+  --syn-string: #a5d6ff;
+  --syn-comment: #8b949e;
+  --syn-number: #79c0ff;
+  --syn-function: #d2a8ff;
+  --syn-type: #ffa657;
+  --syn-definition: #ffa657;
+  --syn-property: #79c0ff;
+  --syn-tag: #7ee787;
+  --syn-meta: #d2a8ff;
+  --syn-active-line: rgba(255, 255, 255, 0.03);
 }

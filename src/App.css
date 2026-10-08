@@ -762,17 +762,29 @@ body.dragging-files * {
 
 .fb-editor-content {
   flex: 1;
-  padding: 12px 14px;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg);
+}
+
+.fb-editor.minimized .fb-editor-content {
+  display: none;
+}
+
+.fb-editor-lang {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--bg-input);
   color: var(--text);
-  border: none;
+  cursor: pointer;
   outline: none;
-  resize: none;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.6;
-  tab-size: 4;
-  overflow: auto;
+}
+
+.fb-editor-lang:focus {
+  border-color: var(--accent);
 }
 
 /* ===== 文件浏览器上下文菜单 ===== */

@@ -3,6 +3,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 import { useTranslation } from 'react-i18next'
+import CodeEditor, { type CodeEditorHandle } from './editor/CodeEditor'
+import { detectLanguage, LANGUAGES, type LanguageId } from './editor/languages'
+
+// 与后端 session_read_file 的上限保持一致
+const MAX_EDITABLE_SIZE = 3 * 1024 * 1024
 
 interface FileEntry {
   name: string
@@ -38,8 +43,9 @@ interface FileContextMenu {
 interface EditorState {
   path: string
   name: string
-  content: string
-  originalContent: string
+  initialContent: string
+  language: LanguageId
+  dirty: boolean
   saving: boolean
   maximized?: boolean
   minimized?: boolean
@@ -157,6 +163,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   const [lastClickedFile, setLastClickedFile] = useState<string | null>(null)
   const [rubberBand, setRubberBand] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null)
   const [editor, setEditor] = useState<EditorState | null>(null)
+  const codeEditorRef = useRef<CodeEditorHandle>(null)
   const [contextMenu, setContextMenu] = useState<FileContextMenu | null>(null)
   const [clipboard, setClipboard] = useState<Clipboard | null>(null)
   const [operationLog, setOperationLog] = useState<{ lines: string[] } | null>(null)
@@ -969,14 +976,21 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
 
   const openEditor = async (entry: FileEntry) => {
     // ponytail：允许所有不超过 3 MB 的文件，不限制格式
-    if (entry.size >= 3 * 1024 * 1024) {
+    if (entry.size > MAX_EDITABLE_SIZE) {
       showToast(t('files.binaryOrLarge'), 'info')
       return
     }
     const filePath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`
     try {
       const content = await invoke<string>('ssh_read_file', { sessionId, path: filePath })
-      setEditor({ path: filePath, name: entry.name, content, originalContent: content, saving: false })
+      setEditor({
+        path: filePath,
+        name: entry.name,
+        initialContent: content,
+        language: detectLanguage(filePath, content),
+        dirty: false,
+        saving: false,
+      })
     } catch (e) {
       console.error('read_file error:', e)
       showToast(t('files.readFailed', { error: e }), 'error')
@@ -984,17 +998,25 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
   }
 
   const handleSaveFile = async () => {
-    if (!editor || !sessionId) return
-    setEditor({ ...editor, saving: true })
+    const editorHandle = codeEditorRef.current
+    if (!editor || !sessionId || !editorHandle || editor.saving) return
+    const { path, name } = editor
+    const content = editorHandle.getContent()
+    setEditor(prev => prev && { ...prev, saving: true })
     try {
-      await invoke('ssh_write_file', { sessionId, path: editor.path, content: editor.content })
-      setEditor({ ...editor, originalContent: editor.content, saving: false })
-      showToast(t('files.savedFile', { name: editor.name }), 'success')
+      await invoke('ssh_write_file', { sessionId, path, content })
+      editorHandle.markSaved(content)
+      showToast(t('files.savedFile', { name }), 'success')
     } catch (e) {
       showToast(t('files.saveFailedMsg', { error: e }), 'error')
-      setEditor({ ...editor, saving: false })
+    } finally {
+      setEditor(prev => prev && { ...prev, saving: false })
     }
   }
+
+  const handleEditorDirtyChange = useCallback((dirty: boolean) => {
+    setEditor(prev => prev && prev.dirty !== dirty ? { ...prev, dirty } : prev)
+  }, [])
 
   const handleDelete = () => {
     const entries = getSelectedEntries()
@@ -1825,7 +1847,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
             setEditor({ ...editor, minimized: false })
             return
           }
-          if (editor.content !== editor.originalContent) {
+          if (editor.dirty) {
             showConfirm(t('files.unsavedChanges'), () => setEditor(null))
             return
           }
@@ -1833,12 +1855,29 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
         }}>
           <div className={`fb-editor ${editor.maximized ? 'maximized' : ''} ${editor.minimized ? 'minimized' : ''}`} onClick={(e) => e.stopPropagation()}>
             <div className="fb-editor-header">
-              <span className="fb-editor-title">{editor.name} — {editor.path}</span>
+              <span className="fb-editor-title">{editor.dirty ? '● ' : ''}{editor.name} — {editor.path}</span>
               <div className="fb-editor-actions">
+                {!editor.minimized && (
+                  <select
+                    className="fb-editor-lang"
+                    value={editor.language}
+                    title={t('files.editorLanguage')}
+                    onChange={(e) => {
+                      const language = e.target.value as LanguageId
+                      setEditor(prev => prev && { ...prev, language })
+                    }}
+                  >
+                    {LANGUAGES.map(lang => (
+                      <option key={lang.id} value={lang.id}>
+                        {lang.id === 'plain' ? t('files.plainText') : lang.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button
                   className="fb-editor-btn save"
                   onClick={handleSaveFile}
-                  disabled={editor.saving || editor.content === editor.originalContent}
+                  disabled={editor.saving || !editor.dirty}
                 >
                   {editor.saving ? t('common.saving') : t('common.save')}
                 </button>
@@ -1847,7 +1886,7 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
                   {editor.maximized ? '❐' : '▢'}
                 </button>
                 <button className="fb-editor-btn close" onClick={() => {
-                  if (editor.content !== editor.originalContent) {
+                  if (editor.dirty) {
                     showConfirm(t('files.unsavedChanges'), () => setEditor(null))
                     return
                   }
@@ -1855,20 +1894,16 @@ export default forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrow
                 }}>✕</button>
               </div>
             </div>
-            {!editor.minimized && (
-              <textarea
-                className="fb-editor-content"
-                value={editor.content}
-                onChange={(e) => setEditor({ ...editor, content: e.target.value })}
-                spellCheck={false}
-                onKeyDown={(e) => {
-                  if (e.ctrlKey && e.key === 's') {
-                    e.preventDefault()
-                    handleSaveFile()
-                  }
-                }}
-              />
-            )}
+            {/* 最小化时只隐藏不卸载，保留撤销历史与光标位置 */}
+            <CodeEditor
+              key={editor.path}
+              ref={codeEditorRef}
+              className="fb-editor-content"
+              initialContent={editor.initialContent}
+              language={editor.language}
+              onDirtyChange={handleEditorDirtyChange}
+              onSave={handleSaveFile}
+            />
           </div>
         </div>
       )}

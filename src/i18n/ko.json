@@ -527,6 +527,8 @@
     "alreadyInFavorites": "이미 북마크된 경로입니다",
     "removedFromFavorites": "북마크 제거됨: {{path}}",
     "binaryOrLarge": "바이너리 또는 대용량 파일 — 터미널을 사용하세요\n또는 마우스 우클릭 \"로컬 컴퓨터에 저장\"으로 다운로드하여 열기",
+    "editorLanguage": "언어",
+    "plainText": "일반 텍스트",
     "downloadComplete": "다운로드 완료",
     "downloadFailed": "다운로드 실패: {{error}}",
     "movedItems": "{{count}} 항목 이동됨",

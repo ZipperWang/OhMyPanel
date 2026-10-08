@@ -527,6 +527,8 @@
     "alreadyInFavorites": "このパスは既にブックマークされています",
     "removedFromFavorites": "ブックマークを削除しました: {{path}}",
     "binaryOrLarge": "バイナリまたは大容量ファイル — ターミナルを使用してください\nまたは右クリック「ローカルPCに保存」でダウンロードして開く",
+    "editorLanguage": "言語",
+    "plainText": "プレーンテキスト",
     "downloadComplete": "ダウンロード完了",
     "downloadFailed": "ダウンロード失敗: {{error}}",
     "movedItems": "{{count}} 件を移動しました",

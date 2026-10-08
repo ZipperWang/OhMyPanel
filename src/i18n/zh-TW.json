@@ -527,6 +527,8 @@
     "alreadyInFavorites": "該路徑已在書籤中",
     "removedFromFavorites": "已移除書籤: {{path}}",
     "binaryOrLarge": "二進位或大檔案 — 請使用終端機\n或右鍵「儲存到本機電腦」開啟",
+    "editorLanguage": "語言",
+    "plainText": "純文字",
     "downloadComplete": "下載完成",
     "downloadFailed": "下載失敗: {{error}}",
     "movedItems": "已移動 {{count}} 項",

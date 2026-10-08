@@ -527,6 +527,8 @@
     "alreadyInFavorites": "Ce chemin est déjà dans les signets",
     "removedFromFavorites": "Signet supprimé : {{path}}",
     "binaryOrLarge": "Fichier binaire ou volumineux — utilisez le terminal\nOu clic droit \"Enregistrer sur l'ordinateur local\" pour télécharger et ouvrir",
+    "editorLanguage": "Langage",
+    "plainText": "Texte brut",
     "downloadComplete": "Téléchargement terminé",
     "downloadFailed": "Échec du téléchargement : {{error}}",
     "movedItems": "{{count}} élément déplacé",

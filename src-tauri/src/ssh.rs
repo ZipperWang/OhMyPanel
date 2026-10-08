@@ -1530,19 +1530,22 @@ pub async fn session_stat_file(session: &SshSession, path: &str) -> Result<serde
     }))
 }
 
+/// 在线编辑允许的最大文件大小，需与前端 FileBrowser 的 MAX_EDITABLE_SIZE 保持一致
+const MAX_EDITABLE_FILE_SIZE: usize = 3 * 1024 * 1024;
+
 pub async fn session_read_file(session: &SshSession, path: &str) -> Result<String, String> {
     let sftp = session_open_sftp(session).await?;
     use tokio::io::AsyncReadExt;
-    let mut file = sftp.open(path).await
+    let file = sftp.open(path).await
         .map_err(|e| format!("Failed to open file: {}", e))?;
+    // 多读 1 字节用于判断是否超限；超限直接报错，不能截断返回，否则保存时会丢失后半部分内容
     let mut buf = Vec::new();
-    file.read_to_end(&mut buf).await
+    file.take(MAX_EDITABLE_FILE_SIZE as u64 + 1).read_to_end(&mut buf).await
         .map_err(|e| format!("Failed to read file: {}", e))?;
-    if buf.len() > 1024 * 1024 {
-        Ok(String::from_utf8_lossy(&buf[..1024 * 1024]).to_string())
-    } else {
-        Ok(String::from_utf8_lossy(&buf).to_string())
+    if buf.len() > MAX_EDITABLE_FILE_SIZE {
+        return Err(format!("File is larger than {} MB and cannot be edited online", MAX_EDITABLE_FILE_SIZE / 1024 / 1024));
     }
+    Ok(String::from_utf8_lossy(&buf).to_string())
 }
 
 pub async fn session_delete_file(session: &SshSession, path: &str, is_dir: bool) -> Result<String, String> {
