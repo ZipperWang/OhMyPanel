@@ -1,15 +1,15 @@
 {
   "version": "1.0.22",
   "notes": "OhMyPanel v1.0.22",
-  "pub_date": "2026-11-20T17:21:28Z",
+  "pub_date": "2026-11-20T17:28:05Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTU2Zwenduc0VQUVI5bFhvTzc3VFVPaTJ4Ukk4ZlUzaEhiQUdHdDZWS1Nqc3dxQ2lqcGw4Rkpyd3lHSWNLTUNNVHcvK3VUblA1bUtLVWhtLzBsdGJnMUNhcTdIaGhrL0F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTk1MjI4CWZpbGU6T2hNeVBhbmVsXzEuMC4yMl94NjQtc2V0dXAuZXhlCjlmS2dkQnBDSVphYTZqRXZNMmNYR2xlelozT1gxL3hNZXB6WkE5V0lmWmpiL3hXRzVsNWxzUC9yc3hldUVMbEJqV3VvOHAyTjJSWC92WHFHYlVIWkRBPT0K",
       "url": "https://github.com/ZipperWang/OhMyPanel/releases/download/v1.0.22/OhMyPanel_1.0.22_x64-setup.exe"
     },
     "darwin-x86_64": {
-      "signature": "",
-      "url": "https://github.com/ZipperWang/OhMyPanel/releases/download/v1.0.22/"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTU2Zwenduc0VQUWJ6Lyt1QmVCL3IyNHhyeFJXY2s4aVYreVBWV3U1OElaZlQxbmljN3h0dklIUU1iQ0FVdDB2UlN0bjBReS9adUtGR3pnOGR2dVNqRVNrcTdXcW9hMGc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTk1MDczCWZpbGU6T2hNeVBhbmVsLmFwcC50YXIuZ3oKVUxkM3pvdUNNelFOcm1YTlZ4bWIzd09ybTRuRHdZcTRLNmZxRktFMUhQZnJKRVhVMythTmlMQXFlZmRibkxvWjB1dlM5STRmR0s0cXA2bU1kV0FNQUE9PQo=",
+      "url": "https://github.com/ZipperWang/OhMyPanel/releases/download/v1.0.22/OhMyPanel_x64.app.tar.gz"
     },
     "darwin-aarch64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTU2Zwenduc0VQUWJhUkVsdGYvS1Byc2hwcDM4eUl1b2sycDN2RE9FREpYaVlYbkdHLzcyWmNZa0liQllWYnNVdXhPeGNnRlZ2YXE2WENBZmdCYzZGQTdwZEo2YVI4dXdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTk1MDc0CWZpbGU6T2hNeVBhbmVsLmFwcC50YXIuZ3oKRHpHOGU2OGRFMkc3VVhadjY0SXFPa29MdFFVVnM4eUJyUGpGeit3WXVsTXZ4QWxMaWJXdUFxa01qQjNMRnpGb1orK2dLK2xlcXpjcGlMbjUwYzFqQ2c9PQo=",
