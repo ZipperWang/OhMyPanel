@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 
 interface TerminalWorkspaceProps {
   terminalMode: boolean
@@ -7,8 +7,15 @@ interface TerminalWorkspaceProps {
 }
 
 export default function TerminalWorkspace({ terminalMode, tabStrip, children }: TerminalWorkspaceProps) {
+  const workspaceRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!terminalMode && document.fullscreenElement === workspaceRef.current) {
+      void document.exitFullscreen().catch(() => {})
+    }
+  }, [terminalMode])
+
   return (
-    <div className={`terminal-workspace ${terminalMode ? 'terminal-mode' : ''}`}>
+    <div ref={workspaceRef} className={`terminal-workspace ${terminalMode ? 'terminal-mode' : ''}`}>
       {tabStrip}
       {children}
     </div>

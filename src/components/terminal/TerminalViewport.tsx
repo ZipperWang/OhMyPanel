@@ -277,9 +277,11 @@ export default forwardRef<TerminalHandle, TerminalViewportProps>(function Termin
   }, [fitTerminal])
 
   const toggleFullscreen = useCallback(async () => {
+    const target = windowRef.current?.closest('.terminal-workspace') ?? windowRef.current
+    if (!target) return
     try {
-      if (document.fullscreenElement === windowRef.current) await document.exitFullscreen()
-      else await windowRef.current?.requestFullscreen()
+      if (document.fullscreenElement === target) await document.exitFullscreen()
+      else await target.requestFullscreen()
     } catch {
       showNotice(t('terminal.fullscreenUnavailable'))
     }
@@ -488,10 +490,10 @@ export default forwardRef<TerminalHandle, TerminalViewportProps>(function Termin
 
   useEffect(() => {
     const handler = () => {
-      const active = document.fullscreenElement === windowRef.current
-      setIsFullscreen(active)
+      setIsFullscreen(!!document.fullscreenElement?.contains(windowRef.current))
       if (activeRef.current) fitTerminal(true)
     }
+    handler()
     document.addEventListener('fullscreenchange', handler)
     return () => document.removeEventListener('fullscreenchange', handler)
   }, [fitTerminal])
