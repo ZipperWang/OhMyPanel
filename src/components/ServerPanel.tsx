@@ -79,6 +79,7 @@ export default function ServerPanel({ sessionId, connHost, connUsername, section
     else if (termRef) termRef.current = handle
   }, [termRef])
   const activeSection: PanelSection = isPanelSection(section) ? section : 'dashboard'
+  const isTerminalActive = isSessionActive && activeSection === 'terminal'
   const [mountedSections, setMountedSections] = useState<Set<PanelSection>>(() => new Set(['terminal', activeSection]))
   const cdHereRef = useRef<string | null>(null)
   const fileBrowserRef = useRef<FileBrowserHandle | null>(null)
@@ -195,11 +196,11 @@ export default function ServerPanel({ sessionId, connHost, connUsername, section
   return (
     <div className="server-panel">
       <div className={`sp-content ${activeSection === 'terminal' ? 'terminal-page' : ''}`}>
-        <div className={`terminal-panel-slot ${activeSection === 'terminal' ? 'active' : ''}`}>
+        <div className={`terminal-panel-slot ${isTerminalActive ? 'active' : ''}`}>
           <Terminal
             ref={setTerminalHandle}
             sessionId={sessionId}
-            isActive={isSessionActive && activeSection === 'terminal'}
+            isActive={isTerminalActive}
             connectionState={connectionState}
             connectionLabel={connectionLabel}
             endpoint={endpointText}

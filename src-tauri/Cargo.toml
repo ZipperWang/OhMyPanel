@@ -1,6 +1,6 @@
 [package]
 name = "ohmypanel"
-version = "1.0.21"
+version = "1.0.22"
 description = "OhMyPanel - SSH server management tool"
 authors = ["OhMyPanel contributors"]
 license = "MIT"
